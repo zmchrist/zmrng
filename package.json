@@ -1,0 +1,24 @@
+{
+  "name": "zmrng",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Autonomous task orchestrator GUI — drives Claude Code headless against the Pheme repo",
+  "workspaces": [
+    "packages/server",
+    "packages/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev:server & npm run dev:web & wait",
+    "dev:server": "npm run dev -w packages/server",
+    "dev:web": "npm run dev -w packages/web",
+    "build": "npm run build --workspaces --if-present",
+    "build:server": "npm run build -w packages/server",
+    "build:web": "npm run build -w packages/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "start": "npm run start -w packages/server"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  }
+}
