@@ -33,7 +33,7 @@ export function TaskList({ tasks, repos, selectedId, onSelect }: Props) {
                 )}
               </span>
               <span className={styles.pill} style={{ color: statusColor(t.status) }}>
-                {t.queued && t.status === 'building' ? 'Queued' : STATUS_LABEL[t.status]}
+                {t.queued && t.status === 'planning' ? 'Queued' : STATUS_LABEL[t.status]}
               </span>
             </button>
           </li>

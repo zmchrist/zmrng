@@ -132,6 +132,7 @@ export default function App() {
             repos={repos}
             onStart={() => api.start(selected.id)}
             onMessage={(text) => api.message(selected.id, text)}
+            onResume={() => api.resume(selected.id)}
             onDone={() => api.done(selected.id)}
             onCancel={() => api.cancel(selected.id)}
           />

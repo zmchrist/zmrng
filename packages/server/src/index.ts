@@ -106,6 +106,16 @@ app.post('/api/tasks/:id/message', (req, reply) => {
   }
 })
 
+app.post('/api/tasks/:id/resume', (req, reply) => {
+  const { id } = req.params as { id: string }
+  try {
+    manager.resume(id)
+    return { ok: true }
+  } catch (err) {
+    return reply.code(400).send({ error: errMsg(err) })
+  }
+})
+
 app.post('/api/tasks/:id/done', async (req, reply) => {
   const { id } = req.params as { id: string }
   try {

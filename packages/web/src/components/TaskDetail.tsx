@@ -18,9 +18,18 @@ interface Props {
   repos: RepoTarget[]
   onStart: () => Promise<unknown>
   onMessage: (text: string) => Promise<unknown>
+  onResume: () => Promise<unknown>
   onDone: () => Promise<unknown>
   onCancel: () => Promise<unknown>
 }
+
+/** Phases where the worker runs autonomously to a PR (no operator input). */
+const AUTONOMOUS: ReadonlySet<string> = new Set([
+  'planning',
+  'executing',
+  'validating',
+  'building',
+])
 
 export function TaskDetail({
   task,
@@ -30,6 +39,7 @@ export function TaskDetail({
   repos,
   onStart,
   onMessage,
+  onResume,
   onDone,
   onCancel,
 }: Props) {
@@ -55,7 +65,7 @@ export function TaskDetail({
         <div className={styles.titleRow}>
           <h1 className={styles.title}>{task.title}</h1>
           <span className={styles.pill} style={{ color: statusColor(task.status) }}>
-            {task.queued && task.status === 'building' ? 'Queued' : STATUS_LABEL[task.status]}
+            {task.queued && task.status === 'planning' ? 'Queued' : STATUS_LABEL[task.status]}
           </span>
         </div>
         <p className={styles.body}>{task.body}</p>
@@ -67,6 +77,7 @@ export function TaskDetail({
         </div>
         <div className={styles.meta}>
           {task.branch && <span className={styles.metaItem}>⌥ {task.branch}</span>}
+          {task.planPath && <span className={styles.metaItem}>▤ {task.planPath}</span>}
           {config && <span className={styles.metaItem}>{config.authMode}</span>}
         </div>
 
@@ -106,6 +117,16 @@ export function TaskDetail({
               {task.status === 'failed' ? 'Restart' : 'Start'}
             </button>
           )}
+          {task.status === 'blocked' && (
+            <button
+              type="button"
+              className={styles.primary}
+              disabled={busy}
+              onClick={() => run(onResume)}
+            >
+              Resume
+            </button>
+          )}
           {task.status === 'review' && task.prUrl && (
             <a
               className={styles.linkBtn}
@@ -138,11 +159,17 @@ export function TaskDetail({
           )}
         </div>
         {err && <div className={styles.error}>{err}</div>}
-        {task.status === 'building' && (
+        {AUTONOMOUS.has(task.status) && (
           <div className={styles.autobar}>
             {task.queued
-              ? 'Queued — waiting for a free build lane…'
+              ? 'Queued — waiting for a free lane…'
               : 'Running autonomously to PR — no input needed.'}
+          </div>
+        )}
+        {task.status === 'blocked' && (
+          <div className={styles.error}>
+            Blocked — a required subagent is missing from this repo. Add it, then press
+            Resume.
           </div>
         )}
       </header>
