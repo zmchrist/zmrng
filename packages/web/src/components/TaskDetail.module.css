@@ -6,11 +6,12 @@
 }
 
 .header {
-  padding: 22px 26px 16px;
+  padding: 24px 28px 18px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  backdrop-filter: blur(var(--blur));
-  -webkit-backdrop-filter: blur(var(--blur));
+  background: var(--surface-strong);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--hairline);
 }
 
 .titleRow {
@@ -21,8 +22,9 @@
 
 .title {
   margin: 0;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tight);
   flex: 1;
   min-width: 0;
 }
@@ -31,26 +33,28 @@
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 4px 11px;
+  padding: 4px 12px;
   border-radius: var(--radius-pill);
-  border: 1px solid currentColor;
-  background: color-mix(in srgb, currentColor 14%, transparent);
+  color: currentColor;
+  border: 1px solid color-mix(in srgb, currentColor 48%, transparent);
+  background: color-mix(in srgb, currentColor 15%, transparent);
+  box-shadow: 0 0 18px -5px currentColor;
 }
 
 .body {
-  margin: 10px 0 14px;
+  margin: 12px 0 16px;
   color: var(--text-dim);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
   white-space: pre-wrap;
 }
 
 .badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 7px;
   margin-bottom: 10px;
 }
 .badge {
@@ -58,54 +62,57 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text-dim);
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
+  padding: 4px 11px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
-  background: var(--surface-strong);
+  background: var(--surface);
+  box-shadow: var(--hairline-soft);
 }
 
 .meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 .metaItem {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-faint);
-  padding: 3px 9px;
+  padding: 3px 10px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--well);
 }
 
 .usage {
   display: flex;
   flex-wrap: wrap;
-  gap: 18px;
-  margin-bottom: 14px;
-  padding: 10px 14px;
+  gap: 22px;
+  margin-bottom: 16px;
+  padding: 13px 17px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--well);
+  box-shadow: var(--hairline-soft);
 }
 .usageItem {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 .usageLabel {
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-faint);
 }
 .usageValue {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 .actions {
@@ -117,51 +124,68 @@
 .primary,
 .danger,
 .linkBtn {
-  padding: 9px 18px;
+  padding: 10px 20px;
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 600;
-  border: 1px solid var(--border-strong);
+  letter-spacing: var(--tracking-tight);
+  border: 1px solid transparent;
   text-decoration: none;
-  transition: opacity var(--transition), background var(--transition);
+  transition: transform var(--transition), box-shadow var(--transition),
+    background var(--transition), opacity var(--transition);
 }
 .primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #0e1116;
+  background: var(--accent-grad);
+  color: var(--accent-ink);
+  box-shadow: var(--glow-accent);
+}
+.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--glow-accent-strong);
 }
 .linkBtn {
+  display: inline-flex;
+  align-items: center;
   background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--accent-bright);
+  border-color: var(--accent-line);
+}
+.linkBtn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--glow-accent);
 }
 .danger {
   background: transparent;
   color: var(--status-failed);
-  border-color: color-mix(in srgb, var(--status-failed) 50%, transparent);
+  border-color: color-mix(in srgb, var(--status-failed) 48%, transparent);
+}
+.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--status-failed) 14%, transparent);
 }
 .primary:disabled,
 .danger:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
+  box-shadow: none;
   cursor: not-allowed;
 }
 
 .error {
-  margin-top: 12px;
-  padding: 8px 12px;
+  margin-top: 14px;
+  padding: 9px 13px;
   border-radius: var(--radius-sm);
   font-size: 12px;
   color: var(--status-failed);
-  border: 1px solid color-mix(in srgb, var(--status-failed) 40%, transparent);
-  background: color-mix(in srgb, var(--status-failed) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-failed) 42%, transparent);
+  background: color-mix(in srgb, var(--status-failed) 11%, transparent);
 }
 
 .autobar {
-  margin-top: 14px;
-  padding: 9px 14px;
+  margin-top: 16px;
+  padding: 10px 15px;
   border-radius: var(--radius-sm);
   font-size: 12.5px;
   color: var(--status-building);
-  border: 1px solid color-mix(in srgb, var(--status-building) 35%, transparent);
-  background: color-mix(in srgb, var(--status-building) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-building) 38%, transparent);
+  background: color-mix(in srgb, var(--status-building) 11%, transparent);
+  box-shadow: 0 0 28px -10px var(--status-building);
 }
