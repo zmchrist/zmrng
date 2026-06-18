@@ -27,12 +27,35 @@ export interface WorktreeHandle {
   worktreePath: string
 }
 
+/** True if `ref` resolves to a commit in `repo`. */
+async function refExists(repo: string, ref: string): Promise<boolean> {
+  try {
+    await git(repo, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
- * Fetch origin, then add a fresh worktree checked out on a new branch cut from
- * origin/main. The branch + worktree are unique per task id.
+ * Resolve the base ref to cut a task branch from, preferring the remote default
+ * branch but degrading gracefully for local-only repos (no origin):
+ *   origin/<defaultBranch> → local <defaultBranch> → HEAD
+ */
+async function resolveBase(repo: string, defaultBranch: string): Promise<string> {
+  if (await refExists(repo, `origin/${defaultBranch}`)) return `origin/${defaultBranch}`
+  if (await refExists(repo, defaultBranch)) return defaultBranch
+  return 'HEAD'
+}
+
+/**
+ * Fetch origin (best effort), then add a fresh worktree checked out on a new
+ * branch cut from the target repo's default branch. The branch + worktree are
+ * unique per task id; worktrees live under zmrng's own worktrees dir.
  */
 export async function createWorktree(
-  targetRepo: string,
+  repoPath: string,
+  defaultBranch: string,
   worktreesDir: string,
   taskId: string,
   title: string,
@@ -42,15 +65,14 @@ export async function createWorktree(
   const branch = `feat/zmrng/${slugify(title)}-${shortId}`
   const worktreePath = path.join(worktreesDir, shortId)
 
-  await git(targetRepo, ['fetch', 'origin', '--quiet'])
-  await git(targetRepo, [
-    'worktree',
-    'add',
-    '-b',
-    branch,
-    worktreePath,
-    'origin/main',
-  ])
+  // Best effort — local-only repos have no origin to fetch.
+  try {
+    await git(repoPath, ['fetch', 'origin', '--quiet'])
+  } catch {
+    // no remote / offline — fall back to local refs below
+  }
+  const base = await resolveBase(repoPath, defaultBranch)
+  await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, base])
   return { branch, worktreePath }
 }
 

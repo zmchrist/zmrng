@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import styles from './TaskDetail.module.css'
-import type { ServerConfig, Task, TaskEvent } from '../types'
+import type { RepoTarget, ServerConfig, Task, TaskEvent } from '../types'
 import { STATUS_LABEL, statusColor } from '../status'
 import { ClarifyChat } from './ClarifyChat'
 import { WorkerLog } from './WorkerLog'
@@ -15,6 +15,7 @@ interface Props {
   events: TaskEvent[]
   live: string
   config: ServerConfig | null
+  repos: RepoTarget[]
   onStart: () => Promise<unknown>
   onMessage: (text: string) => Promise<unknown>
   onDone: () => Promise<unknown>
@@ -26,11 +27,13 @@ export function TaskDetail({
   events,
   live,
   config,
+  repos,
   onStart,
   onMessage,
   onDone,
   onCancel,
 }: Props) {
+  const repoLabel = repos.find((r) => r.id === task.repoId)?.label ?? task.repoId
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -57,6 +60,7 @@ export function TaskDetail({
         </div>
         <p className={styles.body}>{task.body}</p>
         <div className={styles.badges}>
+          {repoLabel && <span className={styles.badge}>⌂ {repoLabel}</span>}
           {task.model && <span className={styles.badge}>{task.model}</span>}
           {task.effort && <span className={styles.badge}>{task.effort}</span>}
           {task.style && <span className={styles.badge}>{task.style}</span>}

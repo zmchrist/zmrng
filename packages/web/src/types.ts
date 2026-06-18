@@ -31,6 +31,15 @@ export const DEFAULT_MODEL: ModelAlias = 'opus'
 export const DEFAULT_EFFORT: EffortLevel = 'high'
 export const DEFAULT_STYLE: CaveStyle = 'caveman-full'
 
+// ---- multi-target repo registry ----
+
+export interface RepoTarget {
+  id: string
+  label: string
+  path: string
+  defaultBranch: string
+}
+
 export interface Task {
   id: string
   title: string
@@ -43,6 +52,7 @@ export interface Task {
   model: string | null
   effort: EffortLevel | null
   style: CaveStyle | null
+  repoId: string
   usage: TaskUsage
   queued: boolean
   createdAt: string
@@ -89,5 +99,6 @@ export interface ServerConfig {
   model: string
   maxLanes: number
   targetRepo: string
+  defaultRepoId: string
   authMode: string
 }
