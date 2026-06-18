@@ -8,8 +8,12 @@ export function statusColor(s: TaskStatus): string {
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: 'Backlog',
   clarify: 'Clarifying',
-  building: 'Building',
+  planning: 'Planning',
+  executing: 'Executing',
+  validating: 'Validating',
+  blocked: 'Blocked',
   review: 'Review',
   done: 'Done',
   failed: 'Failed',
+  building: 'Building',
 }
