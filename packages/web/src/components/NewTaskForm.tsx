@@ -7,13 +7,21 @@ import {
   type CaveStyle,
   type EffortLevel,
   type ModelAlias,
+  type RepoTarget,
 } from '../types'
 
 interface Props {
+  repos: RepoTarget[]
+  defaultRepoId: string
   onCreate: (
     title: string,
     body: string,
-    opts: { model: ModelAlias; effort: EffortLevel; style: CaveStyle },
+    opts: {
+      model: ModelAlias
+      effort: EffortLevel
+      style: CaveStyle
+      repoId: string
+    },
   ) => Promise<void>
 }
 
@@ -27,26 +35,36 @@ const STYLE_OPTIONS: CaveStyle[] = [
   'wenyan-full',
 ]
 
-export function NewTaskForm({ onCreate }: Props) {
+export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [model, setModel] = useState<ModelAlias>(DEFAULT_MODEL)
   const [effort, setEffort] = useState<EffortLevel>(DEFAULT_EFFORT)
   const [style, setStyle] = useState<CaveStyle>(DEFAULT_STYLE)
+  // '' means "follow the server default" until the operator explicitly picks a repo.
+  const [repoId, setRepoId] = useState('')
   const [busy, setBusy] = useState(false)
+
+  const effectiveRepoId = repoId || defaultRepoId
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!title.trim() || !body.trim() || busy) return
     setBusy(true)
     try {
-      await onCreate(title.trim(), body.trim(), { model, effort, style })
+      await onCreate(title.trim(), body.trim(), {
+        model,
+        effort,
+        style,
+        repoId: effectiveRepoId,
+      })
       setTitle('')
       setBody('')
       setModel(DEFAULT_MODEL)
       setEffort(DEFAULT_EFFORT)
       setStyle(DEFAULT_STYLE)
+      setRepoId('')
       setOpen(false)
     } finally {
       setBusy(false)
@@ -80,6 +98,21 @@ export function NewTaskForm({ onCreate }: Props) {
         onChange={(e) => setBody(e.target.value)}
       />
       <div className={styles.controls}>
+        <label className={styles.control}>
+          <span className={styles.controlLabel}>Repo</span>
+          <select
+            className={styles.select}
+            value={effectiveRepoId}
+            onChange={(e) => setRepoId(e.target.value)}
+            disabled={repos.length === 0}
+          >
+            {repos.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className={styles.control}>
           <span className={styles.controlLabel}>Model</span>
           <select

@@ -42,16 +42,26 @@ app.get('/api/config', () => ({
   model: config.defaultModel,
   maxLanes: config.maxLanes,
   targetRepo: config.targetRepo,
+  defaultRepoId: config.defaultRepoId,
   authMode: config.apiKeyStripped
     ? 'Max OAuth (ANTHROPIC_API_KEY stripped from workers)'
     : 'Max OAuth',
 }))
 
+app.get('/api/repos', () => config.repos)
+
 app.get('/api/tasks', () => db.listTasks())
 
 app.post('/api/tasks', (req, reply) => {
   const body = req.body as
-    | { title?: string; body?: string; model?: string; effort?: string; style?: string }
+    | {
+        title?: string
+        body?: string
+        model?: string
+        effort?: string
+        style?: string
+        repoId?: string
+      }
     | undefined
   const title = body?.title?.trim()
   const taskBody = body?.body?.trim()
@@ -64,6 +74,7 @@ app.post('/api/tasks', (req, reply) => {
     body?.model,
     asEffort(body?.effort),
     asStyle(body?.style),
+    body?.repoId,
   )
 })
 
@@ -147,8 +158,14 @@ process.on('SIGTERM', () => shutdown('SIGTERM'))
 
 try {
   await app.listen({ host: '0.0.0.0', port: config.port })
+  for (const warning of config.repoWarnings) app.log.warn({ warning }, 'repo registry')
   app.log.info(
-    { targetRepo: config.targetRepo, maxLanes: config.maxLanes, model: config.defaultModel },
+    {
+      repos: config.repos.map((r) => r.id),
+      defaultRepoId: config.defaultRepoId,
+      maxLanes: config.maxLanes,
+      model: config.defaultModel,
+    },
     'zmrng server ready',
   )
 } catch (err) {
