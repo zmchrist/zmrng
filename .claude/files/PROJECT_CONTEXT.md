@@ -19,13 +19,23 @@ drives **other** repos; it is the conductor, not the orchestra.
   always normal English.
 - **Multi-target** — a repo registry (`config/repos.json` → env → legacy) lets each task
   pick which repo it drives; the worker obeys that repo's own harness.
+- **Desktop shell is a wrapper, not a rewrite** — `packages/desktop` is a Tauri (Rust +
+  WKWebView) shell that runs the *unchanged* Node server as a bundled sidecar. It picks a
+  free port, injects the login-shell `PATH` (Finder launches get a minimal PATH), spawns
+  the sidecar, health-polls, then navigates the window to `localhost:<port>`. Zero
+  frontend changes.
 
 ## Architecture at a glance
 - `packages/server` — Fastify 5 REST + WS, SQLite (WAL), Pino, the claude runner, the
   phase state machine, the repo registry, and git worktrees.
 - `packages/web` — React 19 + Vite single-page UI (TaskList rail | TaskDetail pane).
+- `packages/desktop` — Tauri shell + `bundle-sidecar.mjs` (esbuilds the server to ESM,
+  vendors `better-sqlite3` + an official self-contained Node, copies `web/dist`).
 - Phases: `backlog → clarify → building → review → done` (+ `failed`).
 - One worktree per task under `worktrees/<shortId>` (gitignored), one `claude` child each.
+- **Writable data dir** — `ZMRNG_DATA_DIR` relocates the db, worktrees, and `config/` out
+  of the read-only `.app` bundle into `~/Library/Application Support/zmrng/`. Unset in dev
+  → defaults to the repo root (byte-for-byte legacy behavior).
 
 ## Roadmap / open questions
 See `FUTURE_IDEAS.md` for deferred features. Near-term candidates: cost/usage dashboard,

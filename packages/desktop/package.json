@@ -1,0 +1,15 @@
+{
+  "name": "@zmrng/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tauri desktop shell for zmrng — wraps the Node server as a bundled sidecar",
+  "scripts": {
+    "bundle:sidecar": "node scripts/bundle-sidecar.mjs",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0",
+    "esbuild": "^0.25.0"
+  }
+}
