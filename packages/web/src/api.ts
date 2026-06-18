@@ -2,6 +2,7 @@ import type {
   Task,
   TaskEvent,
   ServerConfig,
+  RepoTarget,
   ModelAlias,
   EffortLevel,
   CaveStyle,
@@ -32,12 +33,18 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getConfig: () => req<ServerConfig>('/api/config'),
+  listRepos: () => req<RepoTarget[]>('/api/repos'),
   listTasks: () => req<Task[]>('/api/tasks'),
   getEvents: (id: string) => req<TaskEvent[]>(`/api/tasks/${id}/events`),
   createTask: (
     title: string,
     body: string,
-    opts?: { model?: ModelAlias; effort?: EffortLevel; style?: CaveStyle },
+    opts?: {
+      model?: ModelAlias
+      effort?: EffortLevel
+      style?: CaveStyle
+      repoId?: string
+    },
   ) =>
     req<Task>('/api/tasks', {
       method: 'POST',
