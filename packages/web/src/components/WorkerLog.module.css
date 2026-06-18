@@ -2,21 +2,22 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 20px 26px;
+  padding: 22px 28px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 13px;
 }
 
 .placeholder {
   color: var(--text-faint);
   font-size: 13px;
   text-align: center;
-  margin-top: 24px;
+  margin-top: 26px;
 }
 
 .row {
   display: flex;
+  animation: msg-in var(--spring) both;
 }
 .operatorRow {
   justify-content: flex-end;
@@ -24,10 +25,10 @@
 
 .bubble {
   max-width: 80%;
-  padding: 11px 14px;
+  padding: 12px 15px;
   border-radius: var(--radius);
   font-size: 13.5px;
-  line-height: 1.55;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
   border: 1px solid var(--border);
@@ -35,31 +36,35 @@
 
 .assistant {
   background: var(--surface-strong);
-  backdrop-filter: blur(var(--blur));
-  -webkit-backdrop-filter: blur(var(--blur));
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--shadow-soft), var(--hairline-soft);
   border-top-left-radius: var(--radius-sm);
 }
 
 .operator {
   background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  border-color: var(--accent-line);
   color: var(--text);
+  box-shadow: var(--glow-operator);
   border-top-right-radius: var(--radius-sm);
 }
 
 .streaming {
-  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  border-color: var(--accent-line);
+  box-shadow: var(--glow-accent);
 }
 
 .caret {
   display: inline-block;
   width: 7px;
-  height: 14px;
-  margin-left: 2px;
+  height: 15px;
+  margin-left: 3px;
   vertical-align: text-bottom;
-  background: var(--accent);
-  border-radius: 1px;
-  animation: blink 1s step-start infinite;
+  border-radius: 2px;
+  background: var(--accent-grad);
+  box-shadow: 0 0 10px 1px var(--accent-line);
+  animation: blink 1.1s step-start infinite;
 }
 @keyframes blink {
   50% {
@@ -69,8 +74,8 @@
 
 .status {
   align-self: center;
-  font-size: 11.5px;
-  letter-spacing: 0.03em;
+  font-size: 11px;
+  letter-spacing: 0.05em;
   color: var(--text-faint);
   text-transform: uppercase;
   font-family: var(--font-mono);
@@ -91,8 +96,19 @@
   align-self: center;
   font-size: 12.5px;
   color: var(--status-failed);
-  padding: 6px 12px;
+  padding: 7px 13px;
   border-radius: var(--radius-sm);
-  border: 1px solid color-mix(in srgb, var(--status-failed) 35%, transparent);
-  background: color-mix(in srgb, var(--status-failed) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-failed) 38%, transparent);
+  background: color-mix(in srgb, var(--status-failed) 9%, transparent);
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
