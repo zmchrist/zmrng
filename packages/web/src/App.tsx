@@ -10,6 +10,7 @@ import type {
   ModelAlias,
   EffortLevel,
   CaveStyle,
+  RepoTarget,
 } from './types'
 import { TaskList } from './components/TaskList'
 import { NewTaskForm } from './components/NewTaskForm'
@@ -21,6 +22,7 @@ export default function App() {
   const [events, setEvents] = useState<TaskEvent[]>([])
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
+  const [repos, setRepos] = useState<RepoTarget[]>([])
   const selectedIdRef = useRef<string | null>(null)
 
   const onWs = useCallback((e: WsEvent) => {
@@ -52,6 +54,7 @@ export default function App() {
 
   useEffect(() => {
     api.getConfig().then(setCfg).catch(() => undefined)
+    api.listRepos().then(setRepos).catch(() => undefined)
     api
       .listTasks()
       .then((list) => {
@@ -78,7 +81,12 @@ export default function App() {
     async (
       title: string,
       body: string,
-      opts: { model: ModelAlias; effort: EffortLevel; style: CaveStyle },
+      opts: {
+        model: ModelAlias
+        effort: EffortLevel
+        style: CaveStyle
+        repoId: string
+      },
     ) => {
       const task = await api.createTask(title, body, opts)
       setTasks((prev) => ({ ...prev, [task.id]: task }))
@@ -107,8 +115,12 @@ export default function App() {
             title={connected ? 'connected' : 'disconnected'}
           />
         </div>
-        <NewTaskForm onCreate={onCreate} />
-        <TaskList tasks={sorted} selectedId={selectedId} onSelect={select} />
+        <NewTaskForm
+          repos={repos}
+          defaultRepoId={cfg?.defaultRepoId ?? ''}
+          onCreate={onCreate}
+        />
+        <TaskList tasks={sorted} repos={repos} selectedId={selectedId} onSelect={select} />
       </aside>
       <main className={styles.detail}>
         {selected ? (
@@ -117,6 +129,7 @@ export default function App() {
             events={events}
             live={live}
             config={cfg}
+            repos={repos}
             onStart={() => api.start(selected.id)}
             onMessage={(text) => api.message(selected.id, text)}
             onDone={() => api.done(selected.id)}

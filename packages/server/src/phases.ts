@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { config } from './config.js'
+import { config, repoById } from './config.js'
 import type { Db, TaskPatch } from './db.js'
 import { Runner, type ResultUsage } from './runner.js'
 import { createWorktree, removeWorktree } from './worktree.js'
@@ -56,12 +56,17 @@ function styleDirective(style: CaveStyle): string {
   ].join('\n')
 }
 
-function systemPrompt(branch: string, style: CaveStyle): string {
+function systemPrompt(
+  branch: string,
+  repoPath: string,
+  defaultBranch: string,
+  style: CaveStyle,
+): string {
   return [
-    'You are a zmrng autonomous worker operating on the Pheme repository.',
-    `You are running inside a dedicated git worktree ALREADY checked out on the fresh branch \`${branch}\`, cut from origin/main.`,
-    'NEVER switch to or commit on `main`/`master`. NEVER create or switch to a different branch — use the branch you are already on.',
-    'Obey the repo CLAUDE.md and every rule under .claude/rules/. Use shared types from @pheme/shared and design tokens from theme.css. The repo security hooks remain active (they block .env access, force-push, and recursive deletes) — respect them.',
+    `You are a zmrng autonomous worker operating on the target repository at \`${repoPath}\`.`,
+    `You are running inside a dedicated git worktree ALREADY checked out on the fresh branch \`${branch}\`, cut from the repo's default branch (${defaultBranch}).`,
+    `NEVER switch to or commit on \`${defaultBranch}\`/\`main\`/\`master\`. NEVER create or switch to a different branch — use the branch you are already on.`,
+    "Obey the target repository's CLAUDE.md and every rule under its .claude/rules/. Follow that repo's own conventions, types, and design tokens. Any repo security hooks remain active (they block .env access, force-push, and recursive deletes) — respect them.",
     'CLARIFY PHASE: ask the operator the questions you need to scope this task, in small batches. Do NOT write code yet. When you have enough to plan and implement fully autonomously, output the exact token ZMRNG_READY on its own line, followed by a one-paragraph scope summary.',
     'After ZMRNG_READY you will receive a single build instruction and must run to completion with no further questions.',
     styleDirective(style),
@@ -76,7 +81,7 @@ function clarifyKickoff(task: Task): string {
   ].join('\n')
 }
 
-function buildKickoff(branch: string): string {
+function buildKickoff(branch: string, defaultBranch: string): string {
   return [
     `Proceed fully autonomously now. You are on branch \`${branch}\` in this worktree.`,
     '1. Write a short plan to .agents/plans/.',
@@ -84,7 +89,7 @@ function buildKickoff(branch: string): string {
     '3. Run: npm run typecheck && npm run lint && npm run build — fix every failure until all three pass.',
     '4. Commit with a descriptive Conventional Commit message.',
     `5. Push the branch: git push -u origin ${branch}`,
-    '6. Open a PR: gh pr create --fill --base main --head ' + branch,
+    `6. Open a PR: gh pr create --fill --base ${defaultBranch} --head ${branch}`,
     'Finally, output the PR URL on its own line.',
   ].join('\n')
 }
@@ -145,9 +150,16 @@ export class TaskManager {
     style: CaveStyle,
     cwd: string,
     branch: string,
+    repoPath: string,
+    defaultBranch: string,
   ): void {
     const runner = new Runner(
-      { cwd, model, effort, systemPrompt: systemPrompt(branch, style) },
+      {
+        cwd,
+        model,
+        effort,
+        systemPrompt: systemPrompt(branch, repoPath, defaultBranch, style),
+      },
       {
         onSession: (sessionId) => {
           this.patch(task.id, { sessionId })
@@ -233,7 +245,8 @@ export class TaskManager {
       sub: 'status',
       note: 'build lane acquired — running autonomously to PR',
     })
-    runner.send(buildKickoff(task.branch ?? 'unknown-branch'))
+    const defaultBranch = repoById(task.repoId)?.defaultBranch ?? 'main'
+    runner.send(buildKickoff(task.branch ?? 'unknown-branch', defaultBranch))
   }
 
   private onPr(task: Task, prUrl: string): void {
@@ -263,8 +276,10 @@ export class TaskManager {
     model?: string,
     effort?: EffortLevel,
     style?: CaveStyle,
+    repoId?: string,
   ): Task {
     const id = randomUUID()
+    const resolvedRepoId = repoId && repoById(repoId) ? repoId : config.defaultRepoId
     const task = this.db.createTask({
       id,
       title,
@@ -272,6 +287,7 @@ export class TaskManager {
       model: model ?? DEFAULT_MODEL,
       effort: effort ?? DEFAULT_EFFORT,
       style: style ?? DEFAULT_STYLE,
+      repoId: resolvedRepoId,
       now: now(),
     })
     this.broadcast({ type: 'task', task })
@@ -284,10 +300,24 @@ export class TaskManager {
     if (task.status !== 'backlog' && task.status !== 'failed') {
       throw new Error(`cannot start a task in status "${task.status}"`)
     }
-    this.emitEvent(taskId, 'status', { sub: 'status', note: 'creating worktree…' })
+    const repo = repoById(task.repoId) ?? repoById(config.defaultRepoId)
+    if (!repo) {
+      this.fail(taskId, 'no target repo configured in the registry')
+      return
+    }
+    this.emitEvent(taskId, 'status', {
+      sub: 'status',
+      note: `creating worktree in ${repo.label}…`,
+    })
     let wt
     try {
-      wt = await createWorktree(config.targetRepo, config.worktreesDir, taskId, task.title)
+      wt = await createWorktree(
+        repo.path,
+        repo.defaultBranch,
+        config.worktreesDir,
+        taskId,
+        task.title,
+      )
     } catch (err) {
       this.fail(taskId, `worktree creation failed: ${errMsg(err)}`)
       return
@@ -301,7 +331,16 @@ export class TaskManager {
     const model = updated?.model ?? config.defaultModel
     const effort = updated?.effort ?? DEFAULT_EFFORT
     const style = updated?.style ?? DEFAULT_STYLE
-    this.spawn({ ...task, branch: wt.branch }, model, effort, style, wt.worktreePath, wt.branch)
+    this.spawn(
+      { ...task, branch: wt.branch },
+      model,
+      effort,
+      style,
+      wt.worktreePath,
+      wt.branch,
+      repo.path,
+      repo.defaultBranch,
+    )
     this.emitEvent(taskId, 'status', {
       sub: 'status',
       note: `worktree ${wt.worktreePath} on ${wt.branch}`,
@@ -328,7 +367,8 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.freeLane(taskId)
     if (task.worktree) {
-      await removeWorktree(config.targetRepo, task.worktree)
+      const repoPath = repoById(task.repoId)?.path ?? config.targetRepo
+      await removeWorktree(repoPath, task.worktree)
       this.patch(taskId, { worktree: null })
     }
     this.transition(taskId, 'done')
@@ -341,7 +381,8 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.freeLane(taskId)
     if (task.worktree) {
-      await removeWorktree(config.targetRepo, task.worktree)
+      const repoPath = repoById(task.repoId)?.path ?? config.targetRepo
+      await removeWorktree(repoPath, task.worktree)
       this.patch(taskId, { worktree: null })
     }
     this.transition(taskId, 'failed', 'cancelled by operator')

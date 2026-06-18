@@ -32,6 +32,16 @@ export const DEFAULT_MODEL: ModelAlias = 'opus'
 export const DEFAULT_EFFORT: EffortLevel = 'high'
 export const DEFAULT_STYLE: CaveStyle = 'caveman-full'
 
+// ---- multi-target repo registry ----
+
+/** A git repo zmrng can drive, one entry per configured target. */
+export interface RepoTarget {
+  id: string
+  label: string
+  path: string
+  defaultBranch: string
+}
+
 export interface Task {
   id: string
   title: string
@@ -45,6 +55,8 @@ export interface Task {
   model: string | null
   effort: EffortLevel | null
   style: CaveStyle | null
+  /** id of the RepoTarget this task drives (from the repo registry). */
+  repoId: string
   usage: TaskUsage
   /** Set while a task that reached READY is waiting for a free build lane. */
   queued: boolean
