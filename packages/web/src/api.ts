@@ -57,6 +57,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ text }),
     }),
+  resume: (id: string) =>
+    req<{ ok: true }>(`/api/tasks/${id}/resume`, { method: 'POST' }),
   done: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/done`, { method: 'POST' }),
   cancel: (id: string) =>

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   branch TEXT,
   worktree TEXT,
   pr_url TEXT,
+  plan_path TEXT,
   model TEXT,
   effort TEXT,
   style TEXT,
@@ -53,6 +54,7 @@ interface TaskRow {
   branch: string | null
   worktree: string | null
   pr_url: string | null
+  plan_path: string | null
   model: string | null
   effort: string | null
   style: string | null
@@ -85,6 +87,7 @@ function rowToTask(r: TaskRow): Task {
     branch: r.branch,
     worktree: r.worktree,
     prUrl: r.pr_url,
+    planPath: r.plan_path,
     model: r.model,
     effort: (r.effort as EffortLevel | null) ?? null,
     style: (r.style as CaveStyle | null) ?? null,
@@ -121,6 +124,7 @@ export type TaskPatch = Partial<
     | 'branch'
     | 'worktree'
     | 'prUrl'
+    | 'planPath'
     | 'model'
     | 'effort'
     | 'style'
@@ -134,6 +138,7 @@ const COLUMN_BY_FIELD: Record<keyof TaskPatch, string> = {
   branch: 'branch',
   worktree: 'worktree',
   prUrl: 'pr_url',
+  planPath: 'plan_path',
   model: 'model',
   effort: 'effort',
   style: 'style',
@@ -165,6 +170,7 @@ export class Db {
       ['effort', 'TEXT'],
       ['style', 'TEXT'],
       ['repo_id', 'TEXT'],
+      ['plan_path', 'TEXT'],
       ['tokens_in', 'INTEGER NOT NULL DEFAULT 0'],
       ['tokens_out', 'INTEGER NOT NULL DEFAULT 0'],
       ['tokens_cache', 'INTEGER NOT NULL DEFAULT 0'],
