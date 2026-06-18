@@ -1,26 +1,29 @@
 :root {
   /* ---- base / atmosphere ---------------------------------------------- */
-  --bg: #070a0f;
-  --bg-grad-a: #0c1018;
-  --bg-grad-b: #070a0f;
-  /* aurora blobs that live *behind* the glass — bright enough for the
-     translucent panels to actually catch and refract the color */
-  --aurora-1: rgba(94, 200, 255, 0.32); /* cyan */
-  --aurora-2: rgba(124, 155, 255, 0.28); /* azure */
-  --aurora-3: rgba(177, 140, 255, 0.26); /* violet */
-  --aurora-4: rgba(80, 224, 200, 0.16); /* teal */
+  /* The canvas is transparent so the macOS vibrancy (and the desktop behind
+     it) bleeds up through the webview — real "see-through" smoked glass. */
+  --bg: transparent;
+  /* a dark smoke veil painted over the vibrancy so content stays legible
+     while the desktop still reads faintly through it */
+  --veil: rgba(9, 11, 14, 0.46);
+  /* faint neutral-grey haze that gives the smoke some living depth — no hue */
+  --smoke-1: rgba(196, 204, 214, 0.05);
+  --smoke-2: rgba(150, 160, 172, 0.045);
+  --smoke-3: rgba(120, 128, 140, 0.05);
+  --smoke-floor: rgba(4, 6, 9, 0.34);
 
-  /* ---- glass surfaces (≈75% opacity, frosted) ------------------------- */
-  --surface: rgba(20, 26, 34, 0.62);
-  --surface-strong: rgba(28, 35, 46, 0.74);
-  --surface-hover: rgba(40, 50, 64, 0.58);
+  /* ---- glass surfaces — brushed smoked panels (neutral, frosted) ------ */
+  --surface: rgba(26, 29, 35, 0.55);
+  --surface-strong: rgba(33, 37, 44, 0.66);
+  --surface-hover: rgba(48, 53, 61, 0.5);
   /* translucent inset wells for fields / code */
-  --well: rgba(6, 9, 14, 0.45);
-  --well-strong: rgba(4, 7, 11, 0.6);
+  --well: rgba(6, 8, 11, 0.4);
+  --well-strong: rgba(3, 5, 8, 0.55);
 
-  /* the signature liquid-glass backdrop filter: blur + saturation lift */
-  --blur: 26px;
-  --glass: saturate(165%) blur(var(--blur));
+  /* the brushed-glass backdrop filter: heavy blur, restrained saturation so
+     it reads as smoke rather than color */
+  --blur: 30px;
+  --glass: saturate(116%) blur(var(--blur));
 
   /* ---- edges / hairlines ---------------------------------------------- */
   --border: rgba(255, 255, 255, 0.08);
@@ -34,17 +37,17 @@
   --text-dim: #a4adba;
   --text-faint: #67717f;
 
-  /* ---- accent (cool cyan → azure) ------------------------------------- */
-  --accent: #5ec8ff;
-  --accent-2: #7c9bff;
-  --accent-bright: #9bdcff;
-  --accent-soft: rgba(94, 200, 255, 0.16);
-  --accent-line: rgba(94, 200, 255, 0.5);
-  --accent-grad: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
-  /* readable ink on top of an accent fill */
-  --accent-ink: #04121d;
+  /* ---- accent — muted cool pewter (low colour, glass-first) ----------- */
+  --accent: #c6cfdd;
+  --accent-2: #a9b4c6;
+  --accent-bright: #e9eef4;
+  --accent-soft: rgba(198, 207, 221, 0.12);
+  --accent-line: rgba(198, 207, 221, 0.34);
+  --accent-grad: linear-gradient(135deg, #cfd7e4 0%, #a9b4c6 100%);
+  /* readable ink on top of the silver accent fill */
+  --accent-ink: #15181d;
 
-  /* ---- status hues (luminous) ----------------------------------------- */
+  /* ---- status hues — kept as functional signal, muted to fit the smoke - */
   --status-backlog: #8b94a3;
   --status-clarify: #f2c879;
   --status-planning: #7c9bff;
@@ -56,6 +59,11 @@
   --status-failed: #ff8a8a;
   /* legacy single-phase status (old DB rows) */
   --status-building: #5ec8ff;
+  --status-clarify: #e3bd7c;
+  --status-building: #92b7d6;
+  --status-review: #b0a2d3;
+  --status-done: #84c7a2;
+  --status-failed: #de9292;
 
   /* ---- shape ---------------------------------------------------------- */
   --radius: 20px;
@@ -67,24 +75,26 @@
   /* smooth GlassOS spring (easeOutQuint) for larger movements */
   --spring: 460ms cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* ---- elevation / glow ----------------------------------------------- */
+  /* ---- elevation / glow — neutral smoke, no coloured bloom ------------- */
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
   --shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.38);
-  --glow-accent: 0 0 0 1px var(--accent-line), 0 10px 34px rgba(94, 200, 255, 0.28);
-  --glow-accent-strong: 0 0 0 1px var(--accent-line), 0 14px 40px rgba(94, 200, 255, 0.4);
-  --glow-operator: 0 8px 26px -12px rgba(94, 200, 255, 0.5);
+  --glow-accent: 0 0 0 1px var(--accent-line), 0 10px 30px rgba(0, 0, 0, 0.36);
+  --glow-accent-strong: 0 0 0 1px var(--border-strong), 0 14px 38px rgba(0, 0, 0, 0.46);
+  --glow-operator: 0 8px 26px -12px rgba(0, 0, 0, 0.55);
   --focus-ring: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent-line);
 
   /* ---- controls ------------------------------------------------------- */
   --scrollbar-thumb: rgba(160, 190, 220, 0.18);
   --scrollbar-thumb-hover: rgba(160, 190, 220, 0.32);
 
-  /* ---- typography ----------------------------------------------------- */
-  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
-    'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  /* ---- typography — Bricolage Grotesque: distinctive, modern, pops ---- */
+  --font: 'Bricolage Grotesque Variable', 'Bricolage Grotesque', -apple-system,
+    BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* display face for the brand + headings (same family, heavier optical) */
+  --font-display: 'Bricolage Grotesque Variable', 'Bricolage Grotesque', var(--font);
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --tracking-wide: 0.16em;
-  --tracking-tight: -0.01em;
+  --tracking-tight: -0.012em;
 }
 
 * {
@@ -109,43 +119,44 @@ body {
   overflow: hidden;
 }
 
-/* Living aurora layer: large blurred color fields that slowly drift behind the
-   glass, giving the translucency something luminous to refract. */
+/* Living smoke layer: faint neutral-grey fields that slowly drift, giving the
+   translucency some moving depth — no hue, just brushed haze. */
 body::before {
   content: '';
   position: fixed;
   inset: -25%;
   z-index: -2;
   background:
-    radial-gradient(44% 50% at 14% 10%, var(--aurora-1), transparent 66%),
-    radial-gradient(46% 52% at 90% 4%, var(--aurora-2), transparent 64%),
-    radial-gradient(52% 56% at 80% 98%, var(--aurora-3), transparent 64%),
-    radial-gradient(54% 60% at 6% 94%, var(--aurora-4), transparent 64%);
-  filter: blur(28px);
-  animation: aurora-drift 32s ease-in-out infinite alternate;
+    radial-gradient(46% 52% at 16% 8%, var(--smoke-1), transparent 66%),
+    radial-gradient(48% 54% at 88% 6%, var(--smoke-2), transparent 64%),
+    radial-gradient(54% 58% at 82% 96%, var(--smoke-3), transparent 64%),
+    radial-gradient(56% 60% at 8% 92%, var(--smoke-2), transparent 64%);
+  filter: blur(30px);
+  animation: smoke-drift 38s ease-in-out infinite alternate;
 }
 
-/* Deep gradient floor + a whisper of grain so flat areas never look dead. */
+/* Translucent dark veil over the macOS vibrancy: keeps content legible while
+   the desktop behind still reads faintly through the smoked glass. */
 body::after {
   content: '';
   position: fixed;
   inset: 0;
   z-index: -3;
   background:
-    radial-gradient(1200px 820px at 18% -12%, var(--bg-grad-a), transparent 60%),
-    radial-gradient(1000px 760px at 112% 116%, #10151f, transparent 58%),
-    var(--bg);
+    radial-gradient(1200px 820px at 18% -12%, var(--smoke-floor), transparent 62%),
+    radial-gradient(1000px 760px at 112% 116%, var(--smoke-floor), transparent 60%),
+    var(--veil);
 }
 
-@keyframes aurora-drift {
+@keyframes smoke-drift {
   0% {
     transform: translate3d(0, 0, 0) scale(1);
   }
   50% {
-    transform: translate3d(2.5%, 1.8%, 0) scale(1.08);
+    transform: translate3d(2%, 1.6%, 0) scale(1.06);
   }
   100% {
-    transform: translate3d(-2%, -2.4%, 0) scale(1.04);
+    transform: translate3d(-1.8%, -2%, 0) scale(1.03);
   }
 }
 
