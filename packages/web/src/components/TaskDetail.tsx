@@ -61,9 +61,9 @@ export function TaskDetail({
         <p className={styles.body}>{task.body}</p>
         <div className={styles.badges}>
           {repoLabel && <span className={styles.badge}>⌂ {repoLabel}</span>}
-          {task.model && <span className={styles.badge}>{task.model}</span>}
-          {task.effort && <span className={styles.badge}>{task.effort}</span>}
-          {task.style && <span className={styles.badge}>{task.style}</span>}
+          {task.model && <span className={styles.badge}>model: {task.model}</span>}
+          {task.effort && <span className={styles.badge}>effort: {task.effort}</span>}
+          {task.style && <span className={styles.badge}>style: {task.style}</span>}
         </div>
         <div className={styles.meta}>
           {task.branch && <span className={styles.metaItem}>⌥ {task.branch}</span>}

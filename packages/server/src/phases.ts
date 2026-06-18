@@ -32,7 +32,15 @@ function errMsg(e: unknown): string {
 
 // ---- phase prompts ----
 
-/** Per-level caveman register rules, applied to narration only. `normal` injects nothing. */
+/** Map a CaveStyle to the `caveman` skill's intensity argument (`/caveman <arg>`). */
+const CAVEMAN_SKILL_ARG: Record<Exclude<CaveStyle, 'normal'>, string> = {
+  'caveman-lite': 'lite',
+  'caveman-full': 'full',
+  'caveman-ultra': 'ultra',
+  'wenyan-full': 'wenyan-full',
+}
+
+/** Per-level caveman register rules — used as a fallback if the skill is unavailable. */
 const CAVEMAN_RULES: Record<Exclude<CaveStyle, 'normal'>, string> = {
   'caveman-lite':
     'Drop filler and hedging. Keep articles and full sentences. Tight and professional.',
@@ -44,16 +52,30 @@ const CAVEMAN_RULES: Record<Exclude<CaveStyle, 'normal'>, string> = {
     'Respond in terse Classical Chinese (文言文) register. ~80% character reduction. Keep all technical terms, code, identifiers, and commands verbatim in their original language.',
 }
 
-/** Caveman directive block appended to the system prompt for non-`normal` styles. */
+/**
+ * Communication-style block appended to the system prompt for non-`normal` styles.
+ * Directs the worker to actually invoke the `caveman` skill (equivalent to the
+ * operator running `/caveman <level>`); the register rules remain only as a
+ * fallback for environments where that skill is not installed.
+ */
 function styleDirective(style: CaveStyle): string {
   if (style === 'normal') return ''
+  const arg = CAVEMAN_SKILL_ARG[style]
   return [
     '',
-    'COMMUNICATION STYLE — apply to ALL your narration, status updates, clarify questions,',
-    'and streamed log. EXCEPTION: write code, commit messages, PR titles/bodies, and plan',
-    'files in normal, clear, professional English (never caveman).',
-    CAVEMAN_RULES[style],
+    'COMMUNICATION STYLE:',
+    `Your VERY FIRST action this session — before clarifying questions or any other output — MUST be to invoke the \`caveman\` skill at "${arg}" intensity (the Skill tool with skill "caveman" and args "${arg}", equivalent to the operator running \`/caveman ${arg}\`).`,
+    'Apply that caveman register to ALL narration, status updates, clarify questions, and streamed log for the rest of the session.',
+    'EXCEPTION: write code, commit messages, PR titles/bodies, and plan files in normal, clear, professional English (never caveman).',
+    `Fallback if the caveman skill is unavailable: ${CAVEMAN_RULES[style]}`,
   ].join('\n')
+}
+
+/** One-line summary of the controls applied to a worker, for the operator log. */
+function settingsNote(model: string, effort: EffortLevel, style: CaveStyle): string {
+  const styleDesc =
+    style === 'normal' ? 'normal (no caveman skill)' : `${style} → /caveman ${CAVEMAN_SKILL_ARG[style]}`
+  return `settings — model=${model} · effort=${effort} · style=${styleDesc}`
 }
 
 function systemPrompt(
@@ -345,6 +367,7 @@ export class TaskManager {
       sub: 'status',
       note: `worktree ${wt.worktreePath} on ${wt.branch}`,
     })
+    this.emitEvent(taskId, 'status', { sub: 'status', note: settingsNote(model, effort, style) })
     this.runners.get(taskId)?.send(clarifyKickoff(task))
   }
 

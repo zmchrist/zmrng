@@ -96,8 +96,9 @@ messages, PR titles/bodies, and plan files stay normal, professional English.** 
 asked otherwise.
 
 ### Per-task controls
-Each task records `model` (opus/sonnet/fable), `effort` (low/medium/high/xhigh/max),
-`style` (caveman levels), and `repoId` (which target repo it drives). Token/cost usage
+Each task records `model` (opus/sonnet), `effort` (low/medium/high/xhigh/max),
+`style` (caveman levels — non-`normal` makes the worker invoke the `caveman` skill at
+the mapped intensity), and `repoId` (which target repo it drives). Token/cost usage
 accumulates across stream-json `result` events and shows once the task hits review/done.
 
 ### TypeScript / logging
@@ -116,8 +117,10 @@ See `.claude/docs/services-reference.md` for full method signatures and behavior
   + PR-URL detection, build-lane cap + queue.
 - **Db** (`packages/server/src/db.ts`) — SQLite (WAL), `tasks` + `events` schema,
   prepared statements, idempotent `ensureColumns()` migration, atomic `addUsage()`.
-- **Config** (`packages/server/src/config.ts`) — env + repo registry (config/repos.json
-  → `ZMRNG_REPOS` env → legacy `ZMRNG_TARGET_REPO`), `repoById()`.
+- **Config** (`packages/server/src/config.ts`) — env + repo registry: explicit
+  (config/repos.json → `ZMRNG_REPOS` env → legacy `ZMRNG_TARGET_REPO`) merged with an
+  auto-scan of `ZMRNG_PROJECTS_DIR` (every git-repo-root under it) plus a zmrng self
+  entry; default repo is zmrng unless `ZMRNG_DEFAULT_REPO` pins another. `repoById()`.
 - **Worktree** (`packages/server/src/worktree.ts`) — `git worktree add` per task, base
   ref resolved `origin/<branch>` → local `<branch>` → `HEAD` for local-only repos.
 - **WsHub** (`packages/server/src/ws.ts`) — fan-out broadcast of task + claude events.
