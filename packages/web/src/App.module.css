@@ -1,49 +1,74 @@
 .app {
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: 348px 1fr;
   height: 100vh;
   overflow: hidden;
+  padding: 12px;
+  gap: 12px;
 }
 
+/* ---- left rail: a floating glass slab ---------------------------------- */
 .rail {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--shadow), var(--hairline);
+  overflow: hidden;
+  animation: rail-in var(--spring) both;
 }
 
 .brandbar {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 18px 18px 12px;
+  padding: 20px 20px 14px;
 }
 
 .brand {
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: var(--tracking-wide);
   text-transform: lowercase;
+  background: linear-gradient(120deg, var(--text) 30%, var(--accent-bright));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   color: var(--text);
 }
 
 .dot {
+  position: relative;
   width: 9px;
   height: 9px;
   border-radius: 50%;
   background: var(--status-failed);
-  transition: background var(--transition);
+  box-shadow: 0 0 0 0 transparent;
+  transition: background var(--transition), box-shadow var(--transition);
 }
 .dotOn {
   background: var(--status-done);
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--status-done) 70%, transparent);
+  animation: dot-pulse 2.6s ease-in-out infinite;
 }
 
+/* ---- right pane: the detail surface ------------------------------------ */
 .detail {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--shadow), var(--hairline);
+  animation: detail-in var(--spring) 80ms both;
 }
 
 .empty {
@@ -52,4 +77,37 @@
   height: 100%;
   color: var(--text-faint);
   font-size: 15px;
+  letter-spacing: var(--tracking-tight);
+}
+
+@keyframes rail-in {
+  from {
+    opacity: 0;
+    transform: translateX(-14px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 10px 0 color-mix(in srgb, var(--status-done) 60%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 16px 3px color-mix(in srgb, var(--status-done) 75%, transparent);
+  }
 }
