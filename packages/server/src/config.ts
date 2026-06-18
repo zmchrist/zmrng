@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import type { RepoTarget } from './types.js'
 
@@ -19,9 +19,18 @@ function expandHome(p: string): string {
  */
 const REPO_ROOT = path.resolve(import.meta.dirname, '../../..')
 
-/** Load a .env file at the repo root into process.env if present (dev convenience). */
-function loadDotEnv(): void {
-  const envPath = path.join(REPO_ROOT, '.env')
+/**
+ * Writable per-user data dir for the SQLite db, git worktrees, and the repo
+ * registry. In dev (no env) this is REPO_ROOT — today's behavior, byte-for-byte.
+ * In the bundled desktop app it is `~/Library/Application Support/zmrng`, set by
+ * the Tauri shell via ZMRNG_DATA_DIR, because the app bundle is read-only.
+ */
+const DATA_DIR = process.env.ZMRNG_DATA_DIR ?? REPO_ROOT
+/** Repo registry (and an optional .env) live here — REPO_ROOT/config in dev. */
+const CONFIG_DIR = path.join(DATA_DIR, 'config')
+
+/** Parse one `.env` file into process.env (existing keys win). */
+function loadDotEnvFile(envPath: string): void {
   if (!existsSync(envPath)) return
   for (const rawLine of readFileSync(envPath, 'utf8').split('\n')) {
     const line = rawLine.trim()
@@ -40,6 +49,17 @@ function loadDotEnv(): void {
   }
 }
 
+/** Load `.env` from the repo root and (if different) the data dir (dev convenience). */
+function loadDotEnv(): void {
+  const seen = new Set<string>()
+  for (const dir of [REPO_ROOT, DATA_DIR]) {
+    const envPath = path.join(dir, '.env')
+    if (seen.has(envPath)) continue
+    seen.add(envPath)
+    loadDotEnvFile(envPath)
+  }
+}
+
 loadDotEnv()
 
 export interface Config {
@@ -55,6 +75,8 @@ export interface Config {
   defaultModel: string
   maxLanes: number
   repoRoot: string
+  /** Writable per-user data dir (db, worktrees, config). REPO_ROOT in dev. */
+  dataDir: string
   dbPath: string
   worktreesDir: string
   webDist: string
@@ -89,8 +111,8 @@ function normalizeEntry(e: Partial<RepoTarget>): RepoTarget | undefined {
 
 /** Load repo registry candidates: config/repos.json → ZMRNG_REPOS env → legacy ZMRNG_TARGET_REPO. */
 function loadRepoCandidates(): RepoTarget[] {
-  // 1. config/repos.json (gitignored; machine-specific paths)
-  const jsonPath = path.join(REPO_ROOT, 'config', 'repos.json')
+  // 1. <dataDir>/config/repos.json (gitignored; machine-specific paths)
+  const jsonPath = path.join(CONFIG_DIR, 'repos.json')
   if (existsSync(jsonPath)) {
     try {
       const parsed = JSON.parse(readFileSync(jsonPath, 'utf8')) as Partial<RepoTarget>[]
@@ -140,6 +162,12 @@ function buildConfig(): Config {
   const defaultRepoId =
     envDefault && repos.some((r) => r.id === envDefault) ? envDefault : repos[0].id
 
+  const worktreesDir = path.join(DATA_DIR, 'worktrees')
+  // Ensure the writable dirs exist before db/worktree code touches them. In dev
+  // these already exist (REPO_ROOT); recursive mkdir is an idempotent no-op.
+  mkdirSync(DATA_DIR, { recursive: true })
+  mkdirSync(worktreesDir, { recursive: true })
+
   return {
     port: Number(process.env.ZMRNG_PORT ?? 4500),
     targetRepo: repos.find((r) => r.id === defaultRepoId)?.path ?? repos[0].path,
@@ -149,9 +177,10 @@ function buildConfig(): Config {
     defaultModel: process.env.ZMRNG_MODEL ?? 'opus',
     maxLanes: Number(process.env.ZMRNG_MAX_LANES ?? 2),
     repoRoot: REPO_ROOT,
-    dbPath: path.join(REPO_ROOT, 'zmrng.db'),
-    worktreesDir: path.join(REPO_ROOT, 'worktrees'),
-    webDist: path.join(REPO_ROOT, 'packages', 'web', 'dist'),
+    dataDir: DATA_DIR,
+    dbPath: path.join(DATA_DIR, 'zmrng.db'),
+    worktreesDir,
+    webDist: process.env.ZMRNG_WEB_DIST ?? path.join(REPO_ROOT, 'packages', 'web', 'dist'),
     apiKeyStripped: Boolean(process.env.ANTHROPIC_API_KEY),
   }
 }

@@ -51,6 +51,29 @@ npm run build
 npm start                     # serves API + built UI on ZMRNG_PORT
 ```
 
+## Desktop app (Tauri)
+
+zmrng can run as a native macOS `.app` (Tauri + WKWebView) that bundles the Node
+server as a sidecar — no terminal, no browser tab. The server is unchanged; the
+Tauri shell picks a free port, injects the login-shell `PATH` (so `claude`/`git`/`gh`
+resolve under a Finder launch), spawns the sidecar, and points the window at it.
+
+```bash
+npm run desktop:dev           # native window running the bundled sidecar
+npm run desktop:build         # build → bundle:sidecar → tauri build  → a .app
+```
+
+Build prerequisites: **Rust** (`https://rustup.rs`), Xcode CLT, and app icons
+(`npm run tauri -w @zmrng/desktop -- icon path/to/logo.png`). The bundle pipeline
+(`npm run bundle:sidecar`) esbuilds the server, vendors `better-sqlite3` + an
+official self-contained Node runtime, and copies `web/dist` into `src-tauri/`.
+
+In the desktop app the SQLite db, git worktrees, and the repo registry live in a
+writable per-user dir — `~/Library/Application Support/zmrng/` — not inside the
+read-only bundle (so `config/repos.json` lives at
+`~/Library/Application Support/zmrng/config/repos.json`). `npm run dev` is unchanged:
+with no env set everything still resolves under the repo root.
+
 ## Config (`.env`)
 
 | Var | Default | Meaning |
@@ -59,6 +82,8 @@ npm start                     # serves API + built UI on ZMRNG_PORT
 | `ZMRNG_PORT` | `4500` | Fastify port |
 | `ZMRNG_MODEL` | `opus` | Default model for new tasks |
 | `ZMRNG_MAX_LANES` | `2` | Max concurrent building tasks |
+| `ZMRNG_DATA_DIR` | repo root | Writable dir for db + worktrees + `config/` (desktop sets this) |
+| `ZMRNG_WEB_DIST` | `packages/web/dist` | Built UI dir the server serves (desktop sets this) |
 
 ## Validate
 
@@ -71,6 +96,7 @@ npm run typecheck && npm run lint && npm run build
 ```
 packages/server/  Fastify + WS + SQLite; spawns/parses the claude child (runner.ts)
 packages/web/     React + Vite frosted-glass UI (list + detail pane)
+packages/desktop/ Tauri shell (Rust) + sidecar bundle pipeline (the .app)
 worktrees/        per-task git worktrees (gitignored)
 plans/            standalone copy of the implementation plan
 ```
