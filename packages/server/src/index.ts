@@ -7,10 +7,26 @@ import { config } from './config.js'
 import { Db } from './db.js'
 import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
-import type { WsEvent } from './types.js'
+import type { WsEvent, EffortLevel, CaveStyle } from './types.js'
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
+}
+
+const EFFORTS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
+const STYLES: readonly CaveStyle[] = [
+  'normal',
+  'caveman-lite',
+  'caveman-full',
+  'caveman-ultra',
+  'wenyan-full',
+]
+
+function asEffort(v: unknown): EffortLevel | undefined {
+  return EFFORTS.includes(v as EffortLevel) ? (v as EffortLevel) : undefined
+}
+function asStyle(v: unknown): CaveStyle | undefined {
+  return STYLES.includes(v as CaveStyle) ? (v as CaveStyle) : undefined
 }
 
 const app = Fastify({ logger: true })
@@ -34,13 +50,21 @@ app.get('/api/config', () => ({
 app.get('/api/tasks', () => db.listTasks())
 
 app.post('/api/tasks', (req, reply) => {
-  const body = req.body as { title?: string; body?: string; model?: string } | undefined
+  const body = req.body as
+    | { title?: string; body?: string; model?: string; effort?: string; style?: string }
+    | undefined
   const title = body?.title?.trim()
   const taskBody = body?.body?.trim()
   if (!title || !taskBody) {
     return reply.code(400).send({ error: 'title and body are required' })
   }
-  return manager.createTask(title, taskBody, body?.model)
+  return manager.createTask(
+    title,
+    taskBody,
+    body?.model,
+    asEffort(body?.effort),
+    asStyle(body?.style),
+  )
 })
 
 app.get('/api/tasks/:id/events', (req) => {

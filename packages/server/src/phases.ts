@@ -1,9 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import { config } from './config.js'
 import type { Db, TaskPatch } from './db.js'
-import { Runner } from './runner.js'
+import { Runner, type ResultUsage } from './runner.js'
 import { createWorktree, removeWorktree } from './worktree.js'
-import type { Task, TaskStatus, EventKind, EventPayload, WsEvent } from './types.js'
+import {
+  DEFAULT_EFFORT,
+  DEFAULT_MODEL,
+  DEFAULT_STYLE,
+  type Task,
+  type TaskStatus,
+  type EventKind,
+  type EventPayload,
+  type WsEvent,
+  type EffortLevel,
+  type CaveStyle,
+} from './types.js'
 
 // ---- detection ----
 const READY_RE = /^\s*ZMRNG_READY\s*$/m
@@ -21,7 +32,31 @@ function errMsg(e: unknown): string {
 
 // ---- phase prompts ----
 
-function systemPrompt(branch: string): string {
+/** Per-level caveman register rules, applied to narration only. `normal` injects nothing. */
+const CAVEMAN_RULES: Record<Exclude<CaveStyle, 'normal'>, string> = {
+  'caveman-lite':
+    'Drop filler and hedging. Keep articles and full sentences. Tight and professional.',
+  'caveman-full':
+    'Drop articles (a/an/the) and filler. Fragments OK. Short synonyms. Pattern: [thing] [action] [reason]. Keep technical terms exact.',
+  'caveman-ultra':
+    'Drop articles/filler/conjunctions. Abbreviate (DB/auth/config/fn/impl). Arrows for causality (X → Y). One word when one word enough. Technical terms exact.',
+  'wenyan-full':
+    'Respond in terse Classical Chinese (文言文) register. ~80% character reduction. Keep all technical terms, code, identifiers, and commands verbatim in their original language.',
+}
+
+/** Caveman directive block appended to the system prompt for non-`normal` styles. */
+function styleDirective(style: CaveStyle): string {
+  if (style === 'normal') return ''
+  return [
+    '',
+    'COMMUNICATION STYLE — apply to ALL your narration, status updates, clarify questions,',
+    'and streamed log. EXCEPTION: write code, commit messages, PR titles/bodies, and plan',
+    'files in normal, clear, professional English (never caveman).',
+    CAVEMAN_RULES[style],
+  ].join('\n')
+}
+
+function systemPrompt(branch: string, style: CaveStyle): string {
   return [
     'You are a zmrng autonomous worker operating on the Pheme repository.',
     `You are running inside a dedicated git worktree ALREADY checked out on the fresh branch \`${branch}\`, cut from origin/main.`,
@@ -29,6 +64,7 @@ function systemPrompt(branch: string): string {
     'Obey the repo CLAUDE.md and every rule under .claude/rules/. Use shared types from @pheme/shared and design tokens from theme.css. The repo security hooks remain active (they block .env access, force-push, and recursive deletes) — respect them.',
     'CLARIFY PHASE: ask the operator the questions you need to scope this task, in small batches. Do NOT write code yet. When you have enough to plan and implement fully autonomously, output the exact token ZMRNG_READY on its own line, followed by a one-paragraph scope summary.',
     'After ZMRNG_READY you will receive a single build instruction and must run to completion with no further questions.',
+    styleDirective(style),
   ].join('\n')
 }
 
@@ -102,9 +138,16 @@ export class TaskManager {
 
   // ---- spawn / event wiring ----
 
-  private spawn(task: Task, model: string, cwd: string, branch: string): void {
+  private spawn(
+    task: Task,
+    model: string,
+    effort: EffortLevel,
+    style: CaveStyle,
+    cwd: string,
+    branch: string,
+  ): void {
     const runner = new Runner(
-      { cwd, model, systemPrompt: systemPrompt(branch) },
+      { cwd, model, effort, systemPrompt: systemPrompt(branch, style) },
       {
         onSession: (sessionId) => {
           this.patch(task.id, { sessionId })
@@ -112,7 +155,7 @@ export class TaskManager {
         },
         onAssistantText: (text) => this.onAssistant(task.id, text),
         onPartial: (text) => this.broadcast({ type: 'partial', taskId: task.id, text }),
-        onResult: (text, isError) => this.onResult(task.id, text, isError),
+        onResult: (text, isError, usage) => this.onResult(task.id, text, isError, usage),
         onExit: (code) => this.onExit(task.id, code),
         onSpawnError: (err) => {
           this.fail(task.id, `failed to spawn claude: ${err.message}`)
@@ -134,8 +177,17 @@ export class TaskManager {
     if (pr && task.status === 'building' && !task.prUrl) this.onPr(task, pr)
   }
 
-  private onResult(taskId: string, text: string, isError: boolean): void {
+  private onResult(
+    taskId: string,
+    text: string,
+    isError: boolean,
+    usage: ResultUsage | undefined,
+  ): void {
     this.emitEvent(taskId, 'claude', { sub: 'result', text, isError })
+    if (usage) {
+      const updated = this.db.addUsage(taskId, usage, now())
+      if (updated) this.broadcast({ type: 'task', task: updated })
+    }
     const task = this.db.getTask(taskId)
     if (!task) return
     if (task.status === 'clarify' && READY_RE.test(text)) {
@@ -205,13 +257,21 @@ export class TaskManager {
 
   // ---- public actions (REST surface) ----
 
-  createTask(title: string, body: string, model?: string): Task {
+  createTask(
+    title: string,
+    body: string,
+    model?: string,
+    effort?: EffortLevel,
+    style?: CaveStyle,
+  ): Task {
     const id = randomUUID()
     const task = this.db.createTask({
       id,
       title,
       body,
-      model: model ?? config.defaultModel,
+      model: model ?? DEFAULT_MODEL,
+      effort: effort ?? DEFAULT_EFFORT,
+      style: style ?? DEFAULT_STYLE,
       now: now(),
     })
     this.broadcast({ type: 'task', task })
@@ -239,7 +299,9 @@ export class TaskManager {
     })
     this.transition(taskId, 'clarify')
     const model = updated?.model ?? config.defaultModel
-    this.spawn({ ...task, branch: wt.branch }, model, wt.worktreePath, wt.branch)
+    const effort = updated?.effort ?? DEFAULT_EFFORT
+    const style = updated?.style ?? DEFAULT_STYLE
+    this.spawn({ ...task, branch: wt.branch }, model, effort, style, wt.worktreePath, wt.branch)
     this.emitEvent(taskId, 'status', {
       sub: 'status',
       note: `worktree ${wt.worktreePath} on ${wt.branch}`,

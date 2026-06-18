@@ -1,9 +1,21 @@
-import type { Task, TaskEvent, ServerConfig } from './types'
+import type {
+  Task,
+  TaskEvent,
+  ServerConfig,
+  ModelAlias,
+  EffortLevel,
+  CaveStyle,
+} from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  // Only declare a JSON content-type when we actually send a body. Fastify
+  // rejects an empty body when content-type is application/json
+  // (FST_ERR_CTP_EMPTY_JSON_BODY) — which 400s the bodyless POSTs
+  // (start/done/cancel).
+  const headers = init?.body ? { 'content-type': 'application/json' } : undefined
   const res = await fetch(path, {
-    headers: { 'content-type': 'application/json' },
     ...init,
+    headers: { ...headers, ...init?.headers },
   })
   if (!res.ok) {
     let detail = res.statusText
@@ -22,10 +34,14 @@ export const api = {
   getConfig: () => req<ServerConfig>('/api/config'),
   listTasks: () => req<Task[]>('/api/tasks'),
   getEvents: (id: string) => req<TaskEvent[]>(`/api/tasks/${id}/events`),
-  createTask: (title: string, body: string, model?: string) =>
+  createTask: (
+    title: string,
+    body: string,
+    opts?: { model?: ModelAlias; effort?: EffortLevel; style?: CaveStyle },
+  ) =>
     req<Task>('/api/tasks', {
       method: 'POST',
-      body: JSON.stringify({ title, body, model }),
+      body: JSON.stringify({ title, body, ...opts }),
     }),
   start: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/start`, { method: 'POST' }),
