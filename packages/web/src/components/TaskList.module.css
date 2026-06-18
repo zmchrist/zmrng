@@ -1,45 +1,67 @@
 .list {
   list-style: none;
   margin: 0;
-  padding: 6px 10px 16px;
+  padding: 8px 12px 18px;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
 }
 
 .empty {
-  padding: 18px;
+  padding: 20px;
   color: var(--text-faint);
   font-size: 13px;
 }
 
 .item {
+  position: relative;
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   text-align: left;
-  padding: 12px 12px;
-  margin-bottom: 6px;
+  padding: 13px 14px;
+  margin-bottom: 7px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
-  transition: background var(--transition), border-color var(--transition);
+  transition: background var(--transition), border-color var(--transition),
+    transform var(--transition), box-shadow var(--transition);
+}
+
+/* accent rail that grows on the active row */
+.item::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent-grad);
+  transform: translateY(-50%);
+  transition: height var(--spring);
 }
 
 .item:hover {
   background: var(--surface-hover);
-  backdrop-filter: blur(var(--blur));
-  -webkit-backdrop-filter: blur(var(--blur));
+  border-color: var(--border);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  transform: translateX(2px);
 }
 
 .active {
   background: var(--surface-strong);
   border-color: var(--border-strong);
-  backdrop-filter: blur(var(--blur));
-  -webkit-backdrop-filter: blur(var(--blur));
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--shadow-soft), var(--hairline-soft);
+}
+.active::before {
+  height: 56%;
 }
 
 .main {
@@ -52,7 +74,9 @@
 
 .title {
   font-size: 14px;
-  line-height: 1.3;
+  font-weight: 500;
+  line-height: 1.32;
+  letter-spacing: var(--tracking-tight);
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -70,12 +94,14 @@
 
 .pill {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  padding: 3px 9px;
+  padding: 3px 10px;
   border-radius: var(--radius-pill);
-  border: 1px solid currentColor;
-  background: color-mix(in srgb, currentColor 12%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  color: currentColor;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  box-shadow: 0 0 14px -4px currentColor;
 }

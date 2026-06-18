@@ -1,43 +1,85 @@
 :root {
-  /* surfaces */
-  --bg: #16181c;
-  --bg-grad-a: #181b20;
-  --bg-grad-b: #121317;
-  --surface: rgba(38, 41, 47, 0.5);
-  --surface-strong: rgba(46, 50, 57, 0.66);
-  --surface-hover: rgba(54, 58, 66, 0.6);
-  --blur: 14px;
+  /* ---- base / atmosphere ---------------------------------------------- */
+  --bg: #070a0f;
+  --bg-grad-a: #0c1018;
+  --bg-grad-b: #070a0f;
+  /* aurora blobs that live *behind* the glass — bright enough for the
+     translucent panels to actually catch and refract the color */
+  --aurora-1: rgba(94, 200, 255, 0.32); /* cyan */
+  --aurora-2: rgba(124, 155, 255, 0.28); /* azure */
+  --aurora-3: rgba(177, 140, 255, 0.26); /* violet */
+  --aurora-4: rgba(80, 224, 200, 0.16); /* teal */
+
+  /* ---- glass surfaces (≈75% opacity, frosted) ------------------------- */
+  --surface: rgba(20, 26, 34, 0.62);
+  --surface-strong: rgba(28, 35, 46, 0.74);
+  --surface-hover: rgba(40, 50, 64, 0.58);
+  /* translucent inset wells for fields / code */
+  --well: rgba(6, 9, 14, 0.45);
+  --well-strong: rgba(4, 7, 11, 0.6);
+
+  /* the signature liquid-glass backdrop filter: blur + saturation lift */
+  --blur: 26px;
+  --glass: saturate(165%) blur(var(--blur));
+
+  /* ---- edges / hairlines ---------------------------------------------- */
   --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  /* the bright top highlight that reads as a glass bevel */
+  --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --hairline-soft: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 
-  /* text */
-  --text: #e6e8ea;
-  --text-dim: #9aa0a6;
-  --text-faint: #6b7178;
+  /* ---- text ----------------------------------------------------------- */
+  --text: #eef3f8;
+  --text-dim: #a4adba;
+  --text-faint: #67717f;
 
-  /* accent */
-  --accent: #7aa2c4;
-  --accent-soft: rgba(122, 162, 196, 0.16);
+  /* ---- accent (cool cyan → azure) ------------------------------------- */
+  --accent: #5ec8ff;
+  --accent-2: #7c9bff;
+  --accent-bright: #9bdcff;
+  --accent-soft: rgba(94, 200, 255, 0.16);
+  --accent-line: rgba(94, 200, 255, 0.5);
+  --accent-grad: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  /* readable ink on top of an accent fill */
+  --accent-ink: #04121d;
 
-  /* status pills */
-  --status-backlog: #8a9099;
-  --status-clarify: #d6a85f;
-  --status-building: #7aa2c4;
-  --status-review: #a886c9;
-  --status-done: #7bbf8f;
-  --status-failed: #c97a7a;
+  /* ---- status hues (luminous) ----------------------------------------- */
+  --status-backlog: #8b94a3;
+  --status-clarify: #f2c879;
+  --status-building: #5ec8ff;
+  --status-review: #b18cff;
+  --status-done: #6ee7a8;
+  --status-failed: #ff8a8a;
 
-  /* shape + motion */
-  --radius: 14px;
-  --radius-sm: 10px;
+  /* ---- shape ---------------------------------------------------------- */
+  --radius: 20px;
+  --radius-sm: 13px;
   --radius-pill: 999px;
-  --transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  --shadow: 0 8px 28px rgba(0, 0, 0, 0.34);
 
-  /* typography */
-  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
+  /* ---- motion --------------------------------------------------------- */
+  --transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  /* smooth GlassOS spring (easeOutQuint) for larger movements */
+  --spring: 460ms cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* ---- elevation / glow ----------------------------------------------- */
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  --shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.38);
+  --glow-accent: 0 0 0 1px var(--accent-line), 0 10px 34px rgba(94, 200, 255, 0.28);
+  --glow-accent-strong: 0 0 0 1px var(--accent-line), 0 14px 40px rgba(94, 200, 255, 0.4);
+  --glow-operator: 0 8px 26px -12px rgba(94, 200, 255, 0.5);
+  --focus-ring: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent-line);
+
+  /* ---- controls ------------------------------------------------------- */
+  --scrollbar-thumb: rgba(160, 190, 220, 0.18);
+  --scrollbar-thumb-hover: rgba(160, 190, 220, 0.32);
+
+  /* ---- typography ----------------------------------------------------- */
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+    'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --tracking-wide: 0.16em;
+  --tracking-tight: -0.01em;
 }
 
 * {
@@ -54,13 +96,52 @@ body,
 body {
   font-family: var(--font);
   color: var(--text);
-  background:
-    radial-gradient(1200px 800px at 20% -10%, var(--bg-grad-a), transparent 60%),
-    radial-gradient(900px 700px at 110% 110%, #1b2027, transparent 55%),
-    var(--bg);
-  background-attachment: fixed;
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv11', 'ss01';
+  overflow: hidden;
+}
+
+/* Living aurora layer: large blurred color fields that slowly drift behind the
+   glass, giving the translucency something luminous to refract. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: -25%;
+  z-index: -2;
+  background:
+    radial-gradient(44% 50% at 14% 10%, var(--aurora-1), transparent 66%),
+    radial-gradient(46% 52% at 90% 4%, var(--aurora-2), transparent 64%),
+    radial-gradient(52% 56% at 80% 98%, var(--aurora-3), transparent 64%),
+    radial-gradient(54% 60% at 6% 94%, var(--aurora-4), transparent 64%);
+  filter: blur(28px);
+  animation: aurora-drift 32s ease-in-out infinite alternate;
+}
+
+/* Deep gradient floor + a whisper of grain so flat areas never look dead. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -3;
+  background:
+    radial-gradient(1200px 820px at 18% -12%, var(--bg-grad-a), transparent 60%),
+    radial-gradient(1000px 760px at 112% 116%, #10151f, transparent 58%),
+    var(--bg);
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(2.5%, 1.8%, 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(-2%, -2.4%, 0) scale(1.04);
+  }
 }
 
 button {
@@ -70,19 +151,46 @@ button {
 
 button:focus-visible,
 input:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+textarea:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--scrollbar-thumb);
   border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background var(--transition);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
