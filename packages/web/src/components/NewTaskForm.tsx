@@ -25,7 +25,7 @@ interface Props {
   ) => Promise<void>
 }
 
-const MODEL_OPTIONS: ModelAlias[] = ['opus', 'sonnet', 'fable']
+const MODEL_OPTIONS: ModelAlias[] = ['opus', 'sonnet']
 const EFFORT_OPTIONS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const STYLE_OPTIONS: CaveStyle[] = [
   'normal',
