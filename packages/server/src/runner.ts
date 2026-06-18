@@ -1,4 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { EffortLevel, TaskUsage } from './types.js'
+
+/** Per-result usage delta parsed from a `result` line. Shape mirrors `TaskUsage`. */
+export type ResultUsage = TaskUsage
 
 // ---- tolerant JSON helpers (claude stream-json shapes vary across versions) ----
 
@@ -35,11 +39,25 @@ function partialDelta(obj: Record<string, unknown>): string | undefined {
   return undefined
 }
 
+/** Parse token/cost usage from a `result` line; returns undefined when absent. */
+function parseUsage(obj: Record<string, unknown>): ResultUsage | undefined {
+  const u = asRecord(obj.usage)
+  if (!u) return undefined
+  const n = (v: unknown): number => (typeof v === 'number' ? v : 0)
+  return {
+    tokensIn: n(u.input_tokens),
+    tokensOut: n(u.output_tokens),
+    tokensCache: n(u.cache_read_input_tokens) + n(u.cache_creation_input_tokens),
+    costUsd: typeof obj.total_cost_usd === 'number' ? obj.total_cost_usd : 0,
+    turns: typeof obj.num_turns === 'number' ? obj.num_turns : 0,
+  }
+}
+
 export interface RunnerCallbacks {
   onSession(sessionId: string): void
   onAssistantText(text: string): void
   onPartial(text: string): void
-  onResult(text: string, isError: boolean): void
+  onResult(text: string, isError: boolean, usage: ResultUsage | undefined): void
   onExit(code: number | null, signal: NodeJS.Signals | null): void
   onSpawnError(err: Error): void
 }
@@ -47,6 +65,7 @@ export interface RunnerCallbacks {
 export interface SpawnOptions {
   cwd: string
   model: string
+  effort: EffortLevel
   systemPrompt: string
 }
 
@@ -80,6 +99,8 @@ export class Runner {
       ...CLAUDE_ARGS_BASE,
       '--model',
       opts.model,
+      '--effort',
+      opts.effort,
       '--append-system-prompt',
       opts.systemPrompt,
       '--add-dir',
@@ -139,7 +160,7 @@ export class Runner {
         return
       }
       case 'result': {
-        this.cb.onResult(asString(obj.result) ?? '', obj.is_error === true)
+        this.cb.onResult(asString(obj.result) ?? '', obj.is_error === true, parseUsage(obj))
         return
       }
       default:

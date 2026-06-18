@@ -1,5 +1,14 @@
 import Database from 'better-sqlite3'
-import type { Task, TaskStatus, TaskEvent, EventKind, EventPayload } from './types.js'
+import type {
+  Task,
+  TaskStatus,
+  TaskEvent,
+  EventKind,
+  EventPayload,
+  EffortLevel,
+  CaveStyle,
+  TaskUsage,
+} from './types.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -12,6 +21,13 @@ CREATE TABLE IF NOT EXISTS tasks (
   worktree TEXT,
   pr_url TEXT,
   model TEXT,
+  effort TEXT,
+  style TEXT,
+  tokens_in INTEGER NOT NULL DEFAULT 0,
+  tokens_out INTEGER NOT NULL DEFAULT 0,
+  tokens_cache INTEGER NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  turns INTEGER NOT NULL DEFAULT 0,
   queued INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -36,6 +52,13 @@ interface TaskRow {
   worktree: string | null
   pr_url: string | null
   model: string | null
+  effort: string | null
+  style: string | null
+  tokens_in: number
+  tokens_out: number
+  tokens_cache: number
+  cost_usd: number
+  turns: number
   queued: number
   created_at: string
   updated_at: string
@@ -60,6 +83,15 @@ function rowToTask(r: TaskRow): Task {
     worktree: r.worktree,
     prUrl: r.pr_url,
     model: r.model,
+    effort: (r.effort as EffortLevel | null) ?? null,
+    style: (r.style as CaveStyle | null) ?? null,
+    usage: {
+      tokensIn: r.tokens_in,
+      tokensOut: r.tokens_out,
+      tokensCache: r.tokens_cache,
+      costUsd: r.cost_usd,
+      turns: r.turns,
+    },
     queued: r.queued === 1,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -76,11 +108,19 @@ function rowToEvent(r: EventRow): TaskEvent {
   }
 }
 
-/** Fields a caller may patch on a task. */
+/** Fields a caller may patch on a task. Usage accumulators are excluded — use `addUsage`. */
 export type TaskPatch = Partial<
   Pick<
     Task,
-    'status' | 'sessionId' | 'branch' | 'worktree' | 'prUrl' | 'model' | 'queued'
+    | 'status'
+    | 'sessionId'
+    | 'branch'
+    | 'worktree'
+    | 'prUrl'
+    | 'model'
+    | 'effort'
+    | 'style'
+    | 'queued'
   >
 >
 
@@ -91,6 +131,8 @@ const COLUMN_BY_FIELD: Record<keyof TaskPatch, string> = {
   worktree: 'worktree',
   prUrl: 'pr_url',
   model: 'model',
+  effort: 'effort',
+  style: 'style',
   queued: 'queued',
 }
 
@@ -102,16 +144,77 @@ export class Db {
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('busy_timeout = 5000')
     this.db.exec(SCHEMA)
+    this.ensureColumns()
   }
 
-  createTask(input: { id: string; title: string; body: string; model: string; now: string }): Task {
+  /**
+   * Idempotently add columns introduced after the original schema. `CREATE TABLE
+   * IF NOT EXISTS` won't alter an existing `zmrng.db`, so migrate explicitly.
+   */
+  private ensureColumns(): void {
+    const cols = new Set(
+      (this.db.prepare(`PRAGMA table_info(tasks)`).all() as { name: string }[]).map(
+        (c) => c.name,
+      ),
+    )
+    const add: [string, string][] = [
+      ['effort', 'TEXT'],
+      ['style', 'TEXT'],
+      ['tokens_in', 'INTEGER NOT NULL DEFAULT 0'],
+      ['tokens_out', 'INTEGER NOT NULL DEFAULT 0'],
+      ['tokens_cache', 'INTEGER NOT NULL DEFAULT 0'],
+      ['cost_usd', 'REAL NOT NULL DEFAULT 0'],
+      ['turns', 'INTEGER NOT NULL DEFAULT 0'],
+    ]
+    for (const [name, decl] of add) {
+      if (!cols.has(name)) this.db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${decl}`)
+    }
+  }
+
+  createTask(input: {
+    id: string
+    title: string
+    body: string
+    model: string
+    effort: EffortLevel
+    style: CaveStyle
+    now: string
+  }): Task {
     this.db
       .prepare(
-        `INSERT INTO tasks (id, title, body, status, model, queued, created_at, updated_at)
-         VALUES (@id, @title, @body, 'backlog', @model, 0, @now, @now)`,
+        `INSERT INTO tasks (id, title, body, status, model, effort, style, queued, created_at, updated_at)
+         VALUES (@id, @title, @body, 'backlog', @model, @effort, @style, 0, @now, @now)`,
       )
       .run(input)
     return this.getTask(input.id)!
+  }
+
+  /**
+   * Atomically increment a task's usage accumulators. Uses `SET col = col + delta`
+   * so concurrent `result` events never lose counts to a read-modify-write race.
+   */
+  addUsage(id: string, delta: TaskUsage, now: string): Task | undefined {
+    this.db
+      .prepare(
+        `UPDATE tasks SET
+           tokens_in = tokens_in + @din,
+           tokens_out = tokens_out + @dout,
+           tokens_cache = tokens_cache + @dcache,
+           cost_usd = cost_usd + @dcost,
+           turns = turns + @dturns,
+           updated_at = @now
+         WHERE id = @id`,
+      )
+      .run({
+        id,
+        din: delta.tokensIn,
+        dout: delta.tokensOut,
+        dcache: delta.tokensCache,
+        dcost: delta.costUsd,
+        dturns: delta.turns,
+        now,
+      })
+    return this.getTask(id)
   }
 
   getTask(id: string): Task | undefined {

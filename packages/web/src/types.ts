@@ -8,6 +8,29 @@ export type TaskStatus =
   | 'done'
   | 'failed'
 
+// ---- per-task controls (model · effort · style) ----
+
+export type ModelAlias = 'opus' | 'sonnet' | 'fable'
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type CaveStyle =
+  | 'normal'
+  | 'caveman-lite'
+  | 'caveman-full'
+  | 'caveman-ultra'
+  | 'wenyan-full'
+
+export interface TaskUsage {
+  tokensIn: number
+  tokensOut: number
+  tokensCache: number
+  costUsd: number
+  turns: number
+}
+
+export const DEFAULT_MODEL: ModelAlias = 'opus'
+export const DEFAULT_EFFORT: EffortLevel = 'high'
+export const DEFAULT_STYLE: CaveStyle = 'caveman-full'
+
 export interface Task {
   id: string
   title: string
@@ -18,6 +41,9 @@ export interface Task {
   worktree: string | null
   prUrl: string | null
   model: string | null
+  effort: EffortLevel | null
+  style: CaveStyle | null
+  usage: TaskUsage
   queued: boolean
   createdAt: string
   updatedAt: string
