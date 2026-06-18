@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import type { RepoTarget } from './types.js'
 
@@ -28,6 +28,14 @@ const REPO_ROOT = path.resolve(import.meta.dirname, '../../..')
 const DATA_DIR = process.env.ZMRNG_DATA_DIR ?? REPO_ROOT
 /** Repo registry (and an optional .env) live here — REPO_ROOT/config in dev. */
 const CONFIG_DIR = path.join(DATA_DIR, 'config')
+
+/**
+ * Directory scanned for additional drivable repos. Every git repo directly
+ * under it is auto-listed in the repo dropdown (override via ZMRNG_PROJECTS_DIR).
+ */
+const PROJECTS_DIR = path.resolve(
+  expandHome(process.env.ZMRNG_PROJECTS_DIR ?? '~/Documents/Projects'),
+)
 
 /** Parse one `.env` file into process.env (existing keys win). */
 function loadDotEnvFile(envPath: string): void {
@@ -97,6 +105,23 @@ function isGitRepo(p: string): boolean {
   }
 }
 
+/**
+ * True if `p` is the ROOT of its own git work tree (not merely nested inside a
+ * parent repo). Used for project scanning so plain folders under a parent git
+ * repo aren't mistaken for drivable repos.
+ */
+function isGitRepoRoot(p: string): boolean {
+  if (!existsSync(p)) return false
+  try {
+    const top = execFileSync('git', ['-C', p, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8',
+    }).trim()
+    return path.resolve(top) === path.resolve(p)
+  } catch {
+    return false
+  }
+}
+
 function normalizeEntry(e: Partial<RepoTarget>): RepoTarget | undefined {
   const id = e.id?.trim()
   const rawPath = e.path?.trim()
@@ -147,8 +172,50 @@ function loadRepoCandidates(): RepoTarget[] {
   ]
 }
 
+/**
+ * Auto-discover every git repo directly under PROJECTS_DIR. Folder name is used
+ * as both id and label; defaultBranch falls back to `main` (worktree creation
+ * degrades to the repo's actual HEAD when `main` is absent). Missing/unreadable
+ * directory is non-fatal — returns an empty list.
+ */
+function scanProjectsDir(): RepoTarget[] {
+  let entries
+  try {
+    entries = readdirSync(PROJECTS_DIR, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const out: RepoTarget[] = []
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith('.')) continue
+    const full = path.join(PROJECTS_DIR, e.name)
+    if (!isGitRepoRoot(full)) continue
+    const norm = normalizeEntry({ id: e.name, label: e.name, path: full })
+    if (norm) out.push(norm)
+  }
+  return out
+}
+
+/** Merge repo lists in priority order, deduping by id and by resolved path (first wins). */
+function mergeRepos(lists: RepoTarget[][]): RepoTarget[] {
+  const byId = new Set<string>()
+  const byPath = new Set<string>()
+  const out: RepoTarget[] = []
+  for (const r of lists.flat()) {
+    if (byId.has(r.id) || byPath.has(r.path)) continue
+    byId.add(r.id)
+    byPath.add(r.path)
+    out.push(r)
+  }
+  return out
+}
+
 function buildConfig(): Config {
-  const candidates = loadRepoCandidates()
+  // zmrng itself is always drivable and is the default target, so a default-repo
+  // task operates in the zmrng checkout rather than some other project.
+  const selfEntry = normalizeEntry({ id: 'zmrng', label: 'zmrng', path: REPO_ROOT })!
+  // Priority: explicit registry (custom labels/branches) → zmrng → scanned projects.
+  const candidates = mergeRepos([loadRepoCandidates(), [selfEntry], scanProjectsDir()])
   const warnings: string[] = []
   const valid = candidates.filter((r) => {
     if (isGitRepo(r.path)) return true
@@ -158,9 +225,13 @@ function buildConfig(): Config {
   // Keep candidates best-effort if validation eliminated everything, so the server still boots.
   const repos = valid.length ? valid : candidates
 
+  // Default to zmrng (the repo at REPO_ROOT) unless the operator pins another via env.
   const envDefault = process.env.ZMRNG_DEFAULT_REPO?.trim()
+  const selfRepoId = repos.find((r) => r.path === REPO_ROOT)?.id
   const defaultRepoId =
-    envDefault && repos.some((r) => r.id === envDefault) ? envDefault : repos[0].id
+    envDefault && repos.some((r) => r.id === envDefault)
+      ? envDefault
+      : (selfRepoId ?? repos[0].id)
 
   const worktreesDir = path.join(DATA_DIR, 'worktrees')
   // Ensure the writable dirs exist before db/worktree code touches them. In dev

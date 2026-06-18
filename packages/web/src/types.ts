@@ -10,7 +10,7 @@ export type TaskStatus =
 
 // ---- per-task controls (model · effort · style) ----
 
-export type ModelAlias = 'opus' | 'sonnet' | 'fable'
+export type ModelAlias = 'opus' | 'sonnet'
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export type CaveStyle =
   | 'normal'
