@@ -15,6 +15,19 @@ backlog ──Start──▶ clarify ──ZMRNG_READY──▶ building ──P
                     (you answer Qs)        (full auto, no stops)  (review on GitHub)
 ```
 
+## ⚠️ App-only focus (operator directive)
+**All work in this directory targets the desktop APP (`packages/desktop` Tauri shell),
+not the browser "website".** There is one codebase — `packages/web` is the app's
+frontend and `packages/server` is bundled as the app's sidecar — so every source change
+is *for the app*. The trap: editing source updates the dev/browser view, but the shipped
+`.app` carries a **stale bundled copy** of `server/dist` + `web/dist` until it is
+re-bundled and re-built. **Any change is not "done" until the app is rebuilt:**
+```bash
+npm run desktop:build     # build → bundle:sidecar → tauri build → fresh .app
+```
+Never consider a task complete after `npm run build` alone — that only refreshes the
+website. Always finish by re-bundling the app so the `.app` ships the new code.
+
 ## Tech stack
 - **Monorepo:** npm workspaces (`packages/server`, `packages/web`) — **no shared package**
 - **Backend:** Fastify 5 + `@fastify/websocket` + `ws`, Pino logging
