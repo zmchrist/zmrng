@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { config } from './config.js'
 import type {
   Task,
   TaskStatus,
@@ -23,6 +24,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   model TEXT,
   effort TEXT,
   style TEXT,
+  repo_id TEXT,
   tokens_in INTEGER NOT NULL DEFAULT 0,
   tokens_out INTEGER NOT NULL DEFAULT 0,
   tokens_cache INTEGER NOT NULL DEFAULT 0,
@@ -54,6 +56,7 @@ interface TaskRow {
   model: string | null
   effort: string | null
   style: string | null
+  repo_id: string | null
   tokens_in: number
   tokens_out: number
   tokens_cache: number
@@ -85,6 +88,7 @@ function rowToTask(r: TaskRow): Task {
     model: r.model,
     effort: (r.effort as EffortLevel | null) ?? null,
     style: (r.style as CaveStyle | null) ?? null,
+    repoId: r.repo_id ?? config.defaultRepoId,
     usage: {
       tokensIn: r.tokens_in,
       tokensOut: r.tokens_out,
@@ -160,6 +164,7 @@ export class Db {
     const add: [string, string][] = [
       ['effort', 'TEXT'],
       ['style', 'TEXT'],
+      ['repo_id', 'TEXT'],
       ['tokens_in', 'INTEGER NOT NULL DEFAULT 0'],
       ['tokens_out', 'INTEGER NOT NULL DEFAULT 0'],
       ['tokens_cache', 'INTEGER NOT NULL DEFAULT 0'],
@@ -178,12 +183,13 @@ export class Db {
     model: string
     effort: EffortLevel
     style: CaveStyle
+    repoId: string
     now: string
   }): Task {
     this.db
       .prepare(
-        `INSERT INTO tasks (id, title, body, status, model, effort, style, queued, created_at, updated_at)
-         VALUES (@id, @title, @body, 'backlog', @model, @effort, @style, 0, @now, @now)`,
+        `INSERT INTO tasks (id, title, body, status, model, effort, style, repo_id, queued, created_at, updated_at)
+         VALUES (@id, @title, @body, 'backlog', @model, @effort, @style, @repoId, 0, @now, @now)`,
       )
       .run(input)
     return this.getTask(input.id)!

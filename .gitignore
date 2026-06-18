@@ -7,4 +7,5 @@ dist/
 worktrees/*
 !worktrees/.gitkeep
 .env
+config/repos.json
 .DS_Store
