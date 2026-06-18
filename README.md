@@ -78,9 +78,11 @@ with no env set everything still resolves under the repo root.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `ZMRNG_TARGET_REPO` | `~/Documents/Projects/pheme` | Repo zmrng drives |
+| `ZMRNG_PROJECTS_DIR` | `~/Documents/Projects` | Dir auto-scanned for git repos to list |
+| `ZMRNG_DEFAULT_REPO` | `zmrng` | Registry id of the default target repo |
+| `ZMRNG_TARGET_REPO` | `~/Documents/Projects/pheme` | Legacy single-repo fallback |
 | `ZMRNG_PORT` | `4500` | Fastify port |
-| `ZMRNG_MODEL` | `opus` | Default model for new tasks |
+| `ZMRNG_MODEL` | `opus` | Default model for new tasks (opus \| sonnet) |
 | `ZMRNG_MAX_LANES` | `2` | Max concurrent building tasks |
 | `ZMRNG_DATA_DIR` | repo root | Writable dir for db + worktrees + `config/` (desktop sets this) |
 | `ZMRNG_WEB_DIST` | `packages/web/dist` | Built UI dir the server serves (desktop sets this) |
