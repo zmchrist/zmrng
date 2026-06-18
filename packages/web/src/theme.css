@@ -49,6 +49,16 @@
 
   /* ---- status hues — kept as functional signal, muted to fit the smoke - */
   --status-backlog: #8b94a3;
+  --status-clarify: #f2c879;
+  --status-planning: #7c9bff;
+  --status-executing: #5ec8ff;
+  --status-validating: #50e0c8;
+  --status-blocked: #ffb35e;
+  --status-review: #b18cff;
+  --status-done: #6ee7a8;
+  --status-failed: #ff8a8a;
+  /* legacy single-phase status (old DB rows) */
+  --status-building: #5ec8ff;
   --status-clarify: #e3bd7c;
   --status-building: #92b7d6;
   --status-review: #b0a2d3;
