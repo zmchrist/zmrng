@@ -3,10 +3,15 @@
 export type TaskStatus =
   | 'backlog'
   | 'clarify'
-  | 'building'
+  | 'planning'
+  | 'executing'
+  | 'validating'
+  | 'blocked'
   | 'review'
   | 'done'
   | 'failed'
+  /** Legacy single-phase autonomous status; retained for old DB rows/events. */
+  | 'building'
 
 // ---- per-task controls (model · effort · style) ----
 
@@ -51,6 +56,8 @@ export interface Task {
   branch: string | null
   worktree: string | null
   prUrl: string | null
+  /** Relative path (within the target repo) of the plan written by the planning phase. */
+  planPath: string | null
   /** Stays `string | null` for forward-compat with full model ids; aliases validated at the form layer. */
   model: string | null
   effort: EffortLevel | null
