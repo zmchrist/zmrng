@@ -50,3 +50,27 @@ non-obvious root cause, or is likely to recur. Template in
 - **Solution:** Mirror every server type change into the web types file in the same change.
 - **Files:** `packages/server/src/types.ts`, `packages/web/src/types.ts`
 - **Date Found:** 2026-06-17
+
+### Vendored Homebrew `node` won't run standalone (dyld libnode.*.dylib)
+- **Error:** `dyld[…]: Library not loaded: @rpath/libnode.141.dylib … (no such file)` when
+  the desktop sidecar runs the vendored Node binary.
+- **Cause:** Homebrew's `node` is **not** self-contained — it dynamically links a separate
+  `libnode.<abi>.dylib` from the Cellar via `@rpath`. Copying `process.execPath` into the
+  bundle copies only the launcher, not the dylib, so it can't start outside Homebrew.
+- **Solution:** Vendor the **official nodejs.org release** binary instead (a single
+  self-contained executable). Pin it to `process.versions.node` so its ABI matches the
+  `better-sqlite3` prebuilt `.node` that `npm install` fetched for the same Node.
+- **Files:** `packages/desktop/scripts/bundle-sidecar.mjs` (`vendorNode`)
+- **Date Found:** 2026-06-18
+
+### Bundled server throws `Dynamic require of "node:events" is not supported`
+- **Error:** The esbuild'd `server.mjs` throws `Dynamic require of "…" is not supported`
+  at startup (from inside fastify/avvio/pino).
+- **Cause:** esbuild ESM output wraps bundled CJS deps with a `__require` shim that throws
+  for any runtime `require()` unless a real `require` exists in module scope — which ESM
+  modules don't have by default.
+- **Solution:** Inject a `createRequire` banner into the esbuild config so the shim finds
+  a working `require`: `import { createRequire } from 'node:module'; const require =
+  createRequire(import.meta.url);`.
+- **Files:** `packages/desktop/scripts/bundle-sidecar.mjs` (esbuild `banner`)
+- **Date Found:** 2026-06-18

@@ -165,6 +165,8 @@ try {
       defaultRepoId: config.defaultRepoId,
       maxLanes: config.maxLanes,
       model: config.defaultModel,
+      dataDir: config.dataDir,
+      port: config.port,
     },
     'zmrng server ready',
   )

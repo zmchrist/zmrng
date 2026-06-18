@@ -48,6 +48,10 @@ zmrng/
 │           ├── useWs.ts        — auto-reconnect WebSocket hook
 │           ├── types.ts        — MANUAL MIRROR of server/src/types.ts
 │           └── components/      — TaskList, NewTaskForm, TaskDetail, ClarifyChat, WorkerLog
+│   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
+│       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
+│       ├── splash/index.html   — frosted-glass loading splash (Tauri frontendDist)
+│       └── src-tauri/          — Rust shell: Cargo.toml, tauri.conf.json, src/main.rs
 ├── config/
 │   ├── repos.json              — repo registry (gitignored; machine-specific paths)
 │   └── repos.example.json      — committed template
@@ -138,6 +142,11 @@ npm run build            # tsc (server) + vite build (web)
 npm run typecheck        # tsc --noEmit, both workspaces
 npm run lint             # ESLint, both workspaces
 npm start                # serve API + built UI
+
+# Desktop app (Tauri) — native macOS .app wrapping the server as a sidecar
+npm run desktop:dev      # native window running the bundled sidecar (needs Rust)
+npm run bundle:sidecar   # esbuild server + vendor better-sqlite3/node + copy web/dist
+npm run desktop:build    # build → bundle:sidecar → tauri build → a .app
 
 # Autonomous loop (Mode 3)
 .agents/scripts/loop.sh .agents/tasks/<task>.md

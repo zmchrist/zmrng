@@ -5,7 +5,8 @@
   "description": "Autonomous task orchestrator GUI — drives Claude Code headless against the Pheme repo",
   "workspaces": [
     "packages/server",
-    "packages/web"
+    "packages/web",
+    "packages/desktop"
   ],
   "scripts": {
     "dev": "npm run dev:server & npm run dev:web & wait",
@@ -16,7 +17,10 @@
     "build:web": "npm run build -w packages/web",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "start": "npm run start -w packages/server"
+    "start": "npm run start -w packages/server",
+    "bundle:sidecar": "npm run bundle:sidecar -w @zmrng/desktop",
+    "desktop:dev": "npm run tauri -w @zmrng/desktop -- dev",
+    "desktop:build": "npm run build && npm run bundle:sidecar && npm run tauri -w @zmrng/desktop -- build"
   },
   "engines": {
     "node": ">=20.11.0"
