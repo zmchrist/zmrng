@@ -8,6 +8,30 @@ export type TaskStatus =
   | 'done'
   | 'failed'
 
+// ---- per-task controls (model · effort · style) ----
+
+export type ModelAlias = 'opus' | 'sonnet' | 'fable'
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type CaveStyle =
+  | 'normal'
+  | 'caveman-lite'
+  | 'caveman-full'
+  | 'caveman-ultra'
+  | 'wenyan-full'
+
+/** Accumulated token/cost usage for a task, summed across all `result` events. */
+export interface TaskUsage {
+  tokensIn: number // input_tokens (sum)
+  tokensOut: number // output_tokens (sum)
+  tokensCache: number // cache_read + cache_creation (sum)
+  costUsd: number // total_cost_usd (sum) — notional on Max OAuth
+  turns: number // num_turns (sum)
+}
+
+export const DEFAULT_MODEL: ModelAlias = 'opus'
+export const DEFAULT_EFFORT: EffortLevel = 'high'
+export const DEFAULT_STYLE: CaveStyle = 'caveman-full'
+
 export interface Task {
   id: string
   title: string
@@ -17,7 +41,11 @@ export interface Task {
   branch: string | null
   worktree: string | null
   prUrl: string | null
+  /** Stays `string | null` for forward-compat with full model ids; aliases validated at the form layer. */
   model: string | null
+  effort: EffortLevel | null
+  style: CaveStyle | null
+  usage: TaskUsage
   /** Set while a task that reached READY is waiting for a free build lane. */
   queued: boolean
   createdAt: string
