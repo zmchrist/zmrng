@@ -2,7 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styles from './App.module.css'
 import { api } from './api'
 import { useWs } from './useWs'
-import type { ServerConfig, Task, TaskEvent, WsEvent } from './types'
+import type {
+  ServerConfig,
+  Task,
+  TaskEvent,
+  WsEvent,
+  ModelAlias,
+  EffortLevel,
+  CaveStyle,
+} from './types'
 import { TaskList } from './components/TaskList'
 import { NewTaskForm } from './components/NewTaskForm'
 import { TaskDetail } from './components/TaskDetail'
@@ -67,12 +75,16 @@ export default function App() {
   }, [])
 
   const onCreate = useCallback(
-    async (title: string, body: string) => {
-      const task = await api.createTask(title, body, cfg?.model)
+    async (
+      title: string,
+      body: string,
+      opts: { model: ModelAlias; effort: EffortLevel; style: CaveStyle },
+    ) => {
+      const task = await api.createTask(title, body, opts)
       setTasks((prev) => ({ ...prev, [task.id]: task }))
       void select(task.id)
     },
-    [cfg, select],
+    [select],
   )
 
   const sorted = useMemo(

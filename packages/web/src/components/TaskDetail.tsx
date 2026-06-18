@@ -5,6 +5,11 @@ import { STATUS_LABEL, statusColor } from '../status'
 import { ClarifyChat } from './ClarifyChat'
 import { WorkerLog } from './WorkerLog'
 
+/** Format an integer with thousands separators (locale-independent grouping). */
+function fmt(n: number): string {
+  return Math.round(n).toLocaleString('en-US')
+}
+
 interface Props {
   task: Task
   events: TaskEvent[]
@@ -51,11 +56,40 @@ export function TaskDetail({
           </span>
         </div>
         <p className={styles.body}>{task.body}</p>
+        <div className={styles.badges}>
+          {task.model && <span className={styles.badge}>{task.model}</span>}
+          {task.effort && <span className={styles.badge}>{task.effort}</span>}
+          {task.style && <span className={styles.badge}>{task.style}</span>}
+        </div>
         <div className={styles.meta}>
           {task.branch && <span className={styles.metaItem}>⌥ {task.branch}</span>}
-          {task.model && <span className={styles.metaItem}>{task.model}</span>}
           {config && <span className={styles.metaItem}>{config.authMode}</span>}
         </div>
+
+        {(task.status === 'review' || task.status === 'done') && (
+          <div className={styles.usage}>
+            <span className={styles.usageItem}>
+              <span className={styles.usageLabel}>tokens in</span>
+              <span className={styles.usageValue}>{fmt(task.usage.tokensIn)}</span>
+            </span>
+            <span className={styles.usageItem}>
+              <span className={styles.usageLabel}>out</span>
+              <span className={styles.usageValue}>{fmt(task.usage.tokensOut)}</span>
+            </span>
+            <span className={styles.usageItem}>
+              <span className={styles.usageLabel}>cache</span>
+              <span className={styles.usageValue}>{fmt(task.usage.tokensCache)}</span>
+            </span>
+            <span className={styles.usageItem} title="notional on Max OAuth">
+              <span className={styles.usageLabel}>est. cost</span>
+              <span className={styles.usageValue}>${task.usage.costUsd.toFixed(4)}</span>
+            </span>
+            <span className={styles.usageItem}>
+              <span className={styles.usageLabel}>turns</span>
+              <span className={styles.usageValue}>{fmt(task.usage.turns)}</span>
+            </span>
+          </div>
+        )}
 
         <div className={styles.actions}>
           {(task.status === 'backlog' || task.status === 'failed') && (
