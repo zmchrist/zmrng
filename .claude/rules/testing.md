@@ -21,7 +21,7 @@ When tests are added:
 - Use a TypeScript-compatible framework (vitest, node:test)
 - Mirror the workspace structure: tests per package
 - Highest-value targets: stream-json line parsing, repo-registry fallback chain,
-  SQLite migration/backfill, phase transitions (clarify→building→review)
+  SQLite migration/backfill, phase transitions (clarify→planning→executing→validating→review)
 
 ## Pre-Commit Validation
 ```bash
@@ -34,7 +34,7 @@ npm run build
 ```bash
 npm run dev            # server + web
 # - create a task, pick a repo, Start → clarify
-# - answer questions → ZMRNG_READY → building → PR
+# - answer questions → ZMRNG_READY → planning → executing → validating → PR
 # - confirm the PR opens in the chosen target repo
 ```
 

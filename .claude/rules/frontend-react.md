@@ -17,7 +17,7 @@ All colors, blur, radii, and motion live in `packages/web/src/theme.css`:
 --accent / --accent-soft                         /* interactive accent */
 --border / --border-strong
 --text / --text-dim / --text-faint
---status-backlog / --status-clarify / --status-building / --status-review / --status-done / --status-failed
+--status-backlog / --status-clarify / --status-planning / --status-executing / --status-validating / --status-blocked / --status-review / --status-done / --status-failed  /* --status-building kept for the legacy status */
 --radius / --radius-sm / --radius-pill
 --transition / --shadow
 --font / --font-mono

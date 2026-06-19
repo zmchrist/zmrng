@@ -11,9 +11,10 @@ React frosted-glass UI over WebSocket. Targets are chosen per task from a config
 repo registry; v1 drove a single hardcoded repo.
 
 ```
-backlog ──Start──▶ clarify ──ZMRNG_READY──▶ building ──PR url──▶ review ──Done──▶ done
-                    (you answer Qs)        (full auto, no stops)  (review on GitHub)
+backlog ─Start─▶ clarify ─READY─▶ planning ─PLAN_READY─▶ executing ─VALIDATING─▶ validating ─PR url─▶ review ─Done─▶ done
+                (you answer Qs)   └─────── full auto: plan → implement → QA/review/docs, no stops ───────┘      (review on GitHub)
 ```
+A worker that needs a missing subagent emits `ZMRNG_BLOCKED: <reason>` and parks in `blocked` until the operator resumes it. `building` is a legacy single-phase status, retained only for old DB rows/events.
 
 ## ⚠️ App-only focus (operator directive)
 **All work in this directory targets the desktop APP (`packages/desktop` Tauri shell),
@@ -138,8 +139,9 @@ See `.claude/docs/services-reference.md` for full method signatures and behavior
   spawns with stream-json in/out, parses session/assistant/partial/result lines, exposes
   `send()`/`kill()`; strips `ANTHROPIC_API_KEY`.
 - **TaskManager / phases** (`packages/server/src/phases.ts`) — phase state machine
-  (backlog→clarify→building→review→done/failed), system + kickoff prompts, `ZMRNG_READY`
-  + PR-URL detection, build-lane cap + queue.
+  (backlog→clarify→planning→executing→validating→review→done/failed, plus `blocked`),
+  per-phase fresh sessions + kickoff prompts, control-token detection (`ZMRNG_READY`,
+  `ZMRNG_PLAN_READY`, `ZMRNG_VALIDATING`, `ZMRNG_BLOCKED`, PR-URL), execute-lane cap + queue.
 - **Db** (`packages/server/src/db.ts`) — SQLite (WAL), `tasks` + `events` schema,
   prepared statements, idempotent `ensureColumns()` migration, atomic `addUsage()`.
 - **Config** (`packages/server/src/config.ts`) — env + repo registry: explicit
