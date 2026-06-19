@@ -86,7 +86,6 @@ export interface Config {
   /** Writable per-user data dir (db, worktrees, config). REPO_ROOT in dev. */
   dataDir: string
   dbPath: string
-  worktreesDir: string
   webDist: string
   /** True if ANTHROPIC_API_KEY was present and stripped so claude uses Max OAuth. */
   apiKeyStripped: boolean
@@ -258,11 +257,9 @@ function buildConfig(): Config {
       ? envDefault
       : (selfRepoId ?? repos[0].id)
 
-  const worktreesDir = path.join(DATA_DIR, 'worktrees')
-  // Ensure the writable dirs exist before db/worktree code touches them. In dev
-  // these already exist (REPO_ROOT); recursive mkdir is an idempotent no-op.
+  // Ensure the writable data dir exists before db code touches it. In dev
+  // this already exists (REPO_ROOT); recursive mkdir is an idempotent no-op.
   mkdirSync(DATA_DIR, { recursive: true })
-  mkdirSync(worktreesDir, { recursive: true })
 
   return {
     port: Number(process.env.ZMRNG_PORT ?? 4500),
@@ -275,7 +272,6 @@ function buildConfig(): Config {
     repoRoot: REPO_ROOT,
     dataDir: DATA_DIR,
     dbPath: path.join(DATA_DIR, 'zmrng.db'),
-    worktreesDir,
     webDist: process.env.ZMRNG_WEB_DIST ?? path.join(REPO_ROOT, 'packages', 'web', 'dist'),
     apiKeyStripped: Boolean(process.env.ANTHROPIC_API_KEY),
   }
