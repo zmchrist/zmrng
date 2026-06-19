@@ -4,9 +4,40 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>zmrng</title>
+    <style>
+      /* Boot veil — paints white on the app's first frame and fades out, so the
+         splash's white bloom hands off seamlessly across the page navigation
+         (covers the React mount gap; no React dependency). */
+      #boot-veil {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: #fff;
+        pointer-events: none;
+        animation: boot-fade 520ms ease-out forwards;
+      }
+      @keyframes boot-fade {
+        to {
+          opacity: 0;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-veil {
+          animation: none;
+          opacity: 0;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot-veil"></div>
     <div id="root"></div>
+    <script>
+      setTimeout(function () {
+        var v = document.getElementById('boot-veil');
+        if (v) v.remove();
+      }, 600);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
