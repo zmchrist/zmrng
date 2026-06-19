@@ -31,7 +31,10 @@ Wraps one long-lived headless `claude` child process per task.
 
 The phase state machine and orchestration.
 
-- **States:** `backlog → clarify → building → review → done` (plus `failed`).
+- **States:** `backlog → clarify → planning → executing → validating → review → done`
+  (plus `blocked` for a missing subagent, and `failed`). Each autonomous phase
+  (planning/executing) runs in its own fresh `claude` session. `building` is a legacy
+  single-phase status, retained only for old DB rows/events.
 - **`createTask(title, body, model?, effort?, style?, repoId?)`** — resolves `repoId`
   against the registry (falls back to `config.defaultRepoId`), inserts, broadcasts.
 - **`start(taskId)`** — resolves the target repo via `repoById`, creates a worktree in
@@ -40,14 +43,24 @@ The phase state machine and orchestration.
   worker it operates on the target repo at `repoPath`, on branch `branch` cut from
   `defaultBranch`, to obey *that repo's* CLAUDE.md/.claude/rules, never touch the
   default branch, and apply the per-task caveman `style` to narration only.
-- **Detection:** `ZMRNG_READY` on its own line (clarify→building); a GitHub PR URL
-  (building→review).
-- **Build lanes:** cap = `config.maxLanes` (`ZMRNG_MAX_LANES`, default 2). Extra READY
-  tasks set `queued` and wait in `buildQueue`; `freeLane` promotes the next.
-- **`message` / `done` / `cancel` / `shutdown`** — operator turn (clarify only),
-  finish + remove worktree, cancel + remove worktree, kill all live runners.
-- `buildKickoff(branch, defaultBranch)` instructs plan → implement → validate → commit
-  → push → `gh pr create --base <defaultBranch>` → print PR URL.
+- **Detection (control tokens):** `ZMRNG_READY` (clarify→planning); `ZMRNG_PLAN_READY
+  model=… effort=… plan=…` (planning→executing, carries the execute-phase model/effort/
+  plan path); `ZMRNG_VALIDATING` (executing→validating); a GitHub PR URL (→review);
+  `ZMRNG_BLOCKED: <reason>` (any autonomous phase → `blocked`, lane held, child alive).
+- **Per-phase fresh sessions:** each autonomous phase is its own `claude` child. On
+  `ZMRNG_READY` the clarify child is replaced by a planning child (always `opus`/`high`,
+  seeded with the condensed clarify transcript); on `ZMRNG_PLAN_READY` it is replaced by
+  an execute child on the plan's chosen model/effort, which runs through validate → PR.
+- **Execute lanes:** cap = `config.maxLanes` (`ZMRNG_MAX_LANES`, default 2). A task takes
+  a lane at `ZMRNG_READY`; extra READY tasks park in `planning` with `queued=true` in
+  `executeQueue`; `freeLane` (on PR/done/cancel/fail) promotes the next via `beginPlan`.
+- **`message` / `resume` / `done` / `cancel` / `shutdown`** — operator turn (clarify
+  only); resume a `blocked` task after the missing agent is added; finish + local-sync
+  after merge + remove worktree; cancel + remove worktree; kill all live runners.
+- `planKickoff` → run `/core_piv_loop:plan-feature`, QA the plan, emit `ZMRNG_PLAN_READY`.
+  `executeKickoff(branch, defaultBranch, planPath)` → `/core_piv_loop:execute` →
+  `ZMRNG_VALIDATING` → qa/code-reviewer/doc-updater chain → commit → push →
+  `gh pr create --base <defaultBranch>` → print PR URL.
 
 ## Db — `packages/server/src/db.ts`
 

@@ -31,7 +31,10 @@ drives **other** repos; it is the conductor, not the orchestra.
 - `packages/web` — React 19 + Vite single-page UI (TaskList rail | TaskDetail pane).
 - `packages/desktop` — Tauri shell + `bundle-sidecar.mjs` (esbuilds the server to ESM,
   vendors `better-sqlite3` + an official self-contained Node, copies `web/dist`).
-- Phases: `backlog → clarify → building → review → done` (+ `failed`).
+- Phases: `backlog → clarify → planning → executing → validating → review → done`
+  (+ `blocked` for a missing subagent, `failed`). Each autonomous phase runs in a fresh
+  `claude` session, handed off by a control token. `building` is a legacy single-phase
+  status retained only for old DB rows.
 - One worktree per task under `worktrees/<shortId>` (gitignored), one `claude` child each.
 - **Writable data dir** — `ZMRNG_DATA_DIR` relocates the db, worktrees, and `config/` out
   of the read-only `.app` bundle into `~/Library/Application Support/zmrng/`. Unset in dev
