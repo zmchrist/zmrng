@@ -10,7 +10,7 @@
 // everything else (fastify, pino, ws, …) is bundled. The output is ESM so the
 // server's top-level await and `import.meta.dirname` survive untouched.
 import * as esbuild from 'esbuild'
-import { cpSync, mkdirSync, rmSync, copyFileSync, chmodSync, existsSync } from 'node:fs'
+import { cpSync, mkdirSync, rmSync, copyFileSync, chmodSync, existsSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -143,6 +143,13 @@ if (existsSync(repoCfgSrc)) {
   copyFileSync(repoCfgSrc, path.join(cfgDstDir, 'repos.json'))
   log('seeded sidecar/config/repos.json from config/repos.json')
 } else {
+  // No curated repos.json — write a stub so the tauri resource glob
+  // `sidecar/config/**/*` always has at least one file (tauri-build treats a
+  // glob with zero matches as a hard error). config.ts loadRepoCandidates falls
+  // through to env/auto-scan when the parsed array is empty.
+  const cfgDstDir = path.join(sidecarDir, 'config')
+  mkdirSync(cfgDstDir, { recursive: true })
+  writeFileSync(path.join(cfgDstDir, 'repos.json'), '[]')
   log('no config/repos.json to seed — bundled app will auto-scan the projects dir')
 }
 
