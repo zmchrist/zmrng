@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import { config, repoById } from './config.js'
 import type { Db, TaskPatch } from './db.js'
 import { Runner, type ResultUsage } from './runner.js'
@@ -499,7 +500,7 @@ export class TaskManager {
       wt = await createWorktree(
         repo.path,
         repo.defaultBranch,
-        config.worktreesDir,
+        path.join(repo.path, 'worktrees'),
         taskId,
         task.title,
       )
