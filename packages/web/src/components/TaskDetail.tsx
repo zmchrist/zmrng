@@ -46,6 +46,7 @@ export function TaskDetail({
   const repoLabel = repos.find((r) => r.id === task.repoId)?.label ?? task.repoId
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [showBody, setShowBody] = useState(false)
 
   async function run(action: () => Promise<unknown>) {
     setErr(null)
@@ -68,7 +69,6 @@ export function TaskDetail({
             {task.queued && task.status === 'planning' ? 'Queued' : STATUS_LABEL[task.status]}
           </span>
         </div>
-        <p className={styles.body}>{task.body}</p>
         <div className={styles.badges}>
           {repoLabel && <span className={styles.badge}>⌂ {repoLabel}</span>}
           {task.model && <span className={styles.badge}>model: {task.model}</span>}
@@ -80,28 +80,25 @@ export function TaskDetail({
           {task.planPath && <span className={styles.metaItem}>▤ {task.planPath}</span>}
           {config && <span className={styles.metaItem}>{config.authMode}</span>}
         </div>
+        {task.body && showBody && <p className={styles.body}>{task.body}</p>}
+        {task.body && (
+          <button
+            type="button"
+            className={styles.bodyToggle}
+            aria-expanded={showBody}
+            onClick={() => setShowBody((v) => !v)}
+          >
+            {showBody ? '▴ Hide description' : '▾ Show description'}
+          </button>
+        )}
 
         {(task.status === 'review' || task.status === 'done') && (
           <div className={styles.usage}>
             <span className={styles.usageItem}>
-              <span className={styles.usageLabel}>tokens in</span>
-              <span className={styles.usageValue}>{fmt(task.usage.tokensIn)}</span>
-            </span>
-            <span className={styles.usageItem}>
-              <span className={styles.usageLabel}>out</span>
-              <span className={styles.usageValue}>{fmt(task.usage.tokensOut)}</span>
-            </span>
-            <span className={styles.usageItem}>
-              <span className={styles.usageLabel}>cache</span>
-              <span className={styles.usageValue}>{fmt(task.usage.tokensCache)}</span>
-            </span>
-            <span className={styles.usageItem} title="notional on Max OAuth">
-              <span className={styles.usageLabel}>est. cost</span>
-              <span className={styles.usageValue}>${task.usage.costUsd.toFixed(4)}</span>
-            </span>
-            <span className={styles.usageItem}>
-              <span className={styles.usageLabel}>turns</span>
-              <span className={styles.usageValue}>{fmt(task.usage.turns)}</span>
+              <span className={styles.usageLabel}>tokens</span>
+              <span className={styles.usageValue}>
+                {fmt(task.usage.tokensIn + task.usage.tokensOut + task.usage.tokensCache)}
+              </span>
             </span>
           </div>
         )}
