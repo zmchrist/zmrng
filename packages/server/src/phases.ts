@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { config, repoById } from './config.js'
 import type { Db, TaskPatch } from './db.js'
 import { Runner, type ResultUsage } from './runner.js'
-import { createWorktree, removeWorktree } from './worktree.js'
+import { createWorktree, removeWorktree, syncLocalAfterMerge } from './worktree.js'
 import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
@@ -574,10 +574,27 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.freeLane(taskId)
+    const repo = repoById(task.repoId)
+    const repoPath = repo?.path ?? config.targetRepo
+    // Remove the worktree first — it holds the feature branch checked out, which
+    // would otherwise block the branch deletion in the local sync below.
     if (task.worktree) {
-      const repoPath = repoById(task.repoId)?.path ?? config.targetRepo
       await removeWorktree(repoPath, task.worktree)
       this.patch(taskId, { worktree: null })
+    }
+    // Done means "I merged the PR on GitHub" — bring the local checkout in sync:
+    // fast-forward the default branch and delete the merged feature branch (safe).
+    if (task.branch) {
+      const defaultBranch = repo?.defaultBranch ?? 'main'
+      try {
+        const notes = await syncLocalAfterMerge(repoPath, defaultBranch, task.branch)
+        for (const note of notes) {
+          this.emitEvent(taskId, 'status', { sub: 'status', note: `local sync — ${note}` })
+        }
+      } catch (err) {
+        // Local sync is best-effort — never block completing the task.
+        this.emitEvent(taskId, 'error', { sub: 'error', text: `local sync failed: ${errMsg(err)}` })
+      }
     }
     this.transition(taskId, 'done')
   }
