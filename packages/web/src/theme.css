@@ -58,12 +58,7 @@
   --status-done: #6ee7a8;
   --status-failed: #ff8a8a;
   /* legacy single-phase status (old DB rows) */
-  --status-building: #5ec8ff;
-  --status-clarify: #e3bd7c;
   --status-building: #92b7d6;
-  --status-review: #b0a2d3;
-  --status-done: #84c7a2;
-  --status-failed: #de9292;
 
   /* ---- shape ---------------------------------------------------------- */
   --radius: 20px;
