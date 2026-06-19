@@ -114,6 +114,18 @@ Each task records `model` (opus/sonnet), `effort` (low/medium/high/xhigh/max),
 the mapped intensity), and `repoId` (which target repo it drives). Token/cost usage
 accumulates across stream-json `result` events and shows once the task hits review/done.
 
+### Done = local sync after the GitHub merge (never auto-push to main)
+The worker still finishes autonomous work by pushing its branch and opening a **PR** —
+zmrng never merges or pushes to `origin/main` itself. The operator reviews and merges the
+PR on GitHub. Clicking **Done** then reconciles the *local* checkout so it stops drifting
+from the merged remote: `done()` removes the worktree, fast-forwards the local default
+branch to `origin/<default>`, and deletes the merged feature branch. All of this is
+**safe + best-effort** (`syncLocalAfterMerge` in `worktree.ts`): `fetch` always; update
+the default branch **fast-forward only** (skip + warn if the working tree is dirty or
+non-ff); delete the branch with `git branch -d` only (a squash/rebase-merged PR's branch
+is *kept*, never force-deleted). Each step emits a `local sync — …` note to the operator
+log. Never force-push, never stash, never touch uncommitted work.
+
 ### TypeScript / logging
 TS strict, no `any` (use the tolerant `asRecord`/`asString` helpers in `runner.ts` for
 untyped stream-json). Pino structured logging (`app.log.info({ code }, 'msg')`) — never
