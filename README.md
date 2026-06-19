@@ -12,16 +12,22 @@ Each task spawns one long-lived headless `claude` process inside a dedicated git
 worktree of the target repo:
 
 ```
-backlog ──Start──▶ clarify ──ZMRNG_READY──▶ building ──PR url──▶ review ──Done──▶ done
-                     (you answer Qs)        (full auto, no stops)   (review on GitHub)
+backlog ─Start─▶ clarify ─READY─▶ planning ─PLAN_READY─▶ executing ─VALIDATING─▶ validating ─PR url─▶ review ─Done─▶ done
+                (you answer Qs)   └─────── full auto: plan → implement → QA/review/docs, no stops ───────┘      (review on GitHub)
 ```
 
 - **clarify** — the agent asks scoping questions; you answer in the UI. It stays
   one native session via `claude --input-format stream-json` on stdin.
-- **building** — on the `ZMRNG_READY` sentinel the server auto-sends the build
-  instruction. The agent branches' worktree is already cut from `origin/main`; it
-  implements, runs `typecheck && lint && build`, commits, pushes, and opens a PR.
+- **planning** — on the `ZMRNG_READY` sentinel a *fresh* session (always opus/high),
+  seeded with the clarify transcript, runs `/core_piv_loop:plan-feature`, QA's the plan,
+  and emits `ZMRNG_PLAN_READY` with the execute-phase model/effort/plan path.
+- **executing → validating** — another fresh session implements the plan in the
+  worktree (already cut from `origin/main`), prints `ZMRNG_VALIDATING`, runs the
+  qa/code-reviewer/doc-updater chain plus `typecheck && lint && build`, commits, pushes,
+  and opens a PR.
 - **review** — the PR URL surfaces in the UI; you review on GitHub and mark done.
+- **blocked** — a worker missing a required subagent emits `ZMRNG_BLOCKED: <reason>` and
+  waits, lane held, until you add the agent and resume it.
 
 ## Safety
 
@@ -31,8 +37,8 @@ backlog ──Start──▶ clarify ──ZMRNG_READY──▶ building ──P
 - **`--dangerously-skip-permissions`** suppresses prompts, but the target repo's
   own `security_guard.py` hook still blocks `.env` access, force-push to main, and
   recursive deletes. Workers operate in isolated worktrees and never touch `main`.
-- **Lane cap.** `ZMRNG_MAX_LANES` (default 2) bounds concurrent building tasks to
-  respect the Max weekly cap; extra READY tasks queue.
+- **Lane cap.** `ZMRNG_MAX_LANES` (default 2) bounds concurrent autonomous (plan→PR)
+  tasks to respect the Max weekly cap; extra READY tasks queue.
 
 ## Run
 
@@ -83,7 +89,7 @@ with no env set everything still resolves under the repo root.
 | `ZMRNG_TARGET_REPO` | `~/Documents/Projects/pheme` | Legacy single-repo fallback |
 | `ZMRNG_PORT` | `4500` | Fastify port |
 | `ZMRNG_MODEL` | `opus` | Default model for new tasks (opus \| sonnet) |
-| `ZMRNG_MAX_LANES` | `2` | Max concurrent building tasks |
+| `ZMRNG_MAX_LANES` | `2` | Max concurrent autonomous (plan→PR) tasks |
 | `ZMRNG_DATA_DIR` | repo root | Writable dir for db + worktrees + `config/` (desktop sets this) |
 | `ZMRNG_WEB_DIST` | `packages/web/dist` | Built UI dir the server serves (desktop sets this) |
 
