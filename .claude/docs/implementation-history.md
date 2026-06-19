@@ -24,6 +24,9 @@ directive into the system prompt and pass model/effort to the runner. Token/cost
 `result` events and renders in TaskDetail once a task reaches review/done. SQLite
 migrated via idempotent `ensureColumns()`.
 
+## Galaxy warp loading screen + boot handshake (2026-06-18)
+Replaced the static frosted-glass spinner splash with a dependency-free vanilla-JS canvas galaxy loader (`packages/desktop/splash/index.html`): idle star-field loop → click or Enter → 2.5 s warp-dive → white bloom → navigate to React app. Boot flow is now a race-free two-signal handshake: a `Mutex<Boot>` in `main.rs` tracks sidecar-up and splash-ready independently; the splash emits `splash-ready` once its `engine-ready` listener is registered, the health-poll sets sidecar-ready, and Rust emits `engine-ready { port }` exactly once when both flags are true — so an early user click never lands on a dead port. The splash (not Rust) calls `window.location.href`. A JS-side 6 s safety timeout prevents the splash stranding the app. `packages/web/index.html` gains a `#boot-veil` white overlay that fades out on the app's first frame for a seamless cross-navigation handoff. Required: `withGlobalTauri: true` + `macOSPrivateApi: true` in `tauri.conf.json` and the `macos-private-api` feature in `Cargo.toml`.
+
 ## Self-harness + multi-target repo selection (2026-06-17)
 - **Self-harness:** a Claude Code working harness scaffolded into the repo
   (`CLAUDE.md`, `.claude/{rules,commands,agents,skills,docs,files,errors.md}`, `.agents/`),

@@ -24,3 +24,6 @@ packages/desktop/src-tauri/icons/*
 !packages/desktop/src-tauri/icons/128x128.png
 !packages/desktop/src-tauri/icons/128x128@2x.png
 !packages/desktop/src-tauri/icons/icon.icns
+
+# Sub-agent private memory (per-agent scratch, not project docs)
+.claude/agent-memory/

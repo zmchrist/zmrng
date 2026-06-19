@@ -63,6 +63,20 @@ non-obvious root cause, or is likely to recur. Template in
 - **Files:** `packages/desktop/scripts/bundle-sidecar.mjs` (`vendorNode`)
 - **Date Found:** 2026-06-18
 
+### Tauri `transparent: true` window silently fails to composite (macOS)
+- **Error:** No error — the window simply renders with a solid background instead of
+  being transparent, making the frosted-glass / backdrop-filter effects invisible.
+- **Cause:** On macOS, Tauri's transparent compositing requires two things to both be
+  set: `"macOSPrivateApi": true` in `tauri.conf.json` **AND** the Cargo feature
+  `"macos-private-api"` enabled in `Cargo.toml`. Missing either one silently disables
+  compositing. The Cargo feature was missing on main.
+- **Solution:** In `tauri.conf.json` set `"macOSPrivateApi": true` (under `app.windows`)
+  and in `Cargo.toml` change `tauri = { version = "2", features = [] }` to
+  `tauri = { version = "2", features = ["macos-private-api"] }`.
+- **Files:** `packages/desktop/src-tauri/tauri.conf.json`,
+  `packages/desktop/src-tauri/Cargo.toml`
+- **Date Found:** 2026-06-18
+
 ### Bundled server throws `Dynamic require of "node:events" is not supported`
 - **Error:** The esbuild'd `server.mjs` throws `Dynamic require of "…" is not supported`
   at startup (from inside fastify/avvio/pino).

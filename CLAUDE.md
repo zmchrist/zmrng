@@ -63,8 +63,8 @@ zmrng/
 │           └── components/      — TaskList, NewTaskForm, TaskDetail, ClarifyChat, WorkerLog
 │   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
 │       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
-│       ├── splash/index.html   — frosted-glass loading splash (Tauri frontendDist)
-│       └── src-tauri/          — Rust shell: Cargo.toml, tauri.conf.json, src/main.rs
+│       ├── splash/index.html   — galaxy-warp canvas loader (vanilla JS, no build); click/Enter → warp-dive → white-bloom → navigate to app; two-signal boot handshake: splash emits `splash-ready`, Rust emits `engine-ready {port}` once both sidecar + splash are ready; requires `withGlobalTauri: true` in tauri.conf.json
+│       └── src-tauri/          — Rust shell: Cargo.toml (`macos-private-api` feature), tauri.conf.json (`withGlobalTauri`, `macOSPrivateApi`), src/main.rs (Boot handshake, Emitter/Listener)
 ├── config/
 │   ├── repos.json              — repo registry (gitignored; machine-specific paths)
 │   └── repos.example.json      — committed template
