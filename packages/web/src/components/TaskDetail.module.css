@@ -85,6 +85,30 @@
   background: var(--well);
 }
 
+.bodyToggle {
+  align-self: flex-start;
+  margin-bottom: 14px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition),
+    border-color var(--transition);
+}
+.bodyToggle:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.bodyToggle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .usage {
   display: flex;
   flex-wrap: wrap;

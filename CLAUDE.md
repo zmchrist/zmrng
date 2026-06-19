@@ -55,7 +55,7 @@ zmrng/
 │   └── web/
 │       └── src/
 │           ├── main.tsx        — React root
-│           ├── App.tsx         — layout: TaskList rail | TaskDetail pane
+│           ├── App.tsx         — layout: slim drag strip (`.dragbar`, 28 px, `data-tauri-drag-region`) spanning full width above a 2-col grid (TaskList rail | TaskDetail pane); grid-template-rows: auto 1fr
 │           ├── theme.css       — frosted-glass design tokens
 │           ├── api.ts          — REST client
 │           ├── useWs.ts        — auto-reconnect WebSocket hook
@@ -64,7 +64,7 @@ zmrng/
 │   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
 │       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
 │       ├── splash/index.html   — galaxy-warp canvas loader (vanilla JS, no build); click/Enter → warp-dive → white-bloom → navigate to app; two-signal boot handshake: splash emits `splash-ready`, Rust emits `engine-ready {port}` once both sidecar + splash are ready; requires `withGlobalTauri: true` in tauri.conf.json
-│       └── src-tauri/          — Rust shell: Cargo.toml (`macos-private-api` feature), tauri.conf.json (`withGlobalTauri`, `macOSPrivateApi`), src/main.rs (Boot handshake, Emitter/Listener)
+│       └── src-tauri/          — Rust shell: Cargo.toml (`macos-private-api` feature), tauri.conf.json (`withGlobalTauri`, `macOSPrivateApi`, `titleBarStyle: "Overlay"`, `hiddenTitle: true` — overlay traffic lights, no title strip), src/main.rs (Boot handshake, Emitter/Listener)
 ├── config/
 │   ├── repos.json              — repo registry (gitignored; machine-specific paths)
 │   └── repos.example.json      — committed template

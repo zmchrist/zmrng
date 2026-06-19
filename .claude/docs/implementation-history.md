@@ -27,6 +27,12 @@ migrated via idempotent `ensureColumns()`.
 ## Galaxy warp loading screen + boot handshake (2026-06-18)
 Replaced the static frosted-glass spinner splash with a dependency-free vanilla-JS canvas galaxy loader (`packages/desktop/splash/index.html`): idle star-field loop → click or Enter → 2.5 s warp-dive → white bloom → navigate to React app. Boot flow is now a race-free two-signal handshake: a `Mutex<Boot>` in `main.rs` tracks sidecar-up and splash-ready independently; the splash emits `splash-ready` once its `engine-ready` listener is registered, the health-poll sets sidecar-ready, and Rust emits `engine-ready { port }` exactly once when both flags are true — so an early user click never lands on a dead port. The splash (not Rust) calls `window.location.href`. A JS-side 6 s safety timeout prevents the splash stranding the app. `packages/web/index.html` gains a `#boot-veil` white overlay that fades out on the app's first frame for a seamless cross-navigation handoff. Required: `withGlobalTauri: true` + `macOSPrivateApi: true` in `tauri.conf.json` and the `macos-private-api` feature in `Cargo.toml`.
 
+## Frameless window polish — overlay title bar + collapsible task description (2026-06-18)
+Three UI-only changes, no server/type modifications:
+1. **Overlay title bar:** `tauri.conf.json` adds `"titleBarStyle": "Overlay"` + `"hiddenTitle": true` — macOS traffic-light controls float over the window glass; the native title strip is removed.
+2. **Drag strip:** `App.tsx` / `App.module.css` — a full-width `.dragbar` div (`height: 28px`, `data-tauri-drag-region`, `-webkit-app-region: drag`) occupies `grid-row 1` spanning both columns; `.app` is now `grid-template-rows: auto 1fr`; `.rail`/`.detail` are pinned to `grid-row 2`. Clears the traffic lights and keeps the frameless window draggable.
+3. **Collapsible task description:** `TaskDetail.tsx` — `task.body` defaults collapsed; a `.bodyToggle` button (▾ Show description / ▴ Hide description, `aria-expanded`) reveals/hides it. Usage display for review/done tasks shows a single total-tokens figure (`tokensIn + tokensOut + tokensCache`) instead of a five-item breakdown; `costUsd` and `turns` are still stored on the server but no longer rendered. `TaskUsage` type is unchanged.
+
 ## Self-harness + multi-target repo selection (2026-06-17)
 - **Self-harness:** a Claude Code working harness scaffolded into the repo
   (`CLAUDE.md`, `.claude/{rules,commands,agents,skills,docs,files,errors.md}`, `.agents/`),
