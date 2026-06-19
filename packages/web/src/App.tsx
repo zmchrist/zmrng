@@ -109,7 +109,7 @@ export default function App() {
     <div className={styles.app}>
       <div className={styles.dragbar} data-tauri-drag-region />
       <aside className={styles.rail}>
-        <div className={styles.brandbar}>
+        <div className={styles.brandbar} data-tauri-drag-region>
           <span className={styles.brand}>zmrng</span>
           <span
             className={`${styles.dot} ${connected ? styles.dotOn : ''}`}
