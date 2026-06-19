@@ -14,12 +14,35 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{Manager, RunEvent, WindowEvent};
+use tauri::{Emitter, Listener, Manager, RunEvent, WindowEvent};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
 /// Holds the live sidecar child so we can terminate it on quit.
 struct Sidecar(Mutex<Option<CommandChild>>);
+
+/// Two-signal boot handshake. `engine-ready` is emitted exactly once, only after
+/// BOTH the sidecar port is up AND the splash JS has registered its listener —
+/// this prevents the event racing ahead of the splash and stranding the app.
+struct Boot {
+    port: u16,
+    sidecar: bool,
+    splash: bool,
+    emitted: bool,
+}
+
+/// Emit `engine-ready { port }` exactly once, when both halves are ready. The
+/// splash owns navigation from here (it has the port from the payload).
+fn try_emit_ready(app: &tauri::AppHandle) {
+    let state = app.state::<Mutex<Boot>>();
+    let mut boot = state.lock().unwrap();
+    if boot.sidecar && boot.splash && !boot.emitted {
+        boot.emitted = true;
+        let port = boot.port;
+        drop(boot);
+        let _ = app.emit("engine-ready", port);
+    }
+}
 
 /// Bind :0 to let the OS hand us a free port, then release it. Tiny TOCTOU
 /// window before the sidecar binds it — acceptable for a single-user app.
@@ -68,6 +91,24 @@ fn main() {
             let port = pick_free_port();
             let path = login_shell_path();
 
+            // Shared boot-handshake state — sidecar-up + splash-ready both flip it.
+            app.manage(Mutex::new(Boot {
+                port,
+                sidecar: false,
+                splash: false,
+                emitted: false,
+            }));
+
+            // Splash JS announces it has registered its `engine-ready` listener.
+            let listen_handle = app.handle().clone();
+            app.listen("splash-ready", move |_event| {
+                {
+                    let state = listen_handle.state::<Mutex<Boot>>();
+                    state.lock().unwrap().splash = true;
+                }
+                try_emit_ready(&listen_handle);
+            });
+
             // Writable per-user data dir (db, worktrees, repo registry) — never
             // inside the read-only app bundle.
             let data_dir = app
@@ -106,19 +147,19 @@ fn main() {
                 }
             });
 
-            // Health-poll the port on a background thread, then navigate the
-            // window to the live server (up to ~15s).
+            // Health-poll the port on a background thread (up to ~15s). On success
+            // flag the sidecar ready and try to fire the handshake — the splash,
+            // not Rust, navigates the window to the live server.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let addr = format!("127.0.0.1:{port}");
                 for _ in 0..75 {
                     if TcpStream::connect(&addr).is_ok() {
-                        if let Some(win) = handle.get_webview_window("main") {
-                            if let Ok(url) = format!("http://localhost:{port}/").parse::<tauri::Url>()
-                            {
-                                let _ = win.navigate(url);
-                            }
+                        {
+                            let state = handle.state::<Mutex<Boot>>();
+                            state.lock().unwrap().sidecar = true;
                         }
+                        try_emit_ready(&handle);
                         return;
                     }
                     std::thread::sleep(Duration::from_millis(200));
