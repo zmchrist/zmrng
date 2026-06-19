@@ -131,4 +131,19 @@ if (!existsSync(webDistSrc)) throw new Error(`web build missing at ${webDistSrc}
 cpSync(webDistSrc, webDistDst, { recursive: true })
 log('copied packages/web/dist → src-tauri/web-dist')
 
+// 6. Seed the repo registry into the bundle. config/repos.json is gitignored and
+// machine-specific, and the app's writable data dir starts empty — so without this
+// the bundled app falls back to legacy/auto-scan and never sees the curated labels.
+// The server copies sidecar/config/repos.json → <dataDir>/config/repos.json on first
+// run when that file is missing (see config.ts seedRegistry).
+const repoCfgSrc = path.join(repoRoot, 'config', 'repos.json')
+if (existsSync(repoCfgSrc)) {
+  const cfgDstDir = path.join(sidecarDir, 'config')
+  mkdirSync(cfgDstDir, { recursive: true })
+  copyFileSync(repoCfgSrc, path.join(cfgDstDir, 'repos.json'))
+  log('seeded sidecar/config/repos.json from config/repos.json')
+} else {
+  log('no config/repos.json to seed — bundled app will auto-scan the projects dir')
+}
+
 log('done.')
