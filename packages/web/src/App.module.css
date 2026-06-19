@@ -1,10 +1,25 @@
 .app {
   display: grid;
   grid-template-columns: 348px 1fr;
+  grid-template-rows: auto 1fr;
   height: 100vh;
   overflow: hidden;
-  padding: 12px;
+  padding: 0 12px 12px;
   gap: 12px;
+}
+
+/* Slim full-width strip below the macOS traffic lights. Draggable in the
+   native Tauri window via data-tauri-drag-region; inert in the browser dev
+   view. Height clears the traffic-light band. */
+.dragbar {
+  grid-column: 1 / -1;
+  height: 28px;
+  -webkit-app-region: drag;
+}
+
+.rail,
+.detail {
+  grid-row: 2;
 }
 
 /* ---- left rail: a floating glass slab ---------------------------------- */

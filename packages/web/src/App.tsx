@@ -107,6 +107,7 @@ export default function App() {
 
   return (
     <div className={styles.app}>
+      <div className={styles.dragbar} data-tauri-drag-region />
       <aside className={styles.rail}>
         <div className={styles.brandbar}>
           <span className={styles.brand}>zmrng</span>

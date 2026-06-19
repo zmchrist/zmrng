@@ -20,6 +20,8 @@
         "resizable": true,
         "fullscreen": false,
         "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "windowEffects": {
           "effects": ["hudWindow"],
           "state": "active",
