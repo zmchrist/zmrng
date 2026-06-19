@@ -76,6 +76,83 @@ export async function createWorktree(
   return { branch, worktreePath }
 }
 
+/**
+ * After the operator merges a task's PR on GitHub, bring the local checkout back
+ * in sync — safely, never touching uncommitted work:
+ *   1. fetch origin (best effort)
+ *   2. fast-forward the local default branch to origin/<default>
+ *      - if it's the checked-out branch: `merge --ff-only`, but ONLY when the
+ *        working tree is clean (skip + warn otherwise)
+ *      - if it's not checked out: move the ref via a ff-only `fetch` (no tree touched)
+ *   3. delete the local feature branch with `-d` (refuses unmerged branches, so a
+ *      squash/rebase-merged PR's branch is kept, never force-deleted)
+ * Returns human-readable notes (info + warnings) for the operator log. The
+ * worktree must already be removed (it holds `branch` checked out).
+ */
+export async function syncLocalAfterMerge(
+  repoPath: string,
+  defaultBranch: string,
+  branch: string,
+): Promise<string[]> {
+  const notes: string[] = []
+
+  // 1. fetch origin — prune deleted remote branches too (you deleted it on GitHub).
+  let fetched = false
+  try {
+    await git(repoPath, ['fetch', 'origin', '--prune', '--quiet'])
+    fetched = true
+  } catch {
+    notes.push('fetch origin failed (offline or no remote) — skipped local default-branch update')
+  }
+
+  // 2. fast-forward the local default branch to match the freshly merged origin.
+  if (fetched && (await refExists(repoPath, `origin/${defaultBranch}`))) {
+    let current: string
+    try {
+      current = await git(repoPath, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+    } catch {
+      current = '' // detached HEAD — treat as "default branch not checked out"
+    }
+    if (current === defaultBranch) {
+      const dirty = (await git(repoPath, ['status', '--porcelain'])).length > 0
+      if (dirty) {
+        notes.push(
+          `local ${defaultBranch} has uncommitted changes — skipped fast-forward (your work untouched)`,
+        )
+      } else {
+        try {
+          await git(repoPath, ['merge', '--ff-only', `origin/${defaultBranch}`])
+          notes.push(`fast-forwarded local ${defaultBranch} → origin/${defaultBranch}`)
+        } catch {
+          notes.push(`local ${defaultBranch} not fast-forwardable — left untouched`)
+        }
+      }
+    } else {
+      // Default branch isn't checked out anywhere — move its ref directly (ff-only).
+      try {
+        await git(repoPath, ['fetch', 'origin', `${defaultBranch}:${defaultBranch}`, '--quiet'])
+        notes.push(`updated local ${defaultBranch} → origin/${defaultBranch}`)
+      } catch {
+        notes.push(`local ${defaultBranch} not fast-forwardable — left untouched`)
+      }
+    }
+  }
+
+  // 3. delete the local feature branch — only if safely merged.
+  if (await refExists(repoPath, branch)) {
+    try {
+      await git(repoPath, ['branch', '-d', branch])
+      notes.push(`deleted local branch ${branch}`)
+    } catch {
+      notes.push(
+        `local branch ${branch} not detected as merged (squash/rebase merge?) — kept; delete manually if intended`,
+      )
+    }
+  }
+
+  return notes
+}
+
 /** Remove a worktree (force, in case of uncommitted changes) and prune. */
 export async function removeWorktree(
   targetRepo: string,
