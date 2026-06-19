@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import type { RepoTarget } from './types.js'
 
@@ -134,6 +134,29 @@ function normalizeEntry(e: Partial<RepoTarget>): RepoTarget | undefined {
   }
 }
 
+/**
+ * Seed the writable data-dir registry from the copy bundled with the app. The
+ * desktop bundle ships the curated `config/repos.json` next to the server (see
+ * bundle-sidecar.mjs → sidecar/config/repos.json); the app's data dir starts
+ * empty, so without this the bundled app falls back to legacy/auto-scan and the
+ * curated repos/labels (e.g. Pheme) never appear in the dropdown. Best-effort and
+ * a no-op in dev (DATA_DIR === REPO_ROOT, so source and dest are the same file).
+ */
+function seedRegistry(): void {
+  const dest = path.join(CONFIG_DIR, 'repos.json')
+  if (existsSync(dest)) return
+  // The server bundle lives at <resources>/sidecar/server.mjs, so the seeded
+  // registry sits at <resources>/sidecar/config/repos.json (next to this module).
+  const seed = path.join(import.meta.dirname, 'config', 'repos.json')
+  if (path.resolve(seed) === path.resolve(dest) || !existsSync(seed)) return
+  try {
+    mkdirSync(CONFIG_DIR, { recursive: true })
+    copyFileSync(seed, dest)
+  } catch {
+    // best effort — fall through to env/legacy/auto-scan registry
+  }
+}
+
 /** Load repo registry candidates: config/repos.json → ZMRNG_REPOS env → legacy ZMRNG_TARGET_REPO. */
 function loadRepoCandidates(): RepoTarget[] {
   // 1. <dataDir>/config/repos.json (gitignored; machine-specific paths)
@@ -211,6 +234,8 @@ function mergeRepos(lists: RepoTarget[][]): RepoTarget[] {
 }
 
 function buildConfig(): Config {
+  // Seed the curated registry into the (initially empty) data dir before loading.
+  seedRegistry()
   // zmrng itself is always drivable and is the default target, so a default-repo
   // task operates in the zmrng checkout rather than some other project.
   const selfEntry = normalizeEntry({ id: 'zmrng', label: 'zmrng', path: REPO_ROOT })!
