@@ -203,7 +203,8 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
 ## Context architecture
 - **Tier 1 — this file.** Always loaded: structure, commands, conventions.
 - **Tier 2 — auto-loading rules** (`.claude/rules/`): `backend-typescript.md`,
-  `frontend-react.md`, `error-handling.md`, `testing.md`, `planning-workflow.md`.
+  `frontend-react.md`, `error-handling.md`, `testing.md`, `planning-workflow.md`,
+  `worktree-location.md`.
 - **Tier 3 — reference docs** (`.claude/docs/`): `services-reference.md`,
   `implementation-history.md`. Plus `.claude/files/` (PROJECT_CONTEXT, FUTURE_IDEAS) and
   `.claude/errors.md` (known gotchas — check before debugging).
@@ -213,5 +214,5 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
 - Max OAuth only — `ANTHROPIC_API_KEY` stripped from worker env.
 - No shared package — server↔web types are a manual mirror.
 - Frosted-glass theme; no test framework yet (typecheck+lint+build is validation).
-- Worktrees live under zmrng `worktrees/` (gitignored), one per task.
+- Worktrees live under the **target repo's own** `worktrees/` dir (e.g. `<repo.path>/worktrees/<shortId>`), not a global dir. That dir should be gitignored in each target repo.
 - Build-lane cap via `ZMRNG_MAX_LANES` (default 2); extra READY tasks queue.

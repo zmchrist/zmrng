@@ -68,7 +68,8 @@ Env parsing + repo registry.
 
 - **`config`**: `port`, `targetRepo` (default repo path, back-compat), `repos[]`,
   `defaultRepoId`, `repoWarnings[]`, `defaultModel`, `maxLanes`, `repoRoot`, `dbPath`,
-  `worktreesDir`, `webDist`, `apiKeyStripped`.
+  `webDist`, `apiKeyStripped`. (`worktreesDir` was removed — each task derives the
+  worktrees dir from `path.join(repo.path, 'worktrees')` at spawn time.)
 - **Registry fallback chain:** `config/repos.json` → `ZMRNG_REPOS` env (`id:path`
   pairs, comma-separated) → legacy single `ZMRNG_TARGET_REPO`.
 - **Validation:** each candidate path checked via `git rev-parse --is-inside-work-tree`;
@@ -82,7 +83,9 @@ Env parsing + repo registry.
 - **`createWorktree(repoPath, defaultBranch, worktreesDir, taskId, title)`** — best-effort
   `git fetch origin`, then `git worktree add -b feat/zmrng/<slug>-<shortId> <path> <base>`.
   Base resolved `origin/<defaultBranch>` → local `<defaultBranch>` → `HEAD` (supports
-  local-only repos with no remote). Worktrees live under zmrng's `worktrees/<shortId>`.
+  local-only repos with no remote). Worktrees live under the **target repo's own**
+  `worktrees/<shortId>` (e.g. `<repo.path>/worktrees/<shortId>`); `phases.ts` passes
+  `path.join(repo.path, 'worktrees')` at spawn time.
 - **`removeWorktree(repoPath, worktreePath)`** — `worktree remove --force` + `prune`
   (both best-effort).
 - **`slugify(title)`** — branch-safe slug.
