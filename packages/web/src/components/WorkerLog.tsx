@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import styles from './WorkerLog.module.css'
 import type { TaskEvent } from '../types'
+import { actorColor } from '../status'
 
 interface Props {
   events: TaskEvent[]
@@ -47,6 +48,43 @@ function renderEvent(ev: TaskEvent) {
         key={ev.id}
       >
         {payload.text || (payload.isError ? 'turn failed' : 'turn complete')}
+      </div>
+    )
+  }
+  if (payload.sub === 'tool') {
+    const color = actorColor('main')
+    return (
+      <div className={styles.tool} style={{ borderLeftColor: color }} key={ev.id}>
+        <span className={styles.toolName} style={{ color }}>
+          ⚙ {payload.tool}
+        </span>
+        {payload.summary ? `: ${payload.summary}` : ''}
+      </div>
+    )
+  }
+  if (payload.sub === 'subagent') {
+    const color = actorColor(payload.subagentType ?? payload.actor ?? '')
+    return (
+      <div className={styles.subagent} style={{ borderLeftColor: color }} key={ev.id}>
+        <span className={styles.subagentName} style={{ color }}>
+          ▸ {payload.subagentType}
+        </span>
+        {payload.summary ? ` — ${payload.summary}` : ''}
+      </div>
+    )
+  }
+  if (payload.sub === 'subagent_result') {
+    const color = actorColor(payload.subagentType ?? payload.actor ?? '')
+    return (
+      <div
+        className={`${styles.subagentResult} ${payload.isError ? styles.resultError : ''}`}
+        style={{ borderLeftColor: color }}
+        key={ev.id}
+      >
+        <span className={styles.subagentName} style={{ color }}>
+          ◂ {payload.subagentType}
+        </span>
+        {payload.summary ? `: ${payload.summary}` : ''}
       </div>
     )
   }

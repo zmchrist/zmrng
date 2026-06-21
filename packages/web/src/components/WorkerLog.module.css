@@ -92,6 +92,33 @@
   font-style: normal;
 }
 
+/* ---- compact activity rows: main-worker tool calls + subagent boundaries -- */
+.tool,
+.subagent,
+.subagentResult {
+  align-self: stretch;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  padding: 5px 11px;
+  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--border-strong);
+  background: var(--well);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.subagent,
+.subagentResult {
+  background: var(--surface);
+}
+
+.toolName,
+.subagentName {
+  font-weight: 600;
+}
+
 .error {
   align-self: center;
   font-size: 12.5px;
