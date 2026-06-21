@@ -18,6 +18,7 @@ All colors, blur, radii, and motion live in `packages/web/src/theme.css`:
 --border / --border-strong
 --text / --text-dim / --text-faint
 --status-backlog / --status-clarify / --status-planning / --status-executing / --status-validating / --status-blocked / --status-review / --status-done / --status-failed  /* --status-building kept for the legacy status */
+--actor-main / --actor-frontend-specialist / --actor-backend-specialist / --actor-qa / --actor-code-reviewer / --actor-doc-updater / --actor-general-purpose / --actor-default  /* worker + subagent color-coding */
 --radius / --radius-sm / --radius-pill
 --transition / --shadow
 --font / --font-mono
@@ -54,10 +55,10 @@ packages/web/src/
   App.tsx        — layout + WS wiring + config/repo fetch
   api.ts         — REST client
   useWs.ts       — auto-reconnect WebSocket hook
-  status.ts      — status label + color helpers
+  status.ts      — statusColor() + actorColor() helpers (--status-* / --actor-* tokens)
   theme.css      — frosted-glass design tokens
   types.ts       — manual mirror of server types
-  components/     — TaskList, NewTaskForm, TaskDetail, ClarifyChat, WorkerLog
+  components/     — TaskList, NewTaskForm, TaskDetail, ClarifyChat (live composer, placeholder prop), WorkerLog (tool/subagent rows)
 ```
 
 ## Anti-Patterns
@@ -88,9 +89,11 @@ const effectiveRepoId = repoId || defaultRepoId
 Use proper types from `./types`. Mirror new shapes from the server.
 
 ### Inline Styles Over CSS Modules
-Prefer CSS Modules. The one sanctioned inline style in this codebase is the
-status pill `color` driven by `statusColor(status)` — follow that precedent only
-when the value is genuinely dynamic.
+Prefer CSS Modules. Two sanctioned inline style uses exist:
+1. Status pill `color` driven by `statusColor(status)` (`var(--status-<s>)`).
+2. Actor accent `color` / `borderLeftColor` driven by `actorColor(actor)` (`var(--actor-<slug>)` for
+   known actors, `var(--actor-default)` otherwise) — used in WorkerLog's tool/subagent rows.
+Follow these precedents only when the value is genuinely dynamic.
 
 ## Accessibility
 - No nested interactive elements
