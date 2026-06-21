@@ -116,6 +116,16 @@ app.post('/api/tasks/:id/resume', (req, reply) => {
   }
 })
 
+app.post('/api/tasks/:id/interrupt', (req, reply) => {
+  const { id } = req.params as { id: string }
+  try {
+    manager.interrupt(id)
+    return { ok: true }
+  } catch (err) {
+    return reply.code(400).send({ error: errMsg(err) })
+  }
+})
+
 app.post('/api/tasks/:id/done', async (req, reply) => {
   const { id } = req.params as { id: string }
   try {

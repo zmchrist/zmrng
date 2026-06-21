@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import type { EffortLevel, TaskUsage } from './types.js'
 
 /** Per-result usage delta parsed from a `result` line. Shape mirrors `TaskUsage`. */
@@ -25,6 +26,59 @@ function assistantText(obj: Record<string, unknown>): string {
         return rb && rb.type === 'text' ? (asString(rb.text) ?? '') : ''
       })
       .join('')
+  }
+  return ''
+}
+
+/** Trim a string to a sane log length. */
+function clip(s: string, max = 200): string {
+  const t = s.trim()
+  return t.length > max ? t.slice(0, max - 1) + '…' : t
+}
+
+/**
+ * Compact one-line summary of a tool call from its `input` record.
+ * Bash→command; Edit/Write/Read/NotebookEdit→file_path; Grep/Glob→pattern;
+ * Task→description; fallback→short stringify of the first scalar input value.
+ */
+function summarizeTool(name: string, input: Record<string, unknown> | undefined): string {
+  if (!input) return ''
+  const pick = (k: string): string | undefined => asString(input[k])
+  switch (name) {
+    case 'Bash':
+      return clip(pick('command') ?? '')
+    case 'Edit':
+    case 'Write':
+    case 'Read':
+    case 'NotebookEdit':
+      return clip(pick('file_path') ?? '')
+    case 'Grep':
+    case 'Glob':
+      return clip(pick('pattern') ?? '')
+    case 'Task':
+      return clip(pick('description') ?? '')
+    default: {
+      for (const v of Object.values(input)) {
+        if (typeof v === 'string') return clip(v)
+        if (typeof v === 'number' || typeof v === 'boolean') return clip(String(v))
+      }
+      return ''
+    }
+  }
+}
+
+/** Compact summary of a tool_result `content` (string, or array of text blocks). */
+function summarizeResult(content: unknown): string {
+  if (typeof content === 'string') return clip(content)
+  if (Array.isArray(content)) {
+    return clip(
+      content
+        .map((b) => {
+          const rb = asRecord(b)
+          return rb && rb.type === 'text' ? (asString(rb.text) ?? '') : ''
+        })
+        .join(''),
+    )
   }
   return ''
 }
@@ -58,6 +112,8 @@ export interface RunnerCallbacks {
   onAssistantText(text: string): void
   onPartial(text: string): void
   onResult(text: string, isError: boolean, usage: ResultUsage | undefined): void
+  onToolUse(name: string, summary: string, isSubagent: boolean, subagentType?: string): void
+  onSubagentResult(subagentType: string, summary: string, isError: boolean): void
   onExit(code: number | null, signal: NodeJS.Signals | null): void
   onSpawnError(err: Error): void
 }
@@ -88,6 +144,8 @@ export class Runner {
   private child: ChildProcessWithoutNullStreams
   private buf = ''
   private sessionSeen = false
+  /** tool_use_id → subagent_type, for matching a Task spawn to its tool_result. */
+  private pendingTasks = new Map<string, string>()
 
   constructor(opts: SpawnOptions, private cb: RunnerCallbacks) {
     // Strip ANTHROPIC_API_KEY so claude authenticates with the operator's Max
@@ -157,6 +215,11 @@ export class Runner {
       case 'assistant': {
         const text = assistantText(obj)
         if (text.trim()) this.cb.onAssistantText(text)
+        this.handleToolUse(obj)
+        return
+      }
+      case 'user': {
+        this.handleToolResult(obj)
         return
       }
       case 'result': {
@@ -164,7 +227,57 @@ export class Runner {
         return
       }
       default:
-        return // system/init captured via session_id; other types ignored
+        // system/init captured via session_id; other types ignored.
+        // The child may emit `control_request`/`control_response` lines of its own;
+        // under `--dangerously-skip-permissions` no control responder is required.
+        return
+    }
+  }
+
+  /** Walk an `assistant` message for `tool_use` blocks (main tools + Task spawns). */
+  private handleToolUse(obj: Record<string, unknown>): void {
+    const msg = asRecord(obj.message)
+    const content = msg?.content
+    if (!Array.isArray(content)) return
+    for (const block of content) {
+      const rb = asRecord(block)
+      if (!rb || rb.type !== 'tool_use') continue
+      const name = asString(rb.name)
+      if (!name) continue
+      const input = asRecord(rb.input)
+      const id = asString(rb.id)
+      if (name === 'Task') {
+        const subagentType = asString(input?.subagent_type) ?? 'subagent'
+        if (id) {
+          // Bounded guard: drop the oldest tracked spawns if the map runs away.
+          if (this.pendingTasks.size > 200) {
+            const oldest = this.pendingTasks.keys().next().value
+            if (oldest) this.pendingTasks.delete(oldest)
+          }
+          this.pendingTasks.set(id, subagentType)
+        }
+        this.cb.onToolUse(name, summarizeTool(name, input), true, subagentType)
+      } else {
+        this.cb.onToolUse(name, summarizeTool(name, input), false)
+      }
+    }
+  }
+
+  /** Walk a `user` message for `tool_result` blocks tied to a tracked Task spawn. */
+  private handleToolResult(obj: Record<string, unknown>): void {
+    const msg = asRecord(obj.message)
+    const content = msg?.content
+    if (!Array.isArray(content)) return
+    for (const block of content) {
+      const rb = asRecord(block)
+      if (!rb || rb.type !== 'tool_result') continue
+      const id = asString(rb.tool_use_id)
+      if (!id) continue
+      const subagentType = this.pendingTasks.get(id)
+      // Main-worker tool results are intentionally not surfaced; only tracked Tasks.
+      if (!subagentType) continue
+      this.cb.onSubagentResult(subagentType, summarizeResult(rb.content), rb.is_error === true)
+      this.pendingTasks.delete(id)
     }
   }
 
@@ -176,6 +289,25 @@ export class Runner {
         message: { role: 'user', content: [{ type: 'text', text }] },
       }) + '\n'
     this.child.stdin.write(payload)
+  }
+
+  /**
+   * Send a stream-json interrupt control request to the live child (ESC-style),
+   * cutting the in-flight turn without killing the process. The child keeps the
+   * session and idles awaiting the operator's next message.
+   */
+  interrupt(): void {
+    try {
+      const payload =
+        JSON.stringify({
+          type: 'control_request',
+          request_id: randomUUID(),
+          request: { subtype: 'interrupt' },
+        }) + '\n'
+      this.child.stdin.write(payload)
+    } catch {
+      // stdin already closed
+    }
   }
 
   /** Close stdin and terminate the child process. */

@@ -60,6 +60,18 @@
   /* legacy single-phase status (old DB rows) */
   --status-building: #92b7d6;
 
+  /* ---- actor hues — color-code worker + subagents, muted to fit smoke -- */
+  /* main worker leans on the pewter accent; specialists/cool greens & blues;
+     qa amber, reviewer violet, doc teal, general slate — all glass-legible */
+  --actor-main: #c6cfdd;
+  --actor-frontend-specialist: #7c9bff;
+  --actor-backend-specialist: #5ec8ff;
+  --actor-qa: #f2c879;
+  --actor-code-reviewer: #b18cff;
+  --actor-doc-updater: #50e0c8;
+  --actor-general-purpose: #8b94a3;
+  --actor-default: #a4adba;
+
   /* ---- shape ---------------------------------------------------------- */
   --radius: 20px;
   --radius-sm: 13px;
