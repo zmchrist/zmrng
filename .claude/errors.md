@@ -6,6 +6,25 @@ non-obvious root cause, or is likely to recur. Template in
 
 ---
 
+### Bundled app's `zmrng` self-repo points inside the `.app`
+- **Error:** No error surfaced — in the packaged desktop app `GET /api/config` reports
+  `targetRepo` as `…/release/bundle/macos/zmrng.app` and the `zmrng` registry entry's
+  path is inside the bundle; a task targeting the default `zmrng` repo would create a
+  worktree inside the read-only `.app`.
+- **Cause:** `config.ts` derives `REPO_ROOT = resolve(import.meta.dirname, '../../..')`.
+  In dev that's the repo root, but the bundled sidecar lives at
+  `<bundle>/Contents/Resources/sidecar/server.mjs`, so `../../..` resolves to the `.app`
+  bundle. The self-entry was built from `REPO_ROOT` and validated with `isGitRepo()`
+  (not `isGitRepoRoot()`), so when the `.app` sits *inside* the dev checkout the bogus
+  path passes validation instead of being skipped.
+- **Solution:** `resolveSelfRepo()` — use `REPO_ROOT` only when it `isGitRepoRoot`;
+  otherwise walk to the git toplevel (the real checkout when the bundle is nested in a
+  dev tree) and reject any path containing `.app/`; return `undefined` for a truly
+  installed app so the operator drives repos from the seeded registry. Default-repo
+  detection now matches the `zmrng` id rather than a `path === REPO_ROOT` lookup.
+- **Files:** `packages/server/src/config.ts` (`resolveSelfRepo`, `buildConfig`)
+- **Date Found:** 2026-06-21
+
 ### Workers silently bill the metered API
 - **Error:** No error surfaced — Anthropic API usage/cost appears even though the
   operator has a Max subscription.
