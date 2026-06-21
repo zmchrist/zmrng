@@ -56,7 +56,7 @@ zmrng/
 │   └── web/
 │       └── src/
 │           ├── main.tsx        — React root
-│           ├── App.tsx         — layout: slim drag strip (`.dragbar`, 28 px, `data-tauri-drag-region`) spanning full width above a 2-col grid (TaskList rail | TaskDetail pane); grid-template-rows: auto 1fr
+│           ├── App.tsx         — layout: slim drag strip (`.dragbar`, 28 px, `data-tauri-drag-region`) spanning full width above a 2-col grid (TaskList rail | TaskDetail pane); grid-template-rows: auto 1fr; left rail is collapsible (collapse button in brandbar → 56 px `.mini` bar of status dots; local `railCollapsed` state, not persisted)
 │           ├── theme.css       — frosted-glass design tokens
 │           ├── api.ts          — REST client
 │           ├── useWs.ts        — auto-reconnect WebSocket hook
