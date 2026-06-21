@@ -15,6 +15,7 @@ import type {
 import { TaskList } from './components/TaskList'
 import { NewTaskForm } from './components/NewTaskForm'
 import { TaskDetail } from './components/TaskDetail'
+import { STATUS_LABEL, statusColor } from './status'
 
 export default function App() {
   const [tasks, setTasks] = useState<Record<string, Task>>({})
@@ -23,6 +24,7 @@ export default function App() {
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
   const [repos, setRepos] = useState<RepoTarget[]>([])
+  const [railCollapsed, setRailCollapsed] = useState(false)
   const selectedIdRef = useRef<string | null>(null)
 
   const onWs = useCallback((e: WsEvent) => {
@@ -106,22 +108,65 @@ export default function App() {
   const selected = selectedId ? tasks[selectedId] : undefined
 
   return (
-    <div className={styles.app}>
+    <div className={`${styles.app} ${railCollapsed ? styles.appCollapsed : ''}`}>
       <div className={styles.dragbar} data-tauri-drag-region />
       <aside className={styles.rail}>
-        <div className={styles.brandbar} data-tauri-drag-region>
-          <span className={styles.brand}>zmrng</span>
-          <span
-            className={`${styles.dot} ${connected ? styles.dotOn : ''}`}
-            title={connected ? 'connected' : 'disconnected'}
-          />
-        </div>
-        <NewTaskForm
-          repos={repos}
-          defaultRepoId={cfg?.defaultRepoId ?? ''}
-          onCreate={onCreate}
-        />
-        <TaskList tasks={sorted} repos={repos} selectedId={selectedId} onSelect={select} />
+        {railCollapsed ? (
+          <div className={styles.mini}>
+            <button
+              type="button"
+              className={styles.collapseBtn}
+              aria-expanded={false}
+              aria-label="Expand task pane"
+              title="Expand task pane"
+              onClick={() => setRailCollapsed(false)}
+            >
+              ›
+            </button>
+            <div className={styles.miniDots}>
+              {sorted.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`${styles.miniDot} ${t.id === selectedId ? styles.miniDotActive : ''}`}
+                  style={{ background: statusColor(t.status) }}
+                  aria-label={`${t.title} — ${STATUS_LABEL[t.status]}`}
+                  aria-current={t.id === selectedId ? 'true' : undefined}
+                  title={`${t.title} — ${STATUS_LABEL[t.status]}`}
+                  onClick={() => select(t.id)}
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className={styles.brandbar} data-tauri-drag-region>
+              <span className={styles.brand}>zmrng</span>
+              <span className={styles.brandbarRight}>
+                <span
+                  className={`${styles.dot} ${connected ? styles.dotOn : ''}`}
+                  title={connected ? 'connected' : 'disconnected'}
+                />
+                <button
+                  type="button"
+                  className={styles.collapseBtn}
+                  aria-expanded={true}
+                  aria-label="Collapse task pane"
+                  title="Collapse task pane"
+                  onClick={() => setRailCollapsed(true)}
+                >
+                  ‹
+                </button>
+              </span>
+            </div>
+            <NewTaskForm
+              repos={repos}
+              defaultRepoId={cfg?.defaultRepoId ?? ''}
+              onCreate={onCreate}
+            />
+            <TaskList tasks={sorted} repos={repos} selectedId={selectedId} onSelect={select} />
+          </>
+        )}
       </aside>
       <main className={styles.detail}>
         {selected ? (

@@ -45,3 +45,6 @@ Three UI-only changes, no server/type modifications:
   opens the PR there. `systemPrompt` is repo-agnostic and relies on the target repo's
   own harness. Worktree base-ref resolution degrades gracefully for local-only repos.
   SQLite migrated with `repo_id` (null backfills to `defaultRepoId` on read).
+
+## Collapsible left task pane (2026-06-21)
+Frontend-only change (`App.tsx`, `App.module.css`). A collapse button in the brandbar (`.brandbarRight`) toggles `railCollapsed` local state (not persisted). Collapsed: `.app` grid first column shrinks from 348 px to 56 px (animated via `--spring`); the rail renders a `.mini` bar with an expand button and a `.miniDots` column of one status-colored dot per task (via `statusColor`/`STATUS_LABEL`), each clickable to select that task; active dot gets an accent ring. No server, type, or route changes.
