@@ -76,6 +76,9 @@ export type EventSub =
   | 'status'
   | 'operator'
   | 'error'
+  | 'tool'
+  | 'subagent'
+  | 'subagent_result'
 
 export interface EventPayload {
   sub: EventSub
@@ -86,6 +89,10 @@ export interface EventPayload {
   sessionId?: string
   model?: string
   isError?: boolean
+  tool?: string
+  actor?: string
+  subagentType?: string
+  summary?: string
 }
 
 export interface TaskEvent {

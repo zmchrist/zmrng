@@ -61,7 +61,8 @@ zmrng/
 │           ├── api.ts          — REST client
 │           ├── useWs.ts        — auto-reconnect WebSocket hook
 │           ├── types.ts        — MANUAL MIRROR of server/src/types.ts
-│           └── components/      — TaskList, NewTaskForm, TaskDetail, ClarifyChat, WorkerLog
+│           ├── status.ts       — statusColor() + actorColor() helpers (backed by --status-* / --actor-* tokens)
+│           └── components/      — TaskList, NewTaskForm, TaskDetail, ClarifyChat (always-on live composer with `placeholder` prop), WorkerLog (tool/subagent/subagent_result rows color-coded by actor)
 │   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
 │       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
 │       ├── splash/index.html   — galaxy-warp canvas loader (vanilla JS, no build); click/Enter → warp-dive → white-bloom → navigate to app; two-signal boot handshake: splash emits `splash-ready`, Rust emits `engine-ready {port}` once both sidecar + splash are ready; requires `withGlobalTauri: true` in tauri.conf.json
@@ -93,7 +94,8 @@ files.** `npm run typecheck` over both workspaces is what catches mirror drift.
 All colors, blur, radii, and motion live in `packages/web/src/theme.css`
 (`--surface`, `--surface-strong`, `--blur`, `--accent`, `--accent-soft`, `--border`,
 `--text`, `--text-dim`, `--radius`, `--radius-sm`, `--transition`, plus `--status-*`
-pills). Always use `var(--*)`. System font stack (`--font`) + mono (`--font-mono`).
+pills and `--actor-*` hues for color-coding the main worker and subagents by type).
+Always use `var(--*)`. System font stack (`--font`) + mono (`--font-mono`).
 
 ### Runner safety — Max OAuth only
 `runner.ts` **strips `ANTHROPIC_API_KEY` from the child env** so `claude` authenticates
@@ -136,12 +138,20 @@ string interpolation, never `console.log` in server code.
 See `.claude/docs/services-reference.md` for full method signatures and behavior.
 
 - **Runner** (`packages/server/src/runner.ts`) — wraps one `claude` child per task;
-  spawns with stream-json in/out, parses session/assistant/partial/result lines, exposes
-  `send()`/`kill()`; strips `ANTHROPIC_API_KEY`.
+  spawns with stream-json in/out, parses session/assistant/partial/result/tool_use/tool_result
+  lines, exposes `send()`/`interrupt()`/`kill()`; strips `ANTHROPIC_API_KEY`. Two new
+  callbacks: `onToolUse(name, summary, isSubagent, subagentType?)` (main-worker tool calls
+  and Task spawns) and `onSubagentResult(subagentType, summary, isError)` (Task results via
+  a bounded `pendingTasks` map). `interrupt()` writes a `control_request`/`interrupt`
+  stream-json envelope to stdin without killing the child.
 - **TaskManager / phases** (`packages/server/src/phases.ts`) — phase state machine
   (backlog→clarify→planning→executing→validating→review→done/failed, plus `blocked`),
   per-phase fresh sessions + kickoff prompts, control-token detection (`ZMRNG_READY`,
   `ZMRNG_PLAN_READY`, `ZMRNG_VALIDATING`, `ZMRNG_BLOCKED`, PR-URL), execute-lane cap + queue.
+  `message()` gate lifted to all live phases (`clarify|planning|executing|validating`).
+  New public `interrupt(taskId)` hard-stops the current turn (ESC-style); a private
+  `interrupting` Set suppresses the interrupted turn's `result` from triggering a task
+  failure. `interrupting` is cleaned up in `fail/done/cancel/onPr`.
 - **Db** (`packages/server/src/db.ts`) — SQLite (WAL), `tasks` + `events` schema,
   prepared statements, idempotent `ensureColumns()` migration, atomic `addUsage()`.
 - **Config** (`packages/server/src/config.ts`) — env + repo registry: explicit
@@ -153,7 +163,7 @@ See `.claude/docs/services-reference.md` for full method signatures and behavior
 - **WsHub** (`packages/server/src/ws.ts`) — fan-out broadcast of task + claude events.
 - **Fastify server** (`packages/server/src/index.ts`) — REST surface
   (`GET /api/config`, `GET /api/repos`, `GET /api/tasks`, `POST /api/tasks`,
-  `POST /api/tasks/:id/{start,message,done,cancel}`, `GET /api/tasks/:id/events`),
+  `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`, `GET /api/tasks/:id/events`),
   `GET /ws`, static serve of `web/dist`.
 - **useWs** (`packages/web/src/useWs.ts`) — auto-reconnect WebSocket hook (1s→30s backoff).
 

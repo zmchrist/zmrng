@@ -82,6 +82,9 @@ export type EventSub =
   | 'status'
   | 'operator'
   | 'error'
+  | 'tool'
+  | 'subagent'
+  | 'subagent_result'
 
 export interface EventPayload {
   sub: EventSub
@@ -95,6 +98,11 @@ export interface EventPayload {
   model?: string
   // result
   isError?: boolean
+  // activity (tool calls / subagents) — Q3/Q4/Q5
+  tool?: string // tool name (e.g. Bash, Edit, Task)
+  actor?: string // 'main' or a subagent_type — drives color
+  subagentType?: string // for subagent / subagent_result events
+  summary?: string // compact one-line activity summary
 }
 
 export interface TaskEvent {
