@@ -6,6 +6,11 @@
   overflow: hidden;
   padding: 0 12px 12px;
   gap: 12px;
+  transition: grid-template-columns var(--spring);
+}
+
+.appCollapsed {
+  grid-template-columns: 56px 1fr;
 }
 
 /* Slim full-width strip below the macOS traffic lights. Draggable in the
@@ -71,6 +76,73 @@
 .dotOn {
   background: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---- collapse / expand control ----------------------------------------- */
+.brandbarRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.collapseBtn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  line-height: 1;
+  font-size: 16px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.collapseBtn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* ---- collapsed rail: mini status dots ---------------------------------- */
+.mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 0 14px;
+  min-height: 0;
+  flex: 1;
+}
+
+.miniDots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+  width: 100%;
+}
+
+.miniDot {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+.miniDot:hover {
+  transform: scale(1.18);
+}
+
+.miniDotActive {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  border-color: var(--border-strong);
 }
 
 /* ---- right pane: the detail surface ------------------------------------ */
