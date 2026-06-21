@@ -19,16 +19,32 @@ interface Props {
   onStart: () => Promise<unknown>
   onMessage: (text: string) => Promise<unknown>
   onResume: () => Promise<unknown>
+  onInterrupt: () => Promise<unknown>
   onDone: () => Promise<unknown>
   onCancel: () => Promise<unknown>
 }
 
-/** Phases where the worker runs autonomously to a PR (no operator input). */
+/** Phases where the worker runs autonomously to a PR (optional operator steer). */
 const AUTONOMOUS: ReadonlySet<string> = new Set([
   'planning',
   'executing',
   'validating',
   'building',
+])
+
+/** Live phases where the operator can type to steer the worker. */
+const LIVE: ReadonlySet<string> = new Set([
+  'clarify',
+  'planning',
+  'executing',
+  'validating',
+])
+
+/** Autonomous live phases where a hard Stop (interrupt) is offered. */
+const STOPPABLE: ReadonlySet<string> = new Set([
+  'planning',
+  'executing',
+  'validating',
 ])
 
 export function TaskDetail({
@@ -40,6 +56,7 @@ export function TaskDetail({
   onStart,
   onMessage,
   onResume,
+  onInterrupt,
   onDone,
   onCancel,
 }: Props) {
@@ -144,6 +161,16 @@ export function TaskDetail({
               Mark done
             </button>
           )}
+          {STOPPABLE.has(task.status) && (
+            <button
+              type="button"
+              className={styles.danger}
+              disabled={busy}
+              onClick={() => run(onInterrupt)}
+            >
+              Stop
+            </button>
+          )}
           {task.status !== 'done' && task.status !== 'backlog' && (
             <button
               type="button"
@@ -160,7 +187,7 @@ export function TaskDetail({
           <div className={styles.autobar}>
             {task.queued
               ? 'Queued — waiting for a free lane…'
-              : 'Running autonomously to PR — no input needed.'}
+              : 'Running autonomously — type to steer, Stop to interrupt.'}
           </div>
         )}
         {task.status === 'blocked' && (
@@ -173,8 +200,16 @@ export function TaskDetail({
 
       <WorkerLog events={events} live={live} />
 
-      {task.status === 'clarify' && (
-        <ClarifyChat onSend={(text) => run(() => onMessage(text))} disabled={busy} />
+      {LIVE.has(task.status) && (
+        <ClarifyChat
+          onSend={(text) => run(() => onMessage(text))}
+          disabled={busy}
+          placeholder={
+            task.status === 'clarify'
+              ? undefined
+              : 'Steer the worker…  (⌘↵ to send)'
+          }
+        />
       )}
     </div>
   )

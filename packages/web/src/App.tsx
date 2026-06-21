@@ -134,6 +134,7 @@ export default function App() {
             onStart={() => api.start(selected.id)}
             onMessage={(text) => api.message(selected.id, text)}
             onResume={() => api.resume(selected.id)}
+            onInterrupt={() => api.interrupt(selected.id)}
             onDone={() => api.done(selected.id)}
             onCancel={() => api.cancel(selected.id)}
           />

@@ -4,9 +4,14 @@ import styles from './ClarifyChat.module.css'
 interface Props {
   onSend: (text: string) => void
   disabled?: boolean
+  placeholder?: string
 }
 
-export function ClarifyChat({ onSend, disabled }: Props) {
+export function ClarifyChat({
+  onSend,
+  disabled,
+  placeholder = "Answer the agent's questions…  (⌘↵ to send)",
+}: Props) {
   const [text, setText] = useState('')
 
   function submit(e: React.FormEvent) {
@@ -27,7 +32,7 @@ export function ClarifyChat({ onSend, disabled }: Props) {
     <form className={styles.bar} onSubmit={submit}>
       <textarea
         className={styles.input}
-        placeholder="Answer the agent's questions…  (⌘↵ to send)"
+        placeholder={placeholder}
         rows={2}
         value={text}
         onChange={(e) => setText(e.target.value)}
