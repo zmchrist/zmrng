@@ -189,6 +189,8 @@ export class TaskManager {
   private replacing = new Set<string>()
   /** Status to restore when a `blocked` task is resumed. */
   private blockedFrom = new Map<string, TaskStatus>()
+  /** Tasks whose current turn was hard-interrupted; suppress the result's fail logic. */
+  private interrupting = new Set<string>()
 
   constructor(
     private db: Db,
@@ -220,6 +222,7 @@ export class TaskManager {
     this.runners.get(taskId)?.kill()
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
+    this.interrupting.delete(taskId)
     this.freeLane(taskId)
     this.transition(taskId, 'failed', note)
   }
@@ -273,6 +276,22 @@ export class TaskManager {
         onAssistantText: (text) => this.onAssistant(task.id, text),
         onPartial: (text) => this.broadcast({ type: 'partial', taskId: task.id, text }),
         onResult: (text, isError, usage) => this.onResult(task.id, text, isError, usage),
+        onToolUse: (name, summary, isSubagent, subagentType) =>
+          this.emitEvent(task.id, 'claude', {
+            sub: isSubagent ? 'subagent' : 'tool',
+            tool: name,
+            summary,
+            subagentType,
+            actor: isSubagent ? (subagentType ?? 'subagent') : 'main',
+          }),
+        onSubagentResult: (subagentType, summary, isError) =>
+          this.emitEvent(task.id, 'claude', {
+            sub: 'subagent_result',
+            subagentType,
+            actor: subagentType,
+            summary,
+            isError,
+          }),
         onExit: (code) => this.onExit(task.id, code),
         onSpawnError: (err) => {
           this.fail(task.id, `failed to spawn claude: ${err.message}`)
@@ -284,7 +303,7 @@ export class TaskManager {
 
   private onAssistant(taskId: string, text: string): void {
     this.emitEvent(taskId, 'claude', { sub: 'assistant', text })
-    this.detect(taskId, text, false)
+    this.detect(taskId, text, false, false)
   }
 
   private onResult(
@@ -298,13 +317,21 @@ export class TaskManager {
       const updated = this.db.addUsage(taskId, usage, now())
       if (updated) this.broadcast({ type: 'task', task: updated })
     }
-    this.detect(taskId, text, isError)
+    this.detect(taskId, text, isError, true)
   }
 
   /** Inspect a chunk of worker output for control tokens and drive the state machine. */
-  private detect(taskId: string, text: string, isError: boolean): void {
+  private detect(taskId: string, text: string, isError: boolean, isResult: boolean): void {
     const task = this.db.getTask(taskId)
     if (!task) return
+    // A hard-interrupted turn ends with a `result` that may carry is_error / no PR;
+    // consume the flag and short-circuit so the failure detector can't fail the task.
+    // (Assistant chunks while interrupting fall through normally.)
+    if (isResult && this.interrupting.has(taskId)) {
+      this.interrupting.delete(taskId)
+      this.emitEvent(taskId, 'status', { sub: 'status', note: 'turn interrupted — awaiting your direction' })
+      return
+    }
     const active =
       task.status === 'planning' ||
       task.status === 'executing' ||
@@ -417,6 +444,7 @@ export class TaskManager {
   private onPr(task: Task, prUrl: string): void {
     this.patch(task.id, { prUrl })
     this.transition(task.id, 'review', 'PR opened')
+    this.interrupting.delete(task.id)
     this.freeLane(task.id)
     // Autonomous work is done; stop the process but keep the worktree for review.
     this.runners.get(task.id)?.kill()
@@ -538,13 +566,34 @@ export class TaskManager {
   message(taskId: string, text: string): void {
     const task = this.db.getTask(taskId)
     if (!task) throw new Error('task not found')
-    if (task.status !== 'clarify') {
-      throw new Error('operator messages are only accepted during the clarify phase')
-    }
+    const live =
+      task.status === 'clarify' ||
+      task.status === 'planning' ||
+      task.status === 'executing' ||
+      task.status === 'validating'
     const runner = this.runners.get(taskId)
-    if (!runner) throw new Error('no live session for this task')
+    if (!live || !runner) {
+      throw new Error('operator messages are only accepted while the worker is live')
+    }
     this.emitEvent(taskId, 'operator', { sub: 'operator', text })
     runner.send(text)
+  }
+
+  /**
+   * Hard-Stop the current turn (ESC-style stream-json interrupt). The worker idles
+   * awaiting the operator's next message, then resumes autonomously (no status change).
+   */
+  interrupt(taskId: string): void {
+    const task = this.db.getTask(taskId)
+    if (!task) throw new Error('task not found')
+    const runner = this.runners.get(taskId)
+    if (!runner) throw new Error('no live session for this task')
+    this.interrupting.add(taskId)
+    runner.interrupt()
+    this.emitEvent(taskId, 'status', {
+      sub: 'status',
+      note: 'Stop — interrupting the worker; it will wait for your next message',
+    })
   }
 
   /** Resume a `blocked` task after the operator has added the missing subagent. */
@@ -574,6 +623,7 @@ export class TaskManager {
     this.runners.get(taskId)?.kill()
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
+    this.interrupting.delete(taskId)
     this.freeLane(taskId)
     const repo = repoById(task.repoId)
     const repoPath = repo?.path ?? config.targetRepo
@@ -606,6 +656,7 @@ export class TaskManager {
     this.runners.get(taskId)?.kill()
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
+    this.interrupting.delete(taskId)
     this.freeLane(taskId)
     if (task.worktree) {
       const repoPath = repoById(task.repoId)?.path ?? config.targetRepo

@@ -59,6 +59,8 @@ export const api = {
     }),
   resume: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/resume`, { method: 'POST' }),
+  interrupt: (id: string) =>
+    req<{ ok: true }>(`/api/tasks/${id}/interrupt`, { method: 'POST' }),
   done: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/done`, { method: 'POST' }),
   cancel: (id: string) =>
