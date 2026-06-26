@@ -173,6 +173,7 @@ function executeKickoff(
     'If any required agent above is missing from this repo, output `ZMRNG_BLOCKED: <agent name> not available` on its own line and STOP — wait for the operator to add it and resume you; then continue the chain.',
     'Finally:',
     '- Ensure `npm run typecheck && npm run lint && npm run build` all pass — fix every failure.',
+    '- MANDATORY before committing: run the `sync-docs` skill (the Skill tool with skill "sync-docs", equivalent to the operator running `/sync-docs`) to bring this repo\'s documentation in sync with your changes, and stage any docs it updates. Do this even if the doc step in the QA chain above already ran. Skip only if the skill is genuinely unavailable in this repo.',
     '- Commit with a descriptive Conventional Commit message.',
     `- Push the branch: git push -u origin ${branch}`,
     `- Open a PR: gh pr create --fill --base ${defaultBranch} --head ${branch}`,
