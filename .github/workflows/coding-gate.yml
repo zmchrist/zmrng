@@ -1,0 +1,12 @@
+name: coding-gate
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+jobs:
+  gate:
+    uses: zmchrist/coding-gate/.github/workflows/coding-gate.yml@main
+    with:
+      test_command: ""
+      setup_command: ""
+      source_globs: "backend/** src/** app/**"
+    secrets: inherit
