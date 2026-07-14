@@ -232,14 +232,48 @@ function mergeRepos(lists: RepoTarget[][]): RepoTarget[] {
   return out
 }
 
+/**
+ * Resolve the real zmrng checkout to seed as a self-drivable repo target.
+ *
+ * REPO_ROOT is `../../..` from this module — the repo root in dev, but it
+ * resolves *inside* the read-only `.app` bundle in the packaged desktop app
+ * (the sidecar lives at `<bundle>/Contents/Resources/sidecar/`). Driving a repo
+ * inside the bundle is never valid, so derive the actual checkout from git:
+ *  - dev: REPO_ROOT is itself a repo root → use it.
+ *  - bundle nested in a dev checkout: walk up to the git toplevel (the real repo).
+ *  - installed app (no surrounding checkout): no self entry — the operator drives
+ *    repos from the seeded registry instead.
+ */
+function resolveSelfRepo(): RepoTarget | undefined {
+  if (isGitRepoRoot(REPO_ROOT)) {
+    return normalizeEntry({ id: 'zmrng', label: 'zmrng', path: REPO_ROOT })
+  }
+  try {
+    const top = execFileSync('git', ['-C', REPO_ROOT, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8',
+    }).trim()
+    if (top && isGitRepoRoot(top) && !top.includes('.app/')) {
+      return normalizeEntry({ id: 'zmrng', label: 'zmrng', path: top })
+    }
+  } catch {
+    // REPO_ROOT is not inside a git work tree — packaged app with no checkout.
+  }
+  return undefined
+}
+
 function buildConfig(): Config {
   // Seed the curated registry into the (initially empty) data dir before loading.
   seedRegistry()
-  // zmrng itself is always drivable and is the default target, so a default-repo
-  // task operates in the zmrng checkout rather than some other project.
-  const selfEntry = normalizeEntry({ id: 'zmrng', label: 'zmrng', path: REPO_ROOT })!
+  // zmrng itself is drivable and is the default target where a real checkout
+  // exists; resolveSelfRepo() returns undefined for a packaged app inside a
+  // read-only bundle (REPO_ROOT would otherwise point into the .app).
+  const selfRepo = resolveSelfRepo()
   // Priority: explicit registry (custom labels/branches) → zmrng → scanned projects.
-  const candidates = mergeRepos([loadRepoCandidates(), [selfEntry], scanProjectsDir()])
+  const candidates = mergeRepos([
+    loadRepoCandidates(),
+    selfRepo ? [selfRepo] : [],
+    scanProjectsDir(),
+  ])
   const warnings: string[] = []
   const valid = candidates.filter((r) => {
     if (isGitRepo(r.path)) return true
@@ -249,13 +283,12 @@ function buildConfig(): Config {
   // Keep candidates best-effort if validation eliminated everything, so the server still boots.
   const repos = valid.length ? valid : candidates
 
-  // Default to zmrng (the repo at REPO_ROOT) unless the operator pins another via env.
+  // Default to the zmrng entry unless the operator pins another via env.
   const envDefault = process.env.ZMRNG_DEFAULT_REPO?.trim()
-  const selfRepoId = repos.find((r) => r.path === REPO_ROOT)?.id
   const defaultRepoId =
     envDefault && repos.some((r) => r.id === envDefault)
       ? envDefault
-      : (selfRepoId ?? repos[0].id)
+      : (repos.find((r) => r.id === 'zmrng')?.id ?? repos[0].id)
 
   // Ensure the writable data dir exists before db code touches it. In dev
   // this already exists (REPO_ROOT); recursive mkdir is an idempotent no-op.
