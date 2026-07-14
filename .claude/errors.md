@@ -6,6 +6,45 @@ non-obvious root cause, or is likely to recur. Template in
 
 ---
 
+### Rebuilt `.app` still ships the old UI (stale bundled `dist`)
+- **Error:** No error surfaced — after `npm run desktop:build`, the `.app` still renders
+  an old UI (e.g. missing the collapsible task pane) even though the feature is present in
+  `packages/web/src`. The dev server (`npm run dev`, vite :5174) shows the feature fine.
+- **Cause:** `bundle-sidecar.mjs` bundles whatever sits in `packages/web/dist` +
+  `packages/server/dist`. If those `dist` dirs lag the current source (a build ran against
+  earlier source, a partial/failed build left an old `dist`, or `bundle:sidecar` was run
+  standalone), the bundle silently bakes outdated assets into the `.app`. The dir mtime can
+  look "today" while the contents predate the feature, so it's easy to miss. Symlink note:
+  `~/Documents/Projects` → `~/Developer/Projects` (one checkout, not two).
+- **Solution:** A freshness guard in `bundle-sidecar.mjs` (`assertFresh`) compares the
+  newest mtime under each `src` tree to its `dist`; if any source file is newer it throws
+  `STALE BUILD: …` and aborts before bundling. Because `bundle:sidecar` sits in the
+  `desktop:build` `&&` chain, a stale `dist` now halts the build loudly instead of shipping
+  old bytes. Fix when it fires: run `npm run build` (or `npm run build:web`/`:server`),
+  then re-bundle. To confirm a built `.app` is current, grep the baked assets, e.g.
+  `grep -roh 'collapseBtn' …/zmrng.app/Contents/Resources/web-dist/assets/*.css`.
+- **Files:** `packages/desktop/scripts/bundle-sidecar.mjs` (`newestMtimeMs`, `assertFresh`)
+- **Date Found:** 2026-06-21
+
+### Bundled app's `zmrng` self-repo points inside the `.app`
+- **Error:** No error surfaced — in the packaged desktop app `GET /api/config` reports
+  `targetRepo` as `…/release/bundle/macos/zmrng.app` and the `zmrng` registry entry's
+  path is inside the bundle; a task targeting the default `zmrng` repo would create a
+  worktree inside the read-only `.app`.
+- **Cause:** `config.ts` derives `REPO_ROOT = resolve(import.meta.dirname, '../../..')`.
+  In dev that's the repo root, but the bundled sidecar lives at
+  `<bundle>/Contents/Resources/sidecar/server.mjs`, so `../../..` resolves to the `.app`
+  bundle. The self-entry was built from `REPO_ROOT` and validated with `isGitRepo()`
+  (not `isGitRepoRoot()`), so when the `.app` sits *inside* the dev checkout the bogus
+  path passes validation instead of being skipped.
+- **Solution:** `resolveSelfRepo()` — use `REPO_ROOT` only when it `isGitRepoRoot`;
+  otherwise walk to the git toplevel (the real checkout when the bundle is nested in a
+  dev tree) and reject any path containing `.app/`; return `undefined` for a truly
+  installed app so the operator drives repos from the seeded registry. Default-repo
+  detection now matches the `zmrng` id rather than a `path === REPO_ROOT` lookup.
+- **Files:** `packages/server/src/config.ts` (`resolveSelfRepo`, `buildConfig`)
+- **Date Found:** 2026-06-21
+
 ### Workers silently bill the metered API
 - **Error:** No error surfaced — Anthropic API usage/cost appears even though the
   operator has a Max subscription.
@@ -88,3 +127,10 @@ non-obvious root cause, or is likely to recur. Template in
   createRequire(import.meta.url);`.
 - **Files:** `packages/desktop/scripts/bundle-sidecar.mjs` (esbuild `banner`)
 - **Date Found:** 2026-06-18
+
+### Worktree creation fails for target repos under ~/Documents (bundled .app only)
+- **Error:** `worktree creation failed: Command failed: git -C /Users/<user>/Documents/Projects/<repo> worktree add -b <branch> … HEAD` → `fatal: Unable to read current working directory: Operation not permitted`. Happens **only** in the bundled `.app`, never in `npm run dev`. No tccd/sandbox denial is logged.
+- **Cause:** macOS hard-protects `~/Documents` (also `~/Desktop`, `~/Downloads`) via TCC. The Finder-launched sidecar runs with cwd `/`; when `git -C <repo-under-Documents>` chdirs in and calls `getcwd()`, the path-walk reads back up through `~/Documents` and is denied → silent `EPERM`. It's silent (no tccd log) because the I/O is performed by `/usr/bin/git` (a shared Apple binary) under the hardened-runtime, different-team bundled `node` helper — that chain breaks TCC responsibility inheritance, so granting Full Disk Access to the `.app` **or** to the bundled `node` does **not** attach to the access. Confirmed by experiment: an identical task against a repo in `/Users/Shared` (non-protected) succeeds instantly with the same app/node/git.
+- **Solution:** Keep drivable target repos **out of** the TCC-protected folders. Move them to `~/Developer` (Apple-blessed, never protected), `~/Projects`, `~/Code`, etc., and repath the registry (`<dataDir>/config/repos.json`, e.g. `~/Library/Application Support/zmrng/config/repos.json`). `npm run dev` is unaffected (the server inherits the Terminal's own Documents grant), so dev mode is a valid interim. FDA on the app is *not* a reliable fix while the app is ad-hoc-signed.
+- **Files:** none (environment/packaging constraint, not a code bug). Touches `<dataDir>/config/repos.json` and `ZMRNG_PROJECTS_DIR` for auto-scan.
+- **Date Found:** 2026-06-20

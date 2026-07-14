@@ -10,7 +10,7 @@
 // everything else (fastify, pino, ws, …) is bundled. The output is ESM so the
 // server's top-level await and `import.meta.dirname` survive untouched.
 import * as esbuild from 'esbuild'
-import { cpSync, mkdirSync, rmSync, copyFileSync, chmodSync, existsSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, rmSync, copyFileSync, chmodSync, existsSync, writeFileSync, readdirSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -82,6 +82,50 @@ async function vendorNode(destPath) {
 function log(msg) {
   process.stdout.write(`[bundle-sidecar] ${msg}\n`)
 }
+
+/** Newest file mtime (ms) anywhere under `dir`; 0 if the dir is absent/empty. */
+function newestMtimeMs(dir) {
+  let newest = 0
+  let entries
+  try {
+    entries = readdirSync(dir, { recursive: true, withFileTypes: true })
+  } catch {
+    return 0
+  }
+  for (const e of entries) {
+    if (!e.isFile()) continue
+    try {
+      const m = statSync(path.join(e.parentPath ?? dir, e.name)).mtimeMs
+      if (m > newest) newest = m
+    } catch {
+      /* unreadable entry — ignore */
+    }
+  }
+  return newest
+}
+
+/**
+ * Refuse to bundle a stale `dist`. If any source file is newer than every build
+ * output, `dist` predates the current source and bundling would silently ship
+ * outdated code (the exact trap that baked an old UI into the .app). Fail loud so
+ * the operator rebuilds instead of shipping stale bytes.
+ */
+function assertFresh(srcDir, distDir, buildCmd) {
+  const distNewest = newestMtimeMs(distDir)
+  if (distNewest === 0) return // absent dist is reported by the existsSync checks below
+  const srcNewest = newestMtimeMs(srcDir)
+  if (srcNewest > distNewest) {
+    throw new Error(
+      `STALE BUILD: a source file under ${path.relative(repoRoot, srcDir)} is newer than its ` +
+        `build output in ${path.relative(repoRoot, distDir)}. Bundling now would ship outdated ` +
+        `code. Run \`${buildCmd}\` (or \`npm run build\`) first, then re-bundle.`,
+    )
+  }
+}
+
+// Guard: never bundle a dist that lags its source (prevents the stale-.app trap).
+assertFresh(path.join(repoRoot, 'packages', 'server', 'src'), path.dirname(serverEntry), 'npm run build:server')
+assertFresh(path.join(repoRoot, 'packages', 'web', 'src'), webDistSrc, 'npm run build:web')
 
 if (!existsSync(serverEntry)) {
   throw new Error(`server build missing at ${serverEntry} — run \`npm run build\` first`)
