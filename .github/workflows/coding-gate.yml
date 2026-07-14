@@ -2,9 +2,15 @@ name: coding-gate
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+permissions:
+  contents: read
+  pull-requests: write
 jobs:
   gate:
     uses: zmchrist/coding-gate/.github/workflows/coding-gate.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       test_command: ""
       setup_command: ""
