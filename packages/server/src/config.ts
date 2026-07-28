@@ -169,10 +169,21 @@ function seedRegistry(): void {
   }
 }
 
-/** Load repo registry candidates: config/repos.json → ZMRNG_REPOS env → legacy ZMRNG_TARGET_REPO. */
-function loadRepoCandidates(): RepoTarget[] {
-  // 1. <dataDir>/config/repos.json (gitignored; machine-specific paths)
-  const jsonPath = path.join(CONFIG_DIR, 'repos.json')
+/** Registry-relevant environment inputs, isolated so `resolveRegistry` is testable. */
+export interface RegistryEnv {
+  ZMRNG_REPOS?: string
+  ZMRNG_TARGET_REPO?: string
+  ZMRNG_DEFAULT_REPO?: string
+}
+
+/**
+ * Load repo registry candidates in priority order:
+ * `<configDir>/repos.json` → `ZMRNG_REPOS` env → legacy `ZMRNG_TARGET_REPO`.
+ * The first source that yields any entries wins.
+ */
+function loadRepoCandidates(configDir: string, env: RegistryEnv): RepoTarget[] {
+  // 1. <configDir>/repos.json (gitignored; machine-specific paths)
+  const jsonPath = path.join(configDir, 'repos.json')
   if (existsSync(jsonPath)) {
     try {
       const parsed = JSON.parse(readFileSync(jsonPath, 'utf8')) as Partial<RepoTarget>[]
@@ -185,7 +196,7 @@ function loadRepoCandidates(): RepoTarget[] {
     }
   }
   // 2. ZMRNG_REPOS env — comma-separated `id:path` pairs
-  const envRepos = process.env.ZMRNG_REPOS?.trim()
+  const envRepos = env.ZMRNG_REPOS?.trim()
   if (envRepos) {
     const entries = envRepos
       .split(',')
@@ -200,7 +211,7 @@ function loadRepoCandidates(): RepoTarget[] {
   // 3. legacy single ZMRNG_TARGET_REPO — emit an entry only when it is set.
   //    When unset there is no hardcoded fallback repo; the zmrng self entry
   //    plus the PROJECTS_DIR auto-scan supply a usable default registry.
-  const legacy = process.env.ZMRNG_TARGET_REPO?.trim()
+  const legacy = env.ZMRNG_TARGET_REPO?.trim()
   if (legacy) {
     const entry = normalizeEntry({ id: 'default', label: 'default', path: legacy })
     if (entry) return [entry]
@@ -214,17 +225,17 @@ function loadRepoCandidates(): RepoTarget[] {
  * degrades to the repo's actual HEAD when `main` is absent). Missing/unreadable
  * directory is non-fatal — returns an empty list.
  */
-function scanProjectsDir(): RepoTarget[] {
+function scanProjectsDir(projectsDir: string): RepoTarget[] {
   let entries
   try {
-    entries = readdirSync(PROJECTS_DIR, { withFileTypes: true })
+    entries = readdirSync(projectsDir, { withFileTypes: true })
   } catch {
     return []
   }
   const out: RepoTarget[] = []
   for (const e of entries) {
     if (!e.isDirectory() || e.name.startsWith('.')) continue
-    const full = path.join(PROJECTS_DIR, e.name)
+    const full = path.join(projectsDir, e.name)
     if (!isGitRepoRoot(full)) continue
     const norm = normalizeEntry({ id: e.name, label: e.name, path: full })
     if (norm) out.push(norm)
@@ -275,18 +286,47 @@ function resolveSelfRepo(): RepoTarget | undefined {
   return undefined
 }
 
-function buildConfig(): Config {
-  // Seed the curated registry into the (initially empty) data dir before loading.
-  seedRegistry()
-  // zmrng itself is drivable and is the default target where a real checkout
-  // exists; resolveSelfRepo() returns undefined for a packaged app inside a
-  // read-only bundle (REPO_ROOT would otherwise point into the .app).
-  const selfRepo = resolveSelfRepo()
-  // Priority: explicit registry (custom labels/branches) → zmrng → scanned projects.
+/** Raised when no drivable repo can be resolved AND no usable fallback root exists. */
+export class RegistryError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RegistryError'
+  }
+}
+
+/** The resolved registry portion of the config, isolated for unit testing. */
+export interface ResolvedRegistry {
+  repos: RepoTarget[]
+  defaultRepoId: string
+  targetRepo: string
+  warnings: string[]
+}
+
+/**
+ * Resolve the repo registry from its inputs — pure enough to unit-test without
+ * the module-level singletons. Precedence: explicit registry
+ * (`repos.json` → env → legacy) → the zmrng self entry → the projects auto-scan.
+ *
+ * ISSUE #16 guard: on `main` the legacy branch always emitted a hardcoded
+ * `default` entry, so `repos` was never empty. That fallback is gone (Phase 1),
+ * making the all-empty case reachable (packaged app / empty data dir / no
+ * projects dir / no seeded registry). Rather than dereferencing `repos[0]` and
+ * throwing a `TypeError` at boot, synthesize a minimal zmrng entry from
+ * `fallbackRoot`; only when even that is unusable do we raise a typed
+ * `RegistryError` the caller can log via Pino.
+ */
+export function resolveRegistry(opts: {
+  configDir: string
+  projectsDir: string
+  selfRepo?: RepoTarget
+  fallbackRoot: string
+  env?: RegistryEnv
+}): ResolvedRegistry {
+  const env = opts.env ?? (process.env as RegistryEnv)
   const candidates = mergeRepos([
-    loadRepoCandidates(),
-    selfRepo ? [selfRepo] : [],
-    scanProjectsDir(),
+    loadRepoCandidates(opts.configDir, env),
+    opts.selfRepo ? [opts.selfRepo] : [],
+    scanProjectsDir(opts.projectsDir),
   ])
   const warnings: string[] = []
   const valid = candidates.filter((r) => {
@@ -295,14 +335,48 @@ function buildConfig(): Config {
     return false
   })
   // Keep candidates best-effort if validation eliminated everything, so the server still boots.
-  const repos = valid.length ? valid : candidates
+  let repos = valid.length ? valid : candidates
+
+  // ISSUE #16: an empty registry is now reachable. Synthesize a usable default
+  // from the repo root instead of throwing on `repos[0]`.
+  if (repos.length === 0) {
+    const fallback = normalizeEntry({ id: 'zmrng', label: 'zmrng', path: opts.fallbackRoot })
+    if (fallback) {
+      repos = [fallback]
+      warnings.push(
+        `repo registry empty — synthesized a default "zmrng" entry from ${fallback.path}`,
+      )
+    }
+  }
+  if (repos.length === 0) {
+    throw new RegistryError(
+      'no drivable repo could be resolved and no usable fallback root was provided',
+    )
+  }
 
   // Default to the zmrng entry unless the operator pins another via env.
-  const envDefault = process.env.ZMRNG_DEFAULT_REPO?.trim()
+  const envDefault = env.ZMRNG_DEFAULT_REPO?.trim()
   const defaultRepoId =
     envDefault && repos.some((r) => r.id === envDefault)
       ? envDefault
       : (repos.find((r) => r.id === 'zmrng')?.id ?? repos[0].id)
+  const targetRepo = repos.find((r) => r.id === defaultRepoId)?.path ?? repos[0].path
+  return { repos, defaultRepoId, targetRepo, warnings }
+}
+
+function buildConfig(): Config {
+  // Seed the curated registry into the (initially empty) data dir before loading.
+  seedRegistry()
+  // zmrng itself is drivable and is the default target where a real checkout
+  // exists; resolveSelfRepo() returns undefined for a packaged app inside a
+  // read-only bundle (REPO_ROOT would otherwise point into the .app).
+  const selfRepo = resolveSelfRepo()
+  const { repos, defaultRepoId, targetRepo, warnings } = resolveRegistry({
+    configDir: CONFIG_DIR,
+    projectsDir: PROJECTS_DIR,
+    selfRepo,
+    fallbackRoot: REPO_ROOT,
+  })
 
   // Ensure the writable data dir exists before db code touches it. In dev
   // this already exists (REPO_ROOT); recursive mkdir is an idempotent no-op.
@@ -310,7 +384,7 @@ function buildConfig(): Config {
 
   return {
     port: Number(process.env.ZMRNG_PORT ?? 4500),
-    targetRepo: repos.find((r) => r.id === defaultRepoId)?.path ?? repos[0].path,
+    targetRepo,
     repos,
     defaultRepoId,
     repoWarnings: warnings,

@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { config, repoById } from './config.js'
 import type { Db, TaskPatch } from './db.js'
-import { Runner, type ResultUsage } from './runner.js'
+import {
+  defaultRunnerFactory,
+  type ResultUsage,
+  type RunnerFactory,
+  type RunnerLike,
+} from './runner.js'
 import { createWorktree, removeWorktree, syncLocalAfterMerge } from './worktree.js'
 import {
   DEFAULT_EFFORT,
@@ -18,24 +23,27 @@ import {
 } from './types.js'
 
 // ---- detection ----
-const READY_RE = /^\s*ZMRNG_READY\s*$/m
-const PLAN_READY_RE = /^\s*ZMRNG_PLAN_READY\b(.*)$/m
-const VALIDATING_RE = /^\s*ZMRNG_VALIDATING\s*$/m
-const BLOCKED_RE = /^\s*ZMRNG_BLOCKED\s*:?\s*(.*)$/m
-const PR_RE = /https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/
+// Exported for the phase-2 control-token unit tests. Each is anchored (`^…$`
+// with the `m` flag) so a token only fires when it stands on its own line —
+// a token quoted mid-prose must NOT match. Keep in sync with systemPrompt().
+export const READY_RE = /^\s*ZMRNG_READY\s*$/m
+export const PLAN_READY_RE = /^\s*ZMRNG_PLAN_READY\b(.*)$/m
+export const VALIDATING_RE = /^\s*ZMRNG_VALIDATING\s*$/m
+export const BLOCKED_RE = /^\s*ZMRNG_BLOCKED\s*:?\s*(.*)$/m
+export const PR_RE = /https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/
 
 const MODELS: readonly string[] = ['opus', 'sonnet']
 const EFFORTS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 /** Decision emitted by the planning child via the `ZMRNG_PLAN_READY` token. */
-interface PlanDecision {
+export interface PlanDecision {
   model: string
   effort: EffortLevel
   planPath: string | null
 }
 
 /** Parse the trailing `key=value` params of a `ZMRNG_PLAN_READY` line. */
-function parsePlanDecision(text: string): PlanDecision | undefined {
+export function parsePlanDecision(text: string): PlanDecision | undefined {
   const m = text.match(PLAN_READY_RE)
   if (!m) return undefined
   const params = m[1] ?? ''
@@ -182,7 +190,7 @@ function executeKickoff(
 }
 
 export class TaskManager {
-  private runners = new Map<string, Runner>()
+  private runners = new Map<string, RunnerLike>()
   /** Tasks holding an autonomous lane (held from planning through to the PR). */
   private executeLanes = new Set<string>()
   private executeQueue: string[] = []
@@ -193,9 +201,16 @@ export class TaskManager {
   /** Tasks whose current turn was hard-interrupted; suppress the result's fail logic. */
   private interrupting = new Set<string>()
 
+  /**
+   * @param runnerFactory builds the per-phase worker wrapper. Defaults to the
+   *   real `claude`-spawning `Runner`; tests (and, later, pluggable agent
+   *   adapters — Appendix A) inject a fake to drive the state machine without a
+   *   real process. This one seam is the only test hook into the engine.
+   */
   constructor(
     private db: Db,
     private broadcast: (e: WsEvent) => void,
+    private runnerFactory: RunnerFactory = defaultRunnerFactory,
   ) {}
 
   // ---- helpers ----
@@ -262,7 +277,7 @@ export class TaskManager {
     repoPath: string,
     defaultBranch: string,
   ): void {
-    const runner = new Runner(
+    const runner = this.runnerFactory(
       {
         cwd,
         model,

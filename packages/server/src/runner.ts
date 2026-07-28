@@ -15,7 +15,7 @@ function asString(v: unknown): string | undefined {
 }
 
 /** Concatenate the text blocks of an `assistant` message. */
-function assistantText(obj: Record<string, unknown>): string {
+export function assistantText(obj: Record<string, unknown>): string {
   const msg = asRecord(obj.message)
   const content = msg?.content
   if (typeof content === 'string') return content
@@ -41,7 +41,7 @@ function clip(s: string, max = 200): string {
  * Bash→command; Edit/Write/Read/NotebookEdit→file_path; Grep/Glob→pattern;
  * Task→description; fallback→short stringify of the first scalar input value.
  */
-function summarizeTool(name: string, input: Record<string, unknown> | undefined): string {
+export function summarizeTool(name: string, input: Record<string, unknown> | undefined): string {
   if (!input) return ''
   const pick = (k: string): string | undefined => asString(input[k])
   switch (name) {
@@ -68,7 +68,7 @@ function summarizeTool(name: string, input: Record<string, unknown> | undefined)
 }
 
 /** Compact summary of a tool_result `content` (string, or array of text blocks). */
-function summarizeResult(content: unknown): string {
+export function summarizeResult(content: unknown): string {
   if (typeof content === 'string') return clip(content)
   if (Array.isArray(content)) {
     return clip(
@@ -84,7 +84,7 @@ function summarizeResult(content: unknown): string {
 }
 
 /** Extract a text delta from a `stream_event` partial line, if present. */
-function partialDelta(obj: Record<string, unknown>): string | undefined {
+export function partialDelta(obj: Record<string, unknown>): string | undefined {
   const ev = asRecord(obj.event)
   if (ev?.type === 'content_block_delta') {
     const delta = asRecord(ev.delta)
@@ -94,7 +94,7 @@ function partialDelta(obj: Record<string, unknown>): string | undefined {
 }
 
 /** Parse token/cost usage from a `result` line; returns undefined when absent. */
-function parseUsage(obj: Record<string, unknown>): ResultUsage | undefined {
+export function parseUsage(obj: Record<string, unknown>): ResultUsage | undefined {
   const u = asRecord(obj.usage)
   if (!u) return undefined
   const n = (v: unknown): number => (typeof v === 'number' ? v : 0)
@@ -324,3 +324,20 @@ export class Runner {
     }
   }
 }
+
+/**
+ * The surface `TaskManager` depends on: enough to drive a worker turn, stop it,
+ * or kill it. `Runner` satisfies this; a test double (or, later, a pluggable
+ * agent adapter — see Appendix A of the productization plan) can too.
+ */
+export interface RunnerLike {
+  send(text: string): void
+  interrupt(): void
+  kill(): void
+}
+
+/** Builds the worker process wrapper for a task's phase. Swappable for tests/adapters. */
+export type RunnerFactory = (opts: SpawnOptions, cb: RunnerCallbacks) => RunnerLike
+
+/** The default factory: spawn the real `claude` child. */
+export const defaultRunnerFactory: RunnerFactory = (opts, cb) => new Runner(opts, cb)
