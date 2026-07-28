@@ -47,8 +47,8 @@ website. Always finish by re-bundling the app so the `.app` ships the new code.
 - **Engine:** Node `child_process` spawning the headless `claude` binary (stream-json)
 - **Frontend:** React 19 + Vite, CSS Modules + design tokens (frosted-glass theme)
 - **Language:** TypeScript throughout (ESM, `NodeNext`/`bundler` resolution)
-- **No cloud. No test framework yet** — validate with
-  `npm run typecheck && npm run lint && npm run build`
+- **No cloud.** Tests run on **Vitest** (both workspaces) — validate with
+  `npm run typecheck && npm run lint && npm test && npm run build`
 
 ## Project structure
 ```
@@ -193,6 +193,8 @@ npm run dev              # both
 npm run build            # tsc (server) + vite build (web)
 npm run typecheck        # tsc --noEmit, both workspaces
 npm run lint             # ESLint, both workspaces
+npm test                 # Vitest run, both workspaces
+npm run test:watch       # Vitest watch, both workspaces
 npm start                # serve API + built UI
 
 # Desktop app (Tauri) — native macOS .app wrapping the server as a sidecar
@@ -237,6 +239,6 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
 - Engine is the real `claude` binary via `child_process` (ToS-compliant; never proxy the token).
 - Max OAuth only — `ANTHROPIC_API_KEY` stripped from worker env.
 - No shared package — server↔web types are a manual mirror.
-- Frosted-glass theme; no test framework yet (typecheck+lint+build is validation).
+- Frosted-glass theme; Vitest across both workspaces (typecheck+lint+test+build is validation).
 - Worktrees live under the **target repo's own** `worktrees/` dir (e.g. `<repo.path>/worktrees/<shortId>`), not a global dir. That dir should be gitignored in each target repo.
 - Build-lane cap via `ZMRNG_MAX_LANES` (default 2); extra READY tasks queue.

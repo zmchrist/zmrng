@@ -8,6 +8,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: scrub gate (no former project/client names, whole-word)
+        run: bash scripts/scrub-gate.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -15,4 +17,5 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm test
       - run: npm run build

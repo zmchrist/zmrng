@@ -169,3 +169,21 @@ export async function removeWorktree(
     // best effort
   }
 }
+
+/**
+ * Resolve a repo's GitHub `owner/name` slug from its `origin` remote.
+ *
+ * Returns `null` for local-only repos (no `origin`, or a non-GitHub remote).
+ * Callers must treat `null` as "unknown" and degrade gracefully rather than
+ * rejecting — a local-only target repo is a supported configuration.
+ */
+export async function repoSlug(targetRepo: string): Promise<string | null> {
+  let url: string
+  try {
+    url = await git(targetRepo, ['remote', 'get-url', 'origin'])
+  } catch {
+    return null
+  }
+  const m = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/.exec(url)
+  return m ? `${m[1]}/${m[2]}` : null
+}
