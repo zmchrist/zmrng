@@ -13,6 +13,28 @@ has a coding agent"* (operator, 2026-07-27). Nothing here may add a runtime depe
 on Hermes, a gateway, `~/.hermes/kanban.db`, or any other daemon.
 `npm install && npm run dev` must remain the entire setup story.
 
+## Scope: WEB INTERFACE ONLY (operator directive, 2026-07-27)
+
+**This plan targets the web interface only — the Tauri desktop `.app` is out of scope
+for every phase.** This is a deliberate, temporary **override of the "App-only focus"
+directive in `CLAUDE.md`**, which says a change is not done until `npm run
+desktop:build` reships the `.app`. For the duration of this plan that rule is
+suspended: `npm run build` + `npm start` (or `npm run dev`) is the whole story.
+
+Consequences:
+- `npm run desktop:build` is **not** a gate on any phase. Do not run it to "finish" work.
+- The shipped `.app` will carry a stale bundled copy of `server/dist` + `web/dist`
+  throughout this plan. That is expected and accepted, not a bug to chase.
+- The desktop shell (`packages/desktop`, splash, sidecar bundling, Tauri Rust code)
+  is **not touched** by any phase. If a change appears to require touching it, stop
+  and re-scope rather than widening.
+- Phase 6's `docs/demo.gif` is recorded from the **browser**, not the `.app`.
+- Re-bundling the desktop app is a separate follow-up after this plan lands, at which
+  point `CLAUDE.md`'s app-only rule resumes.
+
+`CLAUDE.md` is updated in phase 1 to record this override explicitly so a worker
+reading it mid-plan does not "helpfully" rebuild the app.
+
 ## User story
 
 ```
@@ -112,6 +134,10 @@ rewritten four more times. Phase 1 makes the README *true*; phase 6 makes it *se
      `ZMRNG_TARGET_REPO` is unset, emit no legacy entry at all.
    - `CLAUDE.md:80` — describe the inheritance generically ("the universal Projects
      harness one level up"), not as an absolute machine path.
+   - `CLAUDE.md` "⚠ App-only focus" section — record the **web-only override** for the
+     duration of this plan (see *Scope* above), so a worker reading `CLAUDE.md`
+     mid-plan does not rebuild the `.app` to "finish" a task. Keep the original rule
+     documented, marked suspended, with a pointer to this plan.
 4. **`LICENSE`** — MIT, `Copyright (c) 2026 Zachary Christ`.
 5. **`.github/`:**
    - `workflows/ci.yml` — `ubuntu-latest`, Node 22, `npm ci`, then
@@ -367,11 +393,15 @@ Everything the README will claim is now true. Only now does it get to sell.
    architecture → engineering signals on top; existing Run / Desktop / Config /
    Validate sections preserved **verbatim** inside the `<details>` block. Byline +
    contact at the bottom.
-2. **`docs/demo.gif`** — 10–15s loop of a task going to PR, recorded from the `.app`.
+2. **`docs/demo.gif`** — 10–15s loop of a task going to PR, recorded from the **browser
+   UI** (web-only scope; the `.app` is stale by design during this plan).
 3. **Record the Loom** from `career-guide/outbound-kit/zmrng-loom-script.md`; drop the
    link at the top of the README.
-4. **Final sweep:** re-run the phase 1 grep gates; confirm CI badge is green; confirm
-   `npm run desktop:build` produces a fresh `.app` from a clean clone.
+4. **Final sweep:** re-run the phase 1 grep gates; confirm the CI badge is green;
+   confirm a clean clone runs `npm install && npm run dev` and serves the UI. The
+   README's desktop-app section stays as **documentation of an existing capability** —
+   it is not re-verified in this plan (web-only scope), and the follow-up re-bundle
+   happens after launch.
 5. **Flip the repo public.**
 6. **Update `career-guide/outbound-kit/NEXT-STEPS.md`** — mark the blocker cleared and
    unblock the outbound sequence (Loom → profiles → 10 DMs).
@@ -439,9 +469,8 @@ npm run typecheck && npm run lint && npm run build            # phase 1
 npm run typecheck && npm run lint && npm test && npm run build # phase 2+
 ```
 
-**App-only rule (`CLAUDE.md`):** any phase touching `packages/server` or
-`packages/web` is **not done** until `npm run desktop:build` produces a fresh `.app`.
-`npm run build` alone only refreshes the browser view; the shipped `.app` carries a
-stale bundled copy of `server/dist` + `web/dist` until re-bundled. This is a **local
-pre-merge step** — CI deliberately does not build the `.app` (Rust toolchain + macOS
-runner cost, zero added signal over the local build).
+**No desktop build.** `CLAUDE.md`'s app-only rule (a change is not done until
+`npm run desktop:build` reships the `.app`) is **suspended for this plan** — see
+*Scope: WEB INTERFACE ONLY* above. `npm run desktop:build` is not a gate on any phase.
+Verify in the browser via `npm run dev` (or `npm run build && npm start`). CI likewise
+does not build the `.app`: Rust toolchain + macOS runner cost for zero signal.
