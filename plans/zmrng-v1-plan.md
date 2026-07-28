@@ -1,9 +1,9 @@
 # Plan: zmrng — autonomous task orchestrator GUI
 
 > **Status:** Planned · **Type:** New standalone tool · **Complexity:** High
-> **Target repo built at:** `~/Documents/Projects/zmrng` (standalone; NOT inside Pheme)
-> **This tool drives:** the Pheme repo at `~/Documents/Projects/pheme` (v1 hardcoded)
-> **Plan home:** stored in Pheme `.agents/plans/` for paper-trail continuity.
+> **Target repo built at:** `~/Documents/Projects/zmrng` (standalone; NOT inside the target repo)
+> **This tool drives:** the target repo at `~/Projects/example-app` (v1 hardcoded)
+> **Plan home:** stored in the target repo `.agents/plans/` for paper-trail continuity.
 
 ## Problem
 
@@ -14,7 +14,7 @@ shared view of what each agent is doing, no task backlog.
 ## User story
 
 ```
-As the sole operator of Pheme
+As the sole operator of the target repo
 I want a single GUI where I drop in a task, answer a few clarifying questions,
   then watch the agent plan → implement → validate → open a PR fully autonomously
 So that I stop babysitting 5 terminals and only review the final PR.
@@ -24,7 +24,7 @@ So that I stop babysitting 5 terminals and only review the final PR.
 
 | Decision | Choice |
 |---|---|
-| Target | **Pheme-only first** (hardcode repo path + its `.agents/` harness; generalize later) |
+| Target | **target-repo-only first** (hardcode repo path + its `.agents/` harness; generalize later) |
 | Location | **Standalone repo** `~/Documents/Projects/zmrng` |
 | Autonomy | **Full auto to PR** — after the operator answers clarifying questions, no further stops until the PR is open |
 | UI | **List + detail pane** (not kanban) |
@@ -44,7 +44,7 @@ no `ANTHROPIC_API_KEY` in env, or it silently bills API). Verified flags:
   Q&A loop stays in a single session with native context (no resume juggling).
 - `--include-partial-messages` — token-delta streaming for live log UX.
 - `--dangerously-skip-permissions` (or `--permission-mode bypassPermissions`) — no
-  prompts. Safe here: target repo (Pheme) keeps its own `security_guard.py` hook that
+  prompts. Safe here: target repo (the target repo) keeps its own `security_guard.py` hook that
   still blocks `.env`, force-push, `rm -rf`.
 - `-r, --resume [sessionId]` / `--fork-session` — resume a session by id.
 - `--model opus|sonnet` — model selection per task.
@@ -56,13 +56,13 @@ no `ANTHROPIC_API_KEY` in env, or it silently bills API). Verified flags:
 child process per active task. zmrng writes user turns to its stdin, parses events
 from stdout, forwards them to the browser over WebSocket.
 
-## Tech stack (mirror Pheme's versions for familiarity)
+## Tech stack (mirror the target repo's versions for familiarity)
 
 - **Backend:** Fastify `^5.3`, `@fastify/websocket` `^11`, `better-sqlite3` `^12`,
   `pino` `^9`, Node `child_process` for the claude subprocess. TypeScript `~6.0`, tsx for dev.
 - **Frontend:** React `^19`, Vite `^8`, CSS Modules + design tokens (frosted-glass theme).
 - **Persistence:** single SQLite file `zmrng.db` (WAL). No cloud.
-- **Validation:** `npm run typecheck && npm run lint && npm run build` (Pheme convention; no test framework).
+- **Validation:** `npm run typecheck && npm run lint && npm run build` (the target repo convention; no test framework).
 
 ## Repo structure
 
@@ -98,7 +98,7 @@ zmrng/
             ├── App.tsx          # layout: TaskList | TaskDetail
             ├── theme.css        # frosted-glass design tokens
             ├── api.ts           # REST client
-            ├── useWs.ts         # auto-reconnect WS hook (port Pheme's pattern)
+            ├── useWs.ts         # auto-reconnect WS hook (port the target repo's pattern)
             ├── types.ts
             └── components/
                 ├── TaskList.tsx / .module.css      # left rail, status pills
@@ -127,7 +127,7 @@ any phase ─(error / process exit non-zero)─▶ failed (log retained, restart
 ### Phase prompts (in `phases.ts`)
 
 - **System prompt (all phases, via `--append-system-prompt`):** identify as a zmrng
-  worker on the Pheme repo; obey Pheme's CLAUDE.md + `.claude/rules/`; never touch `main`
+  worker on the target repo; obey the target repo's CLAUDE.md + `.claude/rules/`; never touch `main`
   directly; branch from `origin/main`; end the clarify phase with the exact token
   `ZMRNG_READY` on its own line when scoped.
 - **Clarify kickoff:** "Task: <body>. Before any code, ask the operator clarifying
@@ -180,7 +180,7 @@ CREATE TABLE events (            -- append-only log per task (for replay)
    `.gitignore`, `.env.example`, `README.md`. `git init`.
 2. **Shared types** (`server/src/types.ts`, mirror into `web/src/types.ts`).
 3. **db.ts** — SQLite open (WAL), schema, prepared statements (insert/update/list/log).
-4. **config.ts** — env parsing with defaults (`ZMRNG_TARGET_REPO=~/Documents/Projects/pheme`).
+4. **config.ts** — env parsing with defaults (`ZMRNG_TARGET_REPO=~/Projects/example-app`).
 5. **worktree.ts** — `git worktree add worktrees/<id> origin/main`; remove on cleanup.
 6. **runner.ts** — spawn claude child, parse stream-json stdout (line buffer), detect
    `session_id`, assistant text, `ZMRNG_READY`, PR URL regex; expose `send(msg)` / `kill()`.
@@ -188,13 +188,13 @@ CREATE TABLE events (            -- append-only log per task (for replay)
    build kickoff on READY.
 8. **ws.ts + index.ts** — Fastify bootstrap, REST routes, WS hub, serve built web in prod.
 9. **Frontend theme.css** — frosted-glass tokens (deep gray, translucency, blur, radii, transitions).
-10. **useWs.ts + api.ts** — data layer (port Pheme's auto-reconnect WS hook).
+10. **useWs.ts + api.ts** — data layer (port the target repo's auto-reconnect WS hook).
 11. **Components** — TaskList, NewTaskForm, TaskDetail, ClarifyChat, WorkerLog.
 12. **App.tsx + main.tsx** — layout + routing of selected task.
 13. **vite.config.ts** — dev proxy `/api` + `/ws` → `localhost:<port>`.
 14. **Validate** — `npm run typecheck && npm run lint && npm run build` green.
 15. **Smoke test** — `npm run dev`; create a trivial task ("add a code comment to
-    README"), answer clarify, confirm it branches + opens a PR on Pheme.
+    README"), answer clarify, confirm it branches + opens a PR on the target repo.
 
 ## Design tokens (frosted glass — `theme.css`)
 
@@ -223,13 +223,13 @@ npm run dev         # manual smoke: server + web
 ## Acceptance criteria
 
 - [ ] `npm run dev` serves the GUI; tasks persist across restarts (SQLite).
-- [ ] Creating a task → Start → a real `claude` process spawns against the Pheme repo.
+- [ ] Creating a task → Start → a real `claude` process spawns against the target repo.
 - [ ] Clarify Q&A works: operator answers stream into the live session; `ZMRNG_READY`
       transitions the task to building with **no further operator interaction**.
 - [ ] Building phase branches from `origin/main`, implements, validates, and opens a PR;
       PR URL surfaces in the UI and the task moves to review.
 - [ ] Multiple tasks run concurrently (replaces the 5-terminal workflow).
-- [ ] No permission prompts during autonomous phases; Pheme's security hook still active.
+- [ ] No permission prompts during autonomous phases; the target repo's security hook still active.
 - [ ] UI matches the frosted-glass spec; smooth transitions; nothing sharp-cornered.
 
 ## Risks & mitigations
@@ -241,7 +241,7 @@ npm run dev         # manual smoke: server + web
 | stream-json parsing brittle across claude versions | Tolerant line parser; ignore unknown event types; log raw on parse fail |
 | `ZMRNG_READY` sentinel missed / model chatty | Also accept a structured marker; allow manual "force build" button as fallback |
 | Worktrees accumulate | Cleanup on task done/cancel; `worktrees/` gitignored |
-| Runaway agent on `main` | System prompt forbids it; Pheme security hook blocks force-push; worktree isolation |
+| Runaway agent on `main` | System prompt forbids it; the target repo security hook blocks force-push; worktree isolation |
 | ToS — OAuth only for Claude Code | zmrng runs the real `claude` binary (compliant); never extracts/proxies the token |
 
 ## Out of scope (v1)
@@ -251,7 +251,7 @@ cost dashboard · mobile. All deferred; v1 proves the loop.
 
 ## Confidence
 
-**One-pass success: ~7/10.** Scaffold, DB, REST/WS, and UI are routine and mirror Pheme
+**One-pass success: ~7/10.** Scaffold, DB, REST/WS, and UI are routine and mirror the target repo
 patterns. The integration risk concentrates in `runner.ts` (stream-json parsing + the
 persistent stdin session) and the READY→build handoff — these will likely need one
 iteration of live tweaking against the real `claude` binary during the smoke test.

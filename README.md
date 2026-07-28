@@ -4,7 +4,13 @@ Autonomous task orchestrator GUI. Drop in a task, answer a few clarifying
 questions, then watch a Claude Code worker **plan → implement → validate → open a
 PR** fully autonomously. One GUI replaces babysitting five terminals.
 
-v1 drives a single target repo: **Pheme** (`~/Documents/Projects/pheme`).
+zmrng drives a **registry of target repos** — each task picks which repo it
+operates on from a configured list (`config/repos.json`), merged with every git
+repo auto-discovered under `ZMRNG_PROJECTS_DIR` plus a self entry for zmrng
+itself, so it is drivable out of the box with no config file present.
+
+> **Note:** each task's git worktree is created inside its target repo's own
+> `worktrees/` folder, so add `worktrees/` to that repo's `.gitignore`.
 
 ## How it works
 
@@ -44,7 +50,7 @@ backlog ─Start─▶ clarify ─READY─▶ planning ─PLAN_READY─▶ execu
 
 ```bash
 npm install
-cp .env.example .env          # optional — defaults target Pheme
+cp .env.example .env          # optional — every var has a sane default
 npm run dev                   # server :4500 + web :5174
 ```
 
@@ -84,9 +90,9 @@ with no env set everything still resolves under the repo root.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `ZMRNG_PROJECTS_DIR` | `~/Documents/Projects` | Dir auto-scanned for git repos to list |
+| `ZMRNG_PROJECTS_DIR` | first existing of `~/Projects` → `~/Developer/Projects` → `~/Documents/Projects` | Dir auto-scanned for git repos to list |
 | `ZMRNG_DEFAULT_REPO` | `zmrng` | Registry id of the default target repo |
-| `ZMRNG_TARGET_REPO` | `~/Documents/Projects/pheme` | Legacy single-repo fallback |
+| `ZMRNG_TARGET_REPO` | _(unset)_ | Legacy single-repo fallback; no entry emitted when unset |
 | `ZMRNG_PORT` | `4500` | Fastify port |
 | `ZMRNG_MODEL` | `opus` | Default model for new tasks (opus \| sonnet) |
 | `ZMRNG_MAX_LANES` | `2` | Max concurrent autonomous (plan→PR) tasks |

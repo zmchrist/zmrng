@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { WsEvent } from './types'
 
-/** Auto-reconnecting WebSocket hook (ported from Pheme's useWebSocket). */
+/** Auto-reconnecting WebSocket hook. */
 export function useWs(onEvent: (e: WsEvent) => void) {
   const [connected, setConnected] = useState(false)
   const onEventRef = useRef(onEvent)

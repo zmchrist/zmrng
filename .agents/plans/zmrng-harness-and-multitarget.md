@@ -1,8 +1,8 @@
 # Plan: zmrng — self-harness scaffold + multi-target repo selection
 
 > **Status:** Planned · **Type:** Tooling + Enhancement · **Complexity:** Medium-High
-> **Target repo:** `~/Documents/Projects/zmrng` (standalone; NOT Pheme)
-> **Plan home:** Pheme `.agents/plans/` for paper-trail continuity (zmrng convention).
+> **Target repo:** `~/Documents/Projects/zmrng` (standalone; NOT the target repo)
+> **Plan home:** the target repo `.agents/plans/` for paper-trail continuity (zmrng convention).
 > **Builds on:** `zmrng.md` (v1 orchestrator) and `zmrng-task-controls.md` (per-task model/effort/style).
 
 ## Goal
@@ -11,11 +11,11 @@ Two related deliverables:
 
 - **Part A — Self-harness.** Scaffold a Claude Code working harness (`CLAUDE.md`,
   `.claude/`, `.agents/`) *into* the zmrng repo, tailored to zmrng's own stack and
-  stripped of all Pheme domain (Modbus, substations, copper theme, power/water/etc.).
-  Goal: Claude Code helps you *build zmrng* the same way it builds Pheme.
+  stripped of all source-project domain (Modbus, substations, copper theme, power/water/etc.).
+  Goal: Claude Code helps you *build zmrng* the same way it builds the target repo.
 - **Part B — Multi-target runtime.** Generalize zmrng's hardcoded `ZMRNG_TARGET_REPO`
-  so the operator chooses, per task, which repo zmrng drives (pheme,
-  bluebeam-pdf-converter, …) from a configured list shown as a dropdown in the New
+  so the operator chooses, per task, which repo zmrng drives (example-app,
+  example-app, …) from a configured list shown as a dropdown in the New
   Task form.
 
 The two parts are independent: Part A is files-only (no zmrng code), Part B is a code
@@ -25,10 +25,10 @@ change to the running tool. Ship in either order.
 
 | Decision | Choice |
 |---|---|
-| Harness flavor | **zmrng-tailored** — rules/agents/commands reflect zmrng's real stack (Fastify 5 + @fastify/websocket + better-sqlite3 + pino + React 19 + Vite + CSS Modules + frosted-glass tokens + `child_process` claude runner). Pheme domain fully stripped. |
+| Harness flavor | **zmrng-tailored** — rules/agents/commands reflect zmrng's real stack (Fastify 5 + @fastify/websocket + better-sqlite3 + pino + React 19 + Vite + CSS Modules + frosted-glass tokens + `child_process` claude runner). source-project domain fully stripped. |
 | Module scope | **Lean core** — PIV loop, domain rules, key agents, validation commands, sync-docs + caveman + create-task skills, `.agents/plans`+`tasks`. **Skip** missions framework, ralph, patrol/CI loops, GitHub-automation heavy machinery. |
 | Target picker | **Config list + per-task dropdown** — repos defined in a config file (`config/repos.json`) with env fallback; `GET /api/repos` feeds a New Task `<select>`; each task records its target repo. |
-| Plan home | This file in Pheme `.agents/plans/`; once zmrng has its own `.agents/plans/`, future zmrng plans may live there. |
+| Plan home | This file in the target repo `.agents/plans/`; once zmrng has its own `.agents/plans/`, future zmrng plans may live there. |
 | Hooks | zmrng already lives under `~/Documents/Projects/` and **inherits** the universal `Projects/CLAUDE.md` harness (security_guard / post_tool_use_lint / stop_validate). Do **not** duplicate those hooks in zmrng. zmrng's `CLAUDE.md` only overrides/extends. |
 
 ---
@@ -37,9 +37,9 @@ change to the running tool. Ship in either order.
 
 ## Generalization rules (apply to every ported file)
 
-1. **Strip Pheme domain entirely:** no Modbus/float-decode/CT_RATIO, no SS1–SS4 /
+1. **Strip source-project domain entirely:** no Modbus/float-decode/CT_RATIO, no SS1–SS4 /
    substations, no copper/Cinzel/Rajdhani theme, no power/water/network/audio/hvac/
-   weather, no Neon/Drizzle, no `@pheme/shared`.
+   weather, no Neon/Drizzle, no `@example/shared`.
 2. **Keep the shared TS-monorepo stack** that zmrng actually uses: Fastify 5,
    `@fastify/websocket`, better-sqlite3 (WAL), pino, React 19 + Vite, CSS Modules.
 3. **zmrng-specific conventions to bake in** (from `zmrng-task-controls.md`):
@@ -60,7 +60,7 @@ change to the running tool. Ship in either order.
 zmrng/
 ├── CLAUDE.md                              # NEW — project identity + conventions (see below)
 ├── .claude/
-│   ├── settings.local.json                # generic permissions (no Pheme paths)
+│   ├── settings.local.json                # generic permissions (no target-repo paths)
 │   ├── rules/
 │   │   ├── backend-typescript.md          # Fastify 5 / better-sqlite3 / pino / child_process runner patterns
 │   │   ├── frontend-react.md              # React 19 / Vite / CSS Modules / frosted-glass tokens / WS hook
@@ -110,13 +110,13 @@ zmrng/
     ├── code-reviews/.gitkeep
     ├── system-reviews/.gitkeep
     ├── handoffs/.gitkeep
-    └── scripts/loop.sh                      # generic autonomous loop driver (Pheme specifics stripped)
+    └── scripts/loop.sh                      # generic autonomous loop driver (the target repo specifics stripped)
 ```
 
 > **Not ported (lean-core exclusions):** `.missions/`, `ralph/`, `.claude/commands/patrol/`,
 > `auto-issue.md` / `fix-issue.md` / `monitor-ci.md` / `respond-review.md` / `triage-issues.md`,
 > mission agents (orchestrator/worker/scrutiny-validator/user-test-validator), `.claude/PRD.md`,
-> `.claude/reference/*` (Acuvim xlsx etc.), Pheme deploy `scripts/`, `relay/`, `docker/`.
+> `.claude/reference/*` (Acuvim xlsx etc.), the target repo deploy `scripts/`, `relay/`, `docker/`.
 
 ## zmrng `CLAUDE.md` outline (the authoritative new file)
 
@@ -134,7 +134,7 @@ zmrng/
 - **Key services:** runner (spawn/parse stream-json), phases (state machine + system
   prompts), db (SQLite schema + prepared stmts + idempotent migrations), worktree (git
   worktree per task), ws (broadcast hub).
-- **Collaboration:** solo operator → drop Pheme's ZC/CE two-dev protocol; keep
+- **Collaboration:** solo operator → drop the target repo's ZC/CE two-dev protocol; keep
   branch-before-code + plans-before-code + branch-from-origin/main.
 - **PIV loop + context-tier references** pointing at the new `.claude/rules` and `.claude/docs`.
 - **Inherits** universal `Projects/CLAUDE.md` (hooks, PIV table) — note this; don't restate hooks.
@@ -143,17 +143,17 @@ zmrng/
 
 1. Create directory tree (manifest above); `.gitkeep` the empty `.agents/*` dirs.
 2. Write `CLAUDE.md` (outline above).
-3. Port + generalize the 5 `.claude/rules/*` from Pheme (strip domain per rules §1–4).
+3. Port + generalize the 5 `.claude/rules/*` from the target repo (strip domain per rules §1–4).
 4. Port + generalize `.claude/commands/core_piv_loop/*`, `validation/*`, `git/*`.
 5. Port + generalize the 6 `.claude/agents/*` (rewrite tool/role descriptions for zmrng files).
 6. Copy `caveman` skill verbatim; generalize `sync-docs` + `create-task` skills.
 7. Write `.claude/docs/services-reference.md` (zmrng services) + seed `implementation-history.md`.
 8. Write `.claude/files/PROJECT_CONTEXT.md` + `FUTURE_IDEAS.md`; seed `.claude/errors.md`.
-9. Write generic `.agents/README.md` + `.agents/scripts/loop.sh` (strip Pheme task refs).
-10. Write `.claude/settings.local.json` (generic allow/deny; no Pheme-specific paths).
+9. Write generic `.agents/README.md` + `.agents/scripts/loop.sh` (strip the target repo task refs).
+10. Write `.claude/settings.local.json` (generic allow/deny; no target-repo-specific paths).
 11. Copy this plan into `zmrng/.agents/plans/` for the standalone paper trail.
 12. Sanity: open Claude Code in `~/Documents/Projects/zmrng`, run `/prime`, confirm it
-    orients on zmrng (not Pheme) and `/validate` maps to the right commands.
+    orients on zmrng (not the target repo) and `/validate` maps to the right commands.
 
 ---
 
@@ -161,9 +161,9 @@ zmrng/
 
 ## Current state (single hardcoded target)
 
-- `packages/server/src/config.ts` — `ZMRNG_TARGET_REPO` (default `~/Documents/Projects/pheme`).
+- `packages/server/src/config.ts` — `ZMRNG_TARGET_REPO` (default `~/Projects/example-app`).
 - `worktree.ts` — `git worktree add worktrees/<id> origin/main` in the single repo.
-- `phases.ts` — `systemPrompt()` identifies the worker as a **Pheme** worker; `spawn()`
+- `phases.ts` — `systemPrompt()` identifies the worker as a **target-repo** worker; `spawn()`
   uses the single repo path as cwd.
 - `runner.ts` — passes `--add-dir <worktree>`; cwd = target repo.
 
@@ -174,8 +174,8 @@ gitignore it; ship `config/repos.example.json`):
 
 ```json
 [
-  { "id": "pheme",     "label": "Pheme",                 "path": "/Users/tiofeliz/Documents/Projects/pheme",                 "defaultBranch": "main" },
-  { "id": "bluebeam",  "label": "Bluebeam PDF Converter", "path": "/Users/tiofeliz/Documents/Projects/bluebeam-pdf-converter", "defaultBranch": "main" }
+  { "id": "example-app", "label": "Example App", "path": "~/Projects/example-app", "defaultBranch": "main" },
+  { "id": "another-app", "label": "Another App", "path": "~/Projects/another-app", "defaultBranch": "main" }
 ]
 ```
 
@@ -212,7 +212,7 @@ gitignore it; ship `config/repos.example.json`):
 - `createTask(...)` gains `repoId` (default `config.defaultRepoId`); validate against registry.
 - `spawn()` resolves `repoById(task.repoId)`; uses its `path` as cwd + worktree base;
   `--add-dir` the worktree.
-- `systemPrompt()` **generalized**: drop "Pheme"; identify as "a zmrng worker on the
+- `systemPrompt()` **generalized**: drop the hardcoded repo name; identify as "a zmrng worker on the
   target repository at `<path>`; obey that repo's `CLAUDE.md` and `.claude/rules/`;
   never touch its default branch directly; branch from `origin/<defaultBranch>`." The
   target repo's own harness auto-loads in the child `claude` — no per-repo prompt needed.
@@ -262,7 +262,7 @@ gitignore it; ship `config/repos.example.json`):
 # Part A — harness is files-only; verify nothing breaks zmrng build and Claude Code orients correctly
 cd ~/Documents/Projects/zmrng
 npm run typecheck && npm run lint && npm run build   # unaffected by Part A, must stay green
-# open Claude Code here → /prime → confirm zmrng orientation (not Pheme)
+# open Claude Code here → /prime → confirm zmrng orientation (not the target repo)
 
 # Part B — code change
 npm run typecheck && npm run lint && npm run build    # both workspaces, catches mirror drift
@@ -270,9 +270,9 @@ npm run dev   # manual smoke (below)
 ```
 
 **Part B manual smoke:**
-1. `config/repos.json` lists pheme + one other repo; `GET /api/repos` returns both.
+1. `config/repos.json` lists example-app + one other repo; `GET /api/repos` returns both.
 2. New Task form shows a Repo select (default = configured default).
-3. Create a trivial task ("add a code comment to README") targeting the **non-Pheme** repo.
+3. Create a trivial task ("add a code comment to README") targeting the **non-target** repo.
 4. Start → worker spawns with cwd/worktree in that repo; branch from its default branch.
 5. Clarify → READY → build → PR opens **in the chosen repo** (verify URL host/repo).
 6. Repo badge shows correct target; restart server → task + repo persist (SQLite).
@@ -282,7 +282,7 @@ npm run dev   # manual smoke (below)
 
 **Part A**
 - [ ] zmrng has `CLAUDE.md` + `.claude/{rules,commands,agents,skills,docs,files,errors.md,settings.local.json}` + `.agents/{plans,tasks,...,scripts/loop.sh}`.
-- [ ] No Pheme domain remains in any ported file (no Modbus/substation/copper/power/water/Neon/`@pheme/shared`).
+- [ ] No source-project domain remains in any ported file (no Modbus/substation/copper/power/water/Neon/`@example/shared`).
 - [ ] Ported rules/agents reflect zmrng's real stack (Fastify/SQLite/pino/React/frosted-glass) + zmrng conventions (type-mirror, ANTHROPIC_API_KEY strip, caveman default).
 - [ ] `/prime` in zmrng orients on zmrng; `/validate` runs zmrng's typecheck+lint+build.
 - [ ] zmrng build stays green (harness is additive, no code touched).
@@ -291,7 +291,7 @@ npm run dev   # manual smoke (below)
 - [ ] Repo registry loads from `config/repos.json` with env + legacy fallback; invalid entries skipped with warning.
 - [ ] New Task form has a Repo select; each task records + persists its `repoId`.
 - [ ] Worker spawns against the chosen repo (cwd + worktree + `--add-dir`); branches from that repo's default branch; PR opens in that repo.
-- [ ] `systemPrompt` is repo-agnostic (no "Pheme" hardcode); relies on target repo's own harness.
+- [ ] `systemPrompt` is repo-agnostic (no hardcoded repo name); relies on target repo's own harness.
 - [ ] Existing `zmrng.db` migrates cleanly; legacy single-repo setup still works.
 - [ ] `npm run typecheck && npm run lint && npm run build` green in zmrng.
 
@@ -299,7 +299,7 @@ npm run dev   # manual smoke (below)
 
 Auto-scanning `~/Documents/Projects` for repos · per-repo model/effort defaults ·
 multi-repo task batching · repo management UI (add/remove repos in-app) · the heavy
-Pheme harness modules (missions/ralph/patrol/GitHub-automation). Deferred.
+the target repo harness modules (missions/ralph/patrol/GitHub-automation). Deferred.
 
 ## Confidence
 

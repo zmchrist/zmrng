@@ -29,12 +29,25 @@ const DATA_DIR = process.env.ZMRNG_DATA_DIR ?? REPO_ROOT
 /** Repo registry (and an optional .env) live here — REPO_ROOT/config in dev. */
 const CONFIG_DIR = path.join(DATA_DIR, 'config')
 
+/** First directory in `candidates` that exists, else the last candidate. */
+function firstExistingDir(candidates: string[]): string {
+  for (const c of candidates) {
+    if (existsSync(expandHome(c))) return c
+  }
+  return candidates[candidates.length - 1]
+}
+
 /**
  * Directory scanned for additional drivable repos. Every git repo directly
- * under it is auto-listed in the repo dropdown (override via ZMRNG_PROJECTS_DIR).
+ * under it is auto-listed in the repo dropdown. Override via ZMRNG_PROJECTS_DIR;
+ * otherwise resolve to the first of `~/Projects` → `~/Developer/Projects` →
+ * `~/Documents/Projects` that exists, so existing installs keep working.
  */
 const PROJECTS_DIR = path.resolve(
-  expandHome(process.env.ZMRNG_PROJECTS_DIR ?? '~/Documents/Projects'),
+  expandHome(
+    process.env.ZMRNG_PROJECTS_DIR ??
+      firstExistingDir(['~/Projects', '~/Developer/Projects', '~/Documents/Projects']),
+  ),
 )
 
 /** Parse one `.env` file into process.env (existing keys win). */
@@ -138,7 +151,7 @@ function normalizeEntry(e: Partial<RepoTarget>): RepoTarget | undefined {
  * desktop bundle ships the curated `config/repos.json` next to the server (see
  * bundle-sidecar.mjs → sidecar/config/repos.json); the app's data dir starts
  * empty, so without this the bundled app falls back to legacy/auto-scan and the
- * curated repos/labels (e.g. Pheme) never appear in the dropdown. Best-effort and
+ * curated repos/labels never appear in the dropdown. Best-effort and
  * a no-op in dev (DATA_DIR === REPO_ROOT, so source and dest are the same file).
  */
 function seedRegistry(): void {
@@ -184,14 +197,15 @@ function loadRepoCandidates(): RepoTarget[] {
       .filter((e): e is RepoTarget => !!e)
     if (entries.length) return entries
   }
-  // 3. legacy single ZMRNG_TARGET_REPO
-  return [
-    normalizeEntry({
-      id: 'default',
-      label: 'default',
-      path: process.env.ZMRNG_TARGET_REPO ?? '~/Documents/Projects/pheme',
-    })!,
-  ]
+  // 3. legacy single ZMRNG_TARGET_REPO — emit an entry only when it is set.
+  //    When unset there is no hardcoded fallback repo; the zmrng self entry
+  //    plus the PROJECTS_DIR auto-scan supply a usable default registry.
+  const legacy = process.env.ZMRNG_TARGET_REPO?.trim()
+  if (legacy) {
+    const entry = normalizeEntry({ id: 'default', label: 'default', path: legacy })
+    if (entry) return [entry]
+  }
+  return []
 }
 
 /**

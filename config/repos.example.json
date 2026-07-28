@@ -1,14 +1,8 @@
 [
   {
-    "id": "pheme",
-    "label": "Pheme",
-    "path": "~/Documents/Projects/pheme",
-    "defaultBranch": "main"
-  },
-  {
-    "id": "bluebeam",
-    "label": "Bluebeam PDF Converter",
-    "path": "~/Documents/Projects/bluebeam-pdf-converter",
+    "id": "example-app",
+    "label": "Example App",
+    "path": "~/Projects/example-app",
     "defaultBranch": "main"
   }
 ]
