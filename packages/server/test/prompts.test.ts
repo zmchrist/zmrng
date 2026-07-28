@@ -95,6 +95,16 @@ describe('executeKickoff', () => {
     expect(prompt).toMatch(/no test runner/)
   })
 
+  it('stages the plan file, so the checklist link is not dead', () => {
+    expect(prompt).toMatch(/Stage the plan file itself \(`\.agents\/plans\/x\.md`\)/)
+  })
+
+  it('still names the plan generically when the planning phase reported no path', () => {
+    expect(executeKickoff('feat/zmrng/x-1', 'main', null)).toMatch(
+      /Stage the plan file itself \(`the plan you wrote under \.agents\/plans\/`\)/,
+    )
+  })
+
   it('opens the PR with --body-file, never --fill', () => {
     expect(prompt).toContain(`--body-file "${PR_BODY_FILE}"`)
     expect(prompt).not.toContain('gh pr create --fill')

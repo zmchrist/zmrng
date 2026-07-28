@@ -28,7 +28,8 @@ those prompts must say the same thing. **If you change one, change the other**
    address the findings before opening the PR.
 5. **Validate + Sync Docs** — `npm run typecheck && npm run lint && npm test &&
    npm run build`, all green, then run the `sync-docs` skill and stage whatever
-   docs it updates.
+   docs it updates. **Stage the plan file too** — the PR checklist links it, so
+   an uncommitted plan is a dead link.
 
 ## Branch-only (hard rule)
 

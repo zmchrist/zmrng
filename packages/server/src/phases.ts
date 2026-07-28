@@ -242,6 +242,7 @@ export function executeKickoff(
     'Finally:',
     "- Run this repo's full validation and ensure every check passes — fix every failure. For a Node repo that is `npm run typecheck && npm run lint && npm test && npm run build` (skip a script this repo does not define).",
     '- MANDATORY before committing: run the `sync-docs` skill (the Skill tool with skill "sync-docs", equivalent to the operator running `/sync-docs`) to bring this repo\'s documentation in sync with your changes, and stage any docs it updates. Do this even if the doc step in the QA chain above already ran. Skip only if the skill is genuinely unavailable in this repo.',
+    `- Stage the plan file itself (\`${planPath ?? 'the plan you wrote under .agents/plans/'}\`) along with your changes — the PR body links it, so an uncommitted plan is a dead link.`,
     '- Commit with a descriptive Conventional Commit message.',
     `- Push the branch: git push -u origin ${branch}`,
     `- Write the PR body to \`${PR_BODY_FILE}\` (a path inside the git dir — never tracked, never committed). It MUST follow this template verbatim, with every box honestly checked or explicitly explained:`,
