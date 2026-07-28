@@ -6,6 +6,7 @@ Before starting any new feature implementation, verify the baseline is stable:
 npm install                    # Dependencies install cleanly
 npm run typecheck              # tsc --noEmit, both workspaces
 npm run lint                   # ESLint, both workspaces
+npm test                       # Vitest run, both workspaces
 npm run build                  # tsc (server) + vite build (web)
 ```
 
@@ -15,20 +16,49 @@ npm run build                  # tsc (server) + vite build (web)
 
 # Testing Conventions
 
-## Current State
-No test framework is configured yet. Validation is typecheck + lint + build.
-When tests are added:
-- Use a TypeScript-compatible framework (vitest, node:test)
-- Mirror the workspace structure: tests per package
-- Highest-value targets: stream-json line parsing, repo-registry fallback chain,
-  SQLite migration/backfill, phase transitions (clarify→planning→executing→validating→review)
+## Framework
+**Vitest** in both workspaces (chosen over Jest: native ESM, no transform config,
+Vite already present for web).
 
-## Pre-Commit Validation
-```bash
-npm run typecheck
-npm run lint
-npm run build
-```
+- **Server** (`packages/server`) — `environment: 'node'`. Tests + fixtures live in
+  `packages/server/test/` (kept out of the `tsc` build, which compiles `src/` only).
+  Config: `packages/server/vitest.config.ts`.
+- **Web** (`packages/web`) — `environment: 'jsdom'` + `@testing-library/react`.
+  Tests in `packages/web/test/`; setup in `packages/web/test/setup.ts` (jest-dom
+  matchers). Config: `packages/web/vitest.config.ts`.
+
+Run: `npm test` (both), `npm run test:watch` (both), or `-w @zmrng/server` /
+`-w @zmrng/web` for one workspace.
+
+## What's covered
+- **`phases.ts`** — `parsePlanDecision()` and every control-token regex
+  (`READY_RE`, `PLAN_READY_RE`, `VALIDATING_RE`, `BLOCKED_RE`, `PR_RE`), including
+  near-miss cases that must NOT match (tokens quoted in prose, non-PR GitHub URLs).
+- **`runner.ts`** — `summarizeTool()`, `summarizeResult()`, `parseUsage()`,
+  `assistantText()`, `partialDelta()`, fed real-shaped stream-json lines checked
+  in under `test/fixtures/stream-json.jsonl`.
+- **`db.ts`** — temp-file SQLite; `ensureColumns()` migration + idempotency and
+  atomic `addUsage()` accumulation.
+- **`config.ts`** — `resolveRegistry()` precedence (`repos.json` → env → legacy),
+  auto-scan, and the empty-registry guard (issue #16).
+- **State machine** (`taskManager.test.ts`) — the highest-value artifact. Drives
+  the real `TaskManager` over a **real temp git repo** (worktree create/remove run
+  for real) with a **fake runner** injected through `TaskManager`'s optional
+  `runnerFactory` constructor param. Scripts stream-json lines and asserts every
+  status transition that has a control token, plus `blocked`/resume, the lane
+  cap + queue, and `interrupt()` suppressing the failure path.
+
+## Hard rules
+- **No test spawns a real `claude` process, calls `gh`, or touches the network.**
+  The runner-factory seam is what keeps the engine tests hermetic; git runs for
+  real against a temp repo (worktree/branch behaviour is the part worth proving).
+- **Never depend on `ANTHROPIC_API_KEY`** or a global git config; the state-machine
+  test sets local `user.name`/`user.email` on its temp repo.
+- **Coverage is not a gate.** Do not add coverage thresholds.
+
+## Type-mirror check (cheap, catches the most common break)
+Any change to `packages/server/src/types.ts` must be mirrored into
+`packages/web/src/types.ts`; `npm run typecheck` over both workspaces verifies it.
 
 ## Manual Smoke (when touching the engine)
 ```bash
@@ -37,10 +67,6 @@ npm run dev            # server + web
 # - answer questions → ZMRNG_READY → planning → executing → validating → PR
 # - confirm the PR opens in the chosen target repo
 ```
-
-## Type-mirror check (cheap, catches the most common break)
-Any change to `packages/server/src/types.ts` must be mirrored into
-`packages/web/src/types.ts`; `npm run typecheck` over both workspaces verifies it.
 
 ## Workspace-Specific Commands
 ```bash
