@@ -118,7 +118,7 @@ export type WsEvent =
   | { type: 'snapshot'; tasks: Task[] }
   | { type: 'task'; task: Task }
   | { type: 'event'; taskId: string; event: TaskEvent }
-  /** ephemeral token-delta stream, not persisted to the events table */
+  /** transient token-delta stream, not persisted to the events table */
   | { type: 'partial'; taskId: string; text: string }
 
 /** Minimal shape of a parsed line from `claude --output-format stream-json`. */
