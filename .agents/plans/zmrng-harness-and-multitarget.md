@@ -60,7 +60,7 @@ change to the running tool. Ship in either order.
 zmrng/
 ├── CLAUDE.md                              # NEW — project identity + conventions (see below)
 ├── .claude/
-│   ├── settings.local.json                # generic permissions (no the target repo paths)
+│   ├── settings.local.json                # generic permissions (no target-repo paths)
 │   ├── rules/
 │   │   ├── backend-typescript.md          # Fastify 5 / better-sqlite3 / pino / child_process runner patterns
 │   │   ├── frontend-react.md              # React 19 / Vite / CSS Modules / frosted-glass tokens / WS hook
@@ -174,8 +174,8 @@ gitignore it; ship `config/repos.example.json`):
 
 ```json
 [
-  { "id": "example-app",     "label": "the target repo",                 "path": "~/Projects/example-app",                 "defaultBranch": "main" },
-  { "id": "example-app",  "label": "Example App", "path": "~/Projects/example-app", "defaultBranch": "main" }
+  { "id": "example-app", "label": "Example App", "path": "~/Projects/example-app", "defaultBranch": "main" },
+  { "id": "another-app", "label": "Another App", "path": "~/Projects/another-app", "defaultBranch": "main" }
 ]
 ```
 
@@ -212,7 +212,7 @@ gitignore it; ship `config/repos.example.json`):
 - `createTask(...)` gains `repoId` (default `config.defaultRepoId`); validate against registry.
 - `spawn()` resolves `repoById(task.repoId)`; uses its `path` as cwd + worktree base;
   `--add-dir` the worktree.
-- `systemPrompt()` **generalized**: drop "the target repo"; identify as "a zmrng worker on the
+- `systemPrompt()` **generalized**: drop the hardcoded repo name; identify as "a zmrng worker on the
   target repository at `<path>`; obey that repo's `CLAUDE.md` and `.claude/rules/`;
   never touch its default branch directly; branch from `origin/<defaultBranch>`." The
   target repo's own harness auto-loads in the child `claude` — no per-repo prompt needed.
@@ -291,7 +291,7 @@ npm run dev   # manual smoke (below)
 - [ ] Repo registry loads from `config/repos.json` with env + legacy fallback; invalid entries skipped with warning.
 - [ ] New Task form has a Repo select; each task records + persists its `repoId`.
 - [ ] Worker spawns against the chosen repo (cwd + worktree + `--add-dir`); branches from that repo's default branch; PR opens in that repo.
-- [ ] `systemPrompt` is repo-agnostic (no "the target repo" hardcode); relies on target repo's own harness.
+- [ ] `systemPrompt` is repo-agnostic (no hardcoded repo name); relies on target repo's own harness.
 - [ ] Existing `zmrng.db` migrates cleanly; legacy single-repo setup still works.
 - [ ] `npm run typecheck && npm run lint && npm run build` green in zmrng.
 

@@ -10,7 +10,7 @@ the task**, under that repo's own `worktrees/` folder.
 
 Examples (operator's words):
 - task targeting **zmrng** → `~/Projects/zmrng/worktrees/<shortId>`
-- task targeting **the target repo** → `~/Projects/the target repo/worktrees/<shortId>`
+- task targeting **another repo** → `~/Projects/example-app/worktrees/<shortId>`
 
 In addition, this convention must be captured as a **rule** under
 `.claude/rules/` so future workers and contributors know worktrees always live
@@ -101,7 +101,7 @@ that repo's own `worktrees/` folder:
 
 Examples:
 - task targeting **zmrng** → `~/Documents/Projects/zmrng/worktrees/<shortId>`
-- task targeting **the target repo** → `~/Projects/example-app/worktrees/<shortId>`
+- task targeting **another repo** → `~/Projects/example-app/worktrees/<shortId>`
 
 Worktrees are **never** placed in a separate global data dir (e.g.
 `~/Library/Application Support/zmrng/worktrees/`). The working tree lives with
@@ -128,7 +128,7 @@ as untracked content (zmrng's own `.gitignore` already ignores `worktrees/*`).
 1. **Nested worktree pollutes a target repo's `git status`.** A linked worktree
    created at `<repo>/worktrees/<shortId>` sits inside the target repo's main
    working tree. Git does **not** auto-ignore registered worktree paths, so the
-   *main* checkout of a repo that does not ignore `worktrees/` (e.g. the target repo) will
+   *main* checkout of a repo that does not ignore `worktrees/` will
    show `worktrees/` as untracked. Mitigation: the new rule tells contributors to
    add `worktrees/` to the target repo's `.gitignore`. We do **not** edit other
    repos' `.gitignore` from here (out of scope, and not always desired). zmrng
