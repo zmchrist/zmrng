@@ -8,7 +8,7 @@ import {
   type RunnerFactory,
   type RunnerLike,
 } from './runner.js'
-import { createWorktree, removeWorktree, syncLocalAfterMerge } from './worktree.js'
+import { createWorktree, removeWorktree, repoSlug, syncLocalAfterMerge } from './worktree.js'
 import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
@@ -31,6 +31,8 @@ export const PLAN_READY_RE = /^\s*ZMRNG_PLAN_READY\b(.*)$/m
 export const VALIDATING_RE = /^\s*ZMRNG_VALIDATING\s*$/m
 export const BLOCKED_RE = /^\s*ZMRNG_BLOCKED\s*:?\s*(.*)$/m
 export const PR_RE = /https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/
+/** Global twin of `PR_RE` — a worker line may quote several PR URLs. */
+const PR_RE_G = new RegExp(PR_RE.source, 'g')
 
 const MODELS: readonly string[] = ['opus', 'sonnet']
 const EFFORTS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -57,9 +59,6 @@ export function parsePlanDecision(text: string): PlanDecision | undefined {
   }
 }
 
-function extractPrUrl(text: string): string | undefined {
-  return text.match(PR_RE)?.[0]
-}
 function now(): string {
   return new Date().toISOString()
 }
@@ -200,6 +199,12 @@ export class TaskManager {
   private blockedFrom = new Map<string, TaskStatus>()
   /** Tasks whose current turn was hard-interrupted; suppress the result's fail logic. */
   private interrupting = new Set<string>()
+  /**
+   * `owner/name` of each task's target repo, resolved once at start from its
+   * `origin` remote. A `null` entry means the target is local-only (no GitHub
+   * remote) and PR URLs cannot be repo-scoped — see `prUrlForTask`.
+   */
+  private repoSlugs = new Map<string, string | null>()
 
   /**
    * @param runnerFactory builds the per-phase worker wrapper. Defaults to the
@@ -239,6 +244,7 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
+    this.repoSlugs.delete(taskId)
     this.freeLane(taskId)
     this.transition(taskId, 'failed', note)
   }
@@ -372,7 +378,7 @@ export class TaskManager {
       this.transition(taskId, 'validating', 'QA/review/docs chain started')
       return
     }
-    const pr = extractPrUrl(text)
+    const pr = this.prUrlForTask(taskId, text)
     if (pr && (task.status === 'executing' || task.status === 'validating') && !task.prUrl) {
       this.onPr(task, pr)
       return
@@ -455,6 +461,24 @@ export class TaskManager {
     this.emitEvent(task.id, 'error', { sub: 'error', text: `blocked — ${reason}` })
     this.transition(task.id, 'blocked', reason)
     // Keep the child alive and the lane held; the operator resumes after adding the agent.
+  }
+
+  /**
+   * Pick the PR URL from a worker line that belongs to *this task's* target
+   * repo. A worker legitimately quotes other repos' PR URLs (a linked issue, a
+   * dependency's changelog); accepting one of those would flip the task to
+   * `review` with somebody else's PR attached.
+   *
+   * When the target repo has no resolvable GitHub slug (local-only repo), fall
+   * back to the first PR URL seen — repo-scoping is impossible there, and a
+   * local-only target is a supported configuration.
+   */
+  private prUrlForTask(taskId: string, text: string): string | undefined {
+    const urls = text.match(PR_RE_G) ?? []
+    if (!urls.length) return undefined
+    const slug = this.repoSlugs.get(taskId)
+    if (!slug) return urls[0]
+    return urls.find((u) => u.includes(`/${slug}/pull/`))
   }
 
   private onPr(task: Task, prUrl: string): void {
@@ -552,6 +576,10 @@ export class TaskManager {
       this.fail(taskId, `worktree creation failed: ${errMsg(err)}`)
       return
     }
+    // Resolved once here (not per worker line) so PR detection can be scoped to
+    // this task's own repo. `null` = local-only target; detection degrades to
+    // first-URL-wins.
+    this.repoSlugs.set(taskId, await repoSlug(repo.path))
     const updated = this.patch(taskId, {
       branch: wt.branch,
       worktree: wt.worktreePath,
@@ -640,6 +668,7 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
+    this.repoSlugs.delete(taskId)
     this.freeLane(taskId)
     const repo = repoById(task.repoId)
     const repoPath = repo?.path ?? config.targetRepo
@@ -673,6 +702,7 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
+    this.repoSlugs.delete(taskId)
     this.freeLane(taskId)
     if (task.worktree) {
       const repoPath = repoById(task.repoId)?.path ?? config.targetRepo

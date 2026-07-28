@@ -224,4 +224,41 @@ describe('TaskManager state machine (fake runner, real temp git repo)', () => {
     latest().result('', true) // error result, no PR, no prior interrupt
     expect(status(id)).toBe('failed')
   })
+
+  it('ignores a PR URL belonging to a different repo than the task target', async () => {
+    // Give the temp target a GitHub origin so the slug is resolvable.
+    git(repoDir, ['remote', 'add', 'origin', 'https://github.com/zmchrist/sandbox.git'])
+
+    const id = await startTask()
+    latest().say('ZMRNG_READY')
+    latest().say('ZMRNG_PLAN_READY model=opus effort=high plan=p.md')
+    const execRunner = latest()
+    execRunner.say('ZMRNG_VALIDATING')
+    expect(status(id)).toBe('validating')
+
+    // A worker quoting somebody else's PR (a linked issue, a dep's changelog)
+    // must NOT flip the task to review with the wrong PR attached.
+    execRunner.say('see https://github.com/other-owner/other-repo/pull/7 for context')
+    expect(status(id)).toBe('validating')
+    expect(db.getTask(id)!.prUrl).toBeNull()
+
+    // The task's OWN PR still lands, even alongside a foreign one on the line.
+    execRunner.say(
+      'refs https://github.com/other-owner/other-repo/pull/7 — opened https://github.com/zmchrist/sandbox/pull/3',
+    )
+    expect(status(id)).toBe('review')
+    expect(db.getTask(id)!.prUrl).toBe('https://github.com/zmchrist/sandbox/pull/3')
+  })
+
+  it('falls back to first-PR-wins when the target repo has no GitHub remote', async () => {
+    // repoDir has no `origin` — repo-scoping is impossible for a local-only
+    // target, so detection must still work rather than stalling forever.
+    const id = await startTask()
+    latest().say('ZMRNG_READY')
+    latest().say('ZMRNG_PLAN_READY model=opus effort=high plan=p.md')
+    latest().say('ZMRNG_VALIDATING')
+    latest().say('opened https://github.com/anyone/anything/pull/9')
+    expect(status(id)).toBe('review')
+    expect(db.getTask(id)!.prUrl).toBe('https://github.com/anyone/anything/pull/9')
+  })
 })

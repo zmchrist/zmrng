@@ -62,9 +62,11 @@ describe('PR_RE', () => {
     const text = 'opened https://github.com/zmchrist/zmrng/pull/42 for review'
     expect(text.match(PR_RE)?.[0]).toBe('https://github.com/zmchrist/zmrng/pull/42')
   })
-  it('matches a PR URL for ANY repo (detector is repo-agnostic by design)', () => {
-    // The state machine gates PR acceptance on task status, not on repo slug,
-    // so the regex itself matches any owner/repo — this documents that.
+  it('matches a PR URL for ANY repo — repo-scoping is the state machine, not the regex', () => {
+    // The regex deliberately matches any owner/repo; TaskManager then filters
+    // to the task's own target repo (see the "ignores a PR URL belonging to a
+    // different repo" case in taskManager.test.ts). Keeping the regex broad is
+    // what lets a local-only target still detect a PR at all.
     expect(PR_RE.test('https://github.com/other-owner/other-repo/pull/7')).toBe(true)
   })
   it('does NOT match a GitHub issue URL', () => {
