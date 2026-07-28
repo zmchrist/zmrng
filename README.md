@@ -37,6 +37,39 @@ backlog ─Start─▶ clarify ─READY─▶ planning ─PLAN_READY─▶ execu
 - **blocked** — a worker missing a required subagent emits `ZMRNG_BLOCKED: <reason>` and
   waits, lane held, until you add the agent and resume it.
 
+## The harness
+
+Most "agent in a loop" projects hand the model a task and hope it behaves. zmrng
+ships a **development lifecycle** and enforces it from the orchestrator, so
+correctness does not depend on operator discipline or on the model remembering
+to be rigorous. Every task, in every target repo, runs the same five steps:
+
+| Step | Enforced by | What it means |
+|------|-------------|----------------|
+| **Plan** | `planKickoff()` | Grill the approach *before* writing the plan — read the real files, name a rejected alternative. The plan must contain a **Test strategy** section (runner, exact test files, what each proves). A repo with no test runner has to say so. |
+| **Spec/Tickets** | PR checklist | The plan is carried into a spec or tickets, not straight into a diff. |
+| **Implement (TDD)** | `executeKickoff()` | **RED → GREEN → REFACTOR.** Failing test first, confirmed failing for the right reason; tests land in the *same commit* as the source. Untestable changes are allowed — but the reason is stated in the PR body, never silently skipped. |
+| **Review** | `executeKickoff()` | A `code-reviewer` subagent pass against the plan; findings addressed before the PR. |
+| **Validate + Sync Docs** | `executeKickoff()` | Full `typecheck && lint && test && build`, then the `sync-docs` skill; doc updates are staged into the same commit. |
+
+Two hard rules are baked into every worker's system prompt rather than left to
+chance:
+
+- **Branch-only** — a worker can never switch to, commit on, merge into, or push
+  to the default branch, never force-push, and never merge its own PR. Work is
+  delivered as a pull request; the human merges.
+- **Worktree hygiene** — the worktree and branch are owned by the orchestrator.
+  A worker never removes them; zmrng cleans up on **Done**, after the merge.
+
+The PR is opened with `gh pr create --body-file`, **not `--fill`**, so the
+five-item lifecycle checklist plus **Testing** and **Validation** sections are
+*guaranteed* present in every PR instead of hoped for. The prompt contract is
+pinned by tests (`packages/server/test/prompts.test.ts`) — deleting a rule from
+a prompt fails CI.
+
+zmrng holds itself to the same lifecycle: see
+[`.claude/rules/coding-lifecycle.md`](.claude/rules/coding-lifecycle.md).
+
 ## Safety
 
 - **Max OAuth only.** The server strips `ANTHROPIC_API_KEY` from every worker so
