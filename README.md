@@ -1,5 +1,7 @@
 # zmrng
 
+[![CI](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml/badge.svg)](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml)
+
 Autonomous task orchestrator GUI. Drop in a task, answer a few clarifying
 questions, then watch a Claude Code worker **plan → implement → validate → open a
 PR** fully autonomously. One GUI replaces babysitting five terminals.

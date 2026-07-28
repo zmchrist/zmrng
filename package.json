@@ -17,6 +17,8 @@
     "build:web": "npm run build -w packages/web",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:watch": "npm run test:watch -w @zmrng/server & npm run test:watch -w @zmrng/web & wait",
     "start": "npm run start -w packages/server",
     "bundle:sidecar": "npm run bundle:sidecar -w @zmrng/desktop",
     "desktop:dev": "npm run tauri -w @zmrng/desktop -- dev",
