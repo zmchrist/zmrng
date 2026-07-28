@@ -12,7 +12,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
-      test_command: ""
-      setup_command: ""
-      source_globs: "backend/** src/** app/**"
+      test_command: "npm test"
+      setup_command: "npm ci"
+      source_globs: "packages/*/src/**"
     secrets: inherit

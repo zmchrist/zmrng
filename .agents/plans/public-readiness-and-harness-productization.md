@@ -152,10 +152,22 @@ rewritten four more times. Phase 1 makes the README *true*; phase 6 makes it *se
 7. **`config/repos.example.json`** — generic paths only.
 
 ### Acceptance
-- Repo-wide grep for the former project name and the client repo name → zero hits
-  in tracked files.
-- Repo-wide grep for absolute home paths (a leading users-directory prefix) → zero
-  hits in tracked files.
+
+Runnable gates (restored to literal commands per issue #17 — the scrub gate is
+now **word-boundary** matched, so `ephemeral` no longer self-trips it, and the
+canonical name check is encoded once in `scripts/scrub-gate.sh` so it is run,
+not remembered):
+
+```bash
+# No former project name / client repo name as a whole word — zero hits.
+# (Word-boundary `git grep -inw`; "ephemeral" contains the old name but is fine.)
+bash scripts/scrub-gate.sh
+
+# No personal absolute home paths in tracked files — zero hits.
+git grep -nE '/(Users|home)/[A-Za-z0-9._-]+/' -- . ':(exclude).agents/plans/*'
+```
+
+- Both gates above report clean (the scrub gate also runs in CI).
 - `LICENSE`, `.github/workflows/ci.yml`, `.github/PULL_REQUEST_TEMPLATE.md` exist.
 - CI green on the PR.
 - A fresh clone + `npm install` + `npm run dev` starts with no config file present.
