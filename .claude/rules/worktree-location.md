@@ -10,7 +10,7 @@ that repo's own `worktrees/` folder:
 
 Examples:
 - task targeting **zmrng** → `~/Documents/Projects/zmrng/worktrees/<shortId>`
-- task targeting **Pheme** → `~/Documents/Projects/Pheme/worktrees/<shortId>`
+- task targeting **the target repo** → `~/Projects/example-app/worktrees/<shortId>`
 
 Worktrees are **never** placed in a separate global data dir (e.g.
 `~/Library/Application Support/zmrng/worktrees/`). The working tree lives with

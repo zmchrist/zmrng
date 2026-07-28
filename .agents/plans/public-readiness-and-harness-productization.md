@@ -82,7 +82,7 @@ Read these before editing anything:
   (line 28), `POST /api/tasks` (line 55). **No PATCH route exists.**
 - `packages/server/src/config.ts` — `PROJECTS_DIR` default line 37
   (`~/Documents/Projects`), legacy `ZMRNG_TARGET_REPO` fallback line 192
-  (`~/Documents/Projects/pheme`).
+  (a hardcoded target-repo path).
 - `packages/web/src/components/NewTaskForm.tsx` — `STYLES` (32–35), `style` state
   (line 44). Create-time only.
 - `packages/web/src/components/TaskDetail.tsx` — `AUTONOMOUS`/`LIVE`/`STOPPABLE` sets
@@ -93,10 +93,10 @@ Read these before editing anything:
 Audit findings, verified 2026-07-27:
 - Secrets hygiene is **already clean** — `.env`, `config/repos.json`, `*.db`,
   `.DS_Store` gitignored; nothing sensitive tracked. No secret scrub needed.
-- `README.md:7` says *"v1 drives a single target repo: **Pheme**"*.
+- `README.md:7` names a single hardcoded target repo (the former project name).
 - `.agents/plans/zmrng-harness-and-multitarget.md` + `worktree-inside-target-repo.md`
-  hold 15+ `Pheme` references and hardcoded `/Users/tiofeliz/…` paths, including a
-  client `bluebeam` path (`zmrng-harness-and-multitarget.md:178`).
+  hold 15+ references to the former project name and hardcoded absolute home
+  paths, including a client repo path (`zmrng-harness-and-multitarget.md:178`).
 - `CLAUDE.md:80` and `config.ts:37,192` point at `~/Documents/Projects`; the repo
   actually lives under `~/Developer/Projects`. Stale path drift.
 - `wenyan-full` appears at exactly 6 sites: `server/types.ts:25`, `server/index.ts:22`,
@@ -116,21 +116,21 @@ rewritten four more times. Phase 1 makes the README *true*; phase 6 makes it *se
 
 ### Changes
 
-1. **`README.md` — truth-fix only.** Delete the "v1 drives a single target repo:
-   Pheme" line; replace with the multi-repo registry description (which is now
+1. **`README.md` — truth-fix only.** Delete the line naming a single hardcoded
+   target repo; replace with the multi-repo registry description (which is now
    accurate). Add a note that each target repo should gitignore its own `worktrees/`.
    No structural rewrite yet.
 2. **Sanitize `.agents/plans/*.md`.** These stay — they are the paper trail and the
    evidence of PIV discipline. Sanitize **in place**, one commit, no deletions, no
    history rewrite:
-   - `Pheme` → `<target-repo>` / "a target repo" (keep sentences readable)
-   - `bluebeam` registry example → a generic `example-app` entry
-   - `/Users/tiofeliz/Documents/Projects/X` → `~/Projects/X`
+   - former project name → `<target-repo>` / "a target repo" (keep sentences readable)
+   - the client registry example → a generic `example-app` entry
+   - absolute home paths (`~/…/Projects/X` under a user home) → `~/Projects/X`
 3. **Fix path drift.**
    - `config.ts:37` — default `ZMRNG_PROJECTS_DIR` to the first of
      `~/Projects` → `~/Developer/Projects` → `~/Documents/Projects` that exists,
      so current installs keep working. Document in the README config table.
-   - `config.ts:192` — drop the hardcoded `pheme` legacy path; if
+   - `config.ts:192` — drop the hardcoded legacy target path; if
      `ZMRNG_TARGET_REPO` is unset, emit no legacy entry at all.
    - `CLAUDE.md:80` — describe the inheritance generically ("the universal Projects
      harness one level up"), not as an absolute machine path.
@@ -152,8 +152,10 @@ rewritten four more times. Phase 1 makes the README *true*; phase 6 makes it *se
 7. **`config/repos.example.json`** — generic paths only.
 
 ### Acceptance
-- `git grep -in "pheme\|bluebeam"` → zero hits in tracked files.
-- `git grep -n "/Users/"` → zero hits in tracked files.
+- Repo-wide grep for the former project name and the client repo name → zero hits
+  in tracked files.
+- Repo-wide grep for absolute home paths (a leading users-directory prefix) → zero
+  hits in tracked files.
 - `LICENSE`, `.github/workflows/ci.yml`, `.github/PULL_REQUEST_TEMPLATE.md` exist.
 - CI green on the PR.
 - A fresh clone + `npm install` + `npm run dev` starts with no config file present.
