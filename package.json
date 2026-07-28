@@ -2,7 +2,7 @@
   "name": "zmrng",
   "version": "0.1.0",
   "private": true,
-  "description": "Autonomous task orchestrator GUI — drives Claude Code headless against the Pheme repo",
+  "description": "Autonomous task orchestrator GUI — drives Claude Code headless against a configurable registry of target repos",
   "workspaces": [
     "packages/server",
     "packages/web",
