@@ -25,6 +25,6 @@
     "desktop:build": "npm run build && npm run bundle:sidecar && npm run tauri -w @zmrng/desktop -- build"
   },
   "engines": {
-    "node": ">=20.11.0"
+    "node": ">=20.11.0 <23"
   }
 }
