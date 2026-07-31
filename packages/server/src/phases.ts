@@ -114,7 +114,8 @@ function settingsNote(model: string, effort: EffortLevel, style: CaveStyle): str
   return `settings — model=${model} · effort=${effort} · style=${styleDesc}`
 }
 
-function systemPrompt(
+/** Exported for prompt-contract tests (phase 3). */
+export function systemPrompt(
   branch: string,
   repoPath: string,
   defaultBranch: string,
@@ -123,8 +124,21 @@ function systemPrompt(
   return [
     `You are a zmrng autonomous worker operating on the target repository at \`${repoPath}\`.`,
     `You are running inside a dedicated git worktree ALREADY checked out on the fresh branch \`${branch}\`, cut from the repo's default branch (${defaultBranch}).`,
-    `NEVER switch to or commit on \`${defaultBranch}\`/\`main\`/\`master\`. NEVER create or switch to a different branch — use the branch you are already on.`,
+    '',
+    'BRANCH-ONLY (hard rule, no exceptions):',
+    `- NEVER switch to, commit on, merge into, or push to \`${defaultBranch}\`/\`main\`/\`master\`.`,
+    '- NEVER create or switch to a different branch, and never `git checkout`/`git switch` anything — use the branch you are already on.',
+    '- NEVER force-push, rebase onto, or rewrite published history. Your only write to the remote is `git push -u origin <your branch>`.',
+    '- You deliver work as a PULL REQUEST. Merging is the operator\'s job on GitHub; never merge your own PR.',
+    '',
+    'WORKTREE HYGIENE (hard rule):',
+    '- This worktree is owned by the orchestrator. NEVER run `git worktree remove|prune`, never delete the worktree directory, and never delete your branch — the orchestrator cleans both up after the operator merges.',
+    '- Do not create additional worktrees.',
+    '- Leave the tree clean: everything you produce is either committed on your branch or deleted. No stray scratch files, no `git stash`.',
+    '',
     "Obey the target repository's CLAUDE.md and every rule under its .claude/rules/. Follow that repo's own conventions, types, and design tokens. Any repo security hooks remain active (they block .env access, force-push, and recursive deletes) — respect them.",
+    '',
+    'LIFECYCLE: every task moves through Plan → Implement (TDD) → Code Review → Validate → Sync Docs. The orchestrator enforces the phase boundaries; you enforce the steps inside your phase.',
     '',
     'You run inside a PIV pipeline (clarify → plan → execute), one phase per session, each handed off by an orchestrator. You signal phase completion by printing a CONTROL TOKEN on its own line; the orchestrator watches for it. Only emit the token for your current phase:',
     '- ZMRNG_READY — clarify phase complete.',
@@ -143,7 +157,8 @@ function clarifyKickoff(task: Task): string {
   ].join('\n')
 }
 
-function planKickoff(task: Task, transcript: string): string {
+/** Exported for prompt-contract tests (phase 3). */
+export function planKickoff(task: Task, transcript: string): string {
   return [
     'PLAN PHASE. The clarify phase is complete; this is a fresh session. Do NOT implement anything in this phase.',
     `Task title: ${task.title}`,
@@ -153,16 +168,54 @@ function planKickoff(task: Task, transcript: string): string {
     transcript || '(no transcript captured — work from the task title/details)',
     '',
     'Steps:',
-    '1. Run the `/core_piv_loop:plan-feature` workflow for this task and write the resulting plan to `.agents/plans/<kebab-case-name>.md` within THIS repository.',
-    '2. Have a subagent QA the plan: invoke the `code-reviewer` agent (fall back to `qa`) to review the plan for soundness against the task and the repo conventions. If it finds the plan unsound, revise the plan and re-QA. Do AT MOST 2 revise+re-QA rounds, then proceed regardless.',
-    '3. Assess complexity and choose the execute-phase model and effort: use `opus` for non-trivial/architectural/multi-file work and `sonnet` only for simple, mechanical changes; effort defaults to `high`, raise to `xhigh`/`max` for genuinely complex work and drop to `medium` only for trivial work.',
+    '1. GRILL THE APPROACH FIRST — no code before the plan is sharp. Read the actual files you intend to change; do not plan against assumptions. Then interrogate your own approach in writing: what is the simplest thing that works, what does this break, what did you assume that the code does not support, what is out of scope. Name at least one alternative you rejected and why. Nothing is written to the plan until it survives this.',
+    '2. Run the `/core_piv_loop:plan-feature` workflow for this task and write the resulting plan to `.agents/plans/<kebab-case-name>.md` within THIS repository. The plan MUST contain an explicit "Test strategy" section naming: the test runner/command this repo uses, exactly which tests you will add or update (file paths), and what each one proves. If this repo has NO test runner, the section must say so plainly and state how the change will be verified instead — never omit the section.',
+    '3. Have a subagent QA the plan: invoke the `code-reviewer` agent (fall back to `qa`) to review the plan for soundness against the task and the repo conventions. If it finds the plan unsound, revise the plan and re-QA. Do AT MOST 2 revise+re-QA rounds, then proceed regardless.',
+    '4. Assess complexity and choose the execute-phase model and effort: use `opus` for non-trivial/architectural/multi-file work and `sonnet` only for simple, mechanical changes; effort defaults to `high`, raise to `xhigh`/`max` for genuinely complex work and drop to `medium` only for trivial work.',
     'When the plan is written and QA is complete, output on its own line exactly:',
     'ZMRNG_PLAN_READY model=<opus|sonnet> effort=<low|medium|high|xhigh|max> plan=<relative path to the plan file>',
     'If a required QA subagent is missing from this repo, output `ZMRNG_BLOCKED: <agent name> not available` on its own line and stop.',
   ].join('\n')
 }
 
-function executeKickoff(
+/**
+ * Where the worker writes its PR body. Inside the worktree's git dir, so it is
+ * never tracked, never committed, and never left behind as a stray file.
+ */
+export const PR_BODY_FILE = '$(git rev-parse --git-dir)/zmrng-pr-body.md'
+
+/**
+ * The canonical PR body the worker must produce, mirroring
+ * `.github/PULL_REQUEST_TEMPLATE.md`. Passed via `gh pr create --body-file` so
+ * the lifecycle checklist is *guaranteed* present rather than hoped for —
+ * `--fill` would silently drop it.
+ */
+export const PR_BODY_TEMPLATE = [
+  '## What & why',
+  '',
+  '<one paragraph: the change and the motivation>',
+  '',
+  '<!-- coding-gate:checklist:start -->',
+  '## Lifecycle checklist',
+  '',
+  '- [ ] **Plan** — grilled the approach before coding (link the plan file)',
+  '- [ ] **Spec/Tickets** — plan carried into a spec or tickets',
+  '- [ ] **TDD** — implemented RED → GREEN → REFACTOR (tests added/updated in the same commit)',
+  '- [ ] **Review** — `code-reviewer` pass done; findings addressed',
+  "- [ ] **Validate** — ran this repo's full validation; green",
+  '<!-- coding-gate:checklist:end -->',
+  '',
+  '## Testing',
+  '',
+  '<the tests you added/updated and what each proves — or, if none, the explicit reason>',
+  '',
+  '## Validation',
+  '',
+  '<the exact commands you ran and their result>',
+].join('\n')
+
+/** Exported for prompt-contract tests (phase 3). */
+export function executeKickoff(
   branch: string,
   defaultBranch: string,
   planPath: string | null,
@@ -173,17 +226,31 @@ function executeKickoff(
     `You are already on branch \`${branch}\` in this worktree — do NOT create or switch branches (ignore any "create a feature branch" step in the execute workflow).`,
     `Run the \`/core_piv_loop:execute ${planRef}\` workflow against that plan.`,
     'Route work to specialists as needed: frontend work (React/CSS/web) → the `frontend-specialist` agent; backend work (Fastify/runner/phases/SQLite/server) → the `backend-specialist` agent.',
+    '',
+    'IMPLEMENT WITH TDD — this is the workflow, not a suggestion. Follow the plan\'s "Test strategy" section:',
+    '  RED — first, write or update the failing tests for the behaviour you are about to build, using THIS repo\'s existing test runner and conventions. Run them and confirm they FAIL for the right reason. Never write a test that passes before the implementation exists.',
+    '  GREEN — implement the smallest change that makes those tests pass. Run the suite.',
+    '  REFACTOR — clean up with the tests green; re-run to confirm they stay green.',
+    '  Tests land in the SAME commit as the source they cover — never a follow-up commit.',
+    'TOLERANCE (do not silently skip): if this repo genuinely has no test runner, or the change is untestable by its nature (pure docs/config), you may skip RED/GREEN — but you MUST then state that explicitly in the PR body under "Testing", naming the reason. An unexplained absence of tests is a failed execute phase.',
+    '',
     'After implementation, BEFORE committing, print ZMRNG_VALIDATING on its own line, then run this chain in order (best-effort — skip a step only if its agent is genuinely unavailable):',
     '  1. `qa` agent — run validation (typecheck/lint/build) and report PASS/FAIL; fix every failure (route fixes to the right specialist).',
     '  2. `code-reviewer` agent — review the changes against the plan; address its findings.',
     '  3. `doc-updater` agent (or the `sync-docs` skill) — sync the docs to the changes.',
     'If any required agent above is missing from this repo, output `ZMRNG_BLOCKED: <agent name> not available` on its own line and STOP — wait for the operator to add it and resume you; then continue the chain.',
     'Finally:',
-    '- Ensure `npm run typecheck && npm run lint && npm run build` all pass — fix every failure.',
+    "- Run this repo's full validation and ensure every check passes — fix every failure. For a Node repo that is `npm run typecheck && npm run lint && npm test && npm run build` (skip a script this repo does not define).",
     '- MANDATORY before committing: run the `sync-docs` skill (the Skill tool with skill "sync-docs", equivalent to the operator running `/sync-docs`) to bring this repo\'s documentation in sync with your changes, and stage any docs it updates. Do this even if the doc step in the QA chain above already ran. Skip only if the skill is genuinely unavailable in this repo.',
+    `- Stage the plan file itself (\`${planPath ?? 'the plan you wrote under .agents/plans/'}\`) along with your changes — the PR body links it, so an uncommitted plan is a dead link.`,
     '- Commit with a descriptive Conventional Commit message.',
     `- Push the branch: git push -u origin ${branch}`,
-    `- Open a PR: gh pr create --fill --base ${defaultBranch} --head ${branch}`,
+    `- Write the PR body to \`${PR_BODY_FILE}\` (a path inside the git dir — never tracked, never committed). It MUST follow this template verbatim, with every box honestly checked or explicitly explained:`,
+    '',
+    PR_BODY_TEMPLATE,
+    '',
+    `- Open the PR with that file (NOT \`--fill\`): gh pr create --base ${defaultBranch} --head ${branch} --title "<conventional commit style title>" --body-file "${PR_BODY_FILE}"`,
+    '- Write the PR title and body in normal, professional English regardless of your narration style.',
     'Then output the PR URL on its own line.',
   ].join('\n')
 }
