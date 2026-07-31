@@ -41,6 +41,11 @@ Run: `npm test` (both), `npm run test:watch` (both), or `-w @zmrng/server` /
   atomic `addUsage()` accumulation.
 - **`config.ts`** — `resolveRegistry()` precedence (`repos.json` → env → legacy),
   auto-scan, and the empty-registry guard (issue #16).
+- **Worker prompts** (`prompts.test.ts`) — the harness contract. `systemPrompt()`,
+  `planKickoff()`, `executeKickoff()`, and `PR_BODY_TEMPLATE` are pinned: the
+  branch-only + worktree-hygiene rules, the grill/test-strategy planning steps,
+  RED→GREEN→REFACTOR, `--body-file` (never `--fill`), and checklist parity with
+  `.github/PULL_REQUEST_TEMPLATE.md`. Deleting a rule from a prompt fails CI.
 - **State machine** (`taskManager.test.ts`) — the highest-value artifact. Drives
   the real `TaskManager` over a **real temp git repo** (worktree create/remove run
   for real) with a **fake runner** injected through `TaskManager`'s optional
