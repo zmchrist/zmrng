@@ -230,7 +230,7 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
 - **Tier 1 — this file.** Always loaded: structure, commands, conventions.
 - **Tier 2 — auto-loading rules** (`.claude/rules/`): `backend-typescript.md`,
   `frontend-react.md`, `error-handling.md`, `testing.md`, `planning-workflow.md`,
-  `worktree-location.md`.
+  `worktree-location.md`, `coding-lifecycle.md`.
 - **Tier 3 — reference docs** (`.claude/docs/`): `services-reference.md`,
   `implementation-history.md`. Plus `.claude/files/` (PROJECT_CONTEXT, FUTURE_IDEAS) and
   `.claude/errors.md` (known gotchas — check before debugging).
