@@ -6,6 +6,23 @@ non-obvious root cause, or is likely to recur. Template in
 
 ---
 
+### `npm start` dies with `ERR_DLOPEN_FAILED` / `NODE_MODULE_VERSION`
+- **Error:** `npm start` aborts immediately: *"The module
+  `node_modules/better-sqlite3/build/Release/better_sqlite3.node` was compiled
+  against a different Node.js version using NODE_MODULE_VERSION 127"*,
+  `code: 'ERR_DLOPEN_FAILED'`. `npm test`/`npm run build` are unaffected —
+  only the paths that actually open the DB.
+- **Cause:** `better-sqlite3` is a native addon; its binding is compiled for the
+  Node major that ran `npm install`. This machine has several nodes on `PATH`
+  (nvm 22.14, homebrew `node@25`), and a shell that resolves the newer one loads
+  a binding built for the older ABI.
+- **Solution:** `nvm use` (`.nvmrc` pins 22) then `npm start`. If the binding is
+  genuinely built for the wrong major, `npm rebuild better-sqlite3`. `engines`
+  is pinned to `>=20.11.0 <23` so npm warns instead of failing at runtime.
+  Verify with `node -v` before blaming the server.
+- **Files:** `.nvmrc`, root `package.json` (`engines`)
+- **Date Found:** 2026-07-27
+
 ### Rebuilt `.app` still ships the old UI (stale bundled `dist`)
 - **Error:** No error surfaced — after `npm run desktop:build`, the `.app` still renders
   an old UI (e.g. missing the collapsible task pane) even though the feature is present in

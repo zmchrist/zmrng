@@ -56,6 +56,12 @@ cp .env.example .env          # optional — every var has a sane default
 npm run dev                   # server :4500 + web :5174
 ```
 
+**Node 20.11–22** (`.nvmrc` pins 22; `nvm use` picks it up). `better-sqlite3`
+ships a native binding compiled per Node major — running the server on a newer
+Node than the one `npm install` ran under fails at startup with
+`NODE_MODULE_VERSION … ERR_DLOPEN_FAILED`. Fix: `nvm use && npm rebuild
+better-sqlite3`.
+
 Open http://localhost:5174.
 
 Production build + serve (web is served by the Fastify server from `web/dist`):
