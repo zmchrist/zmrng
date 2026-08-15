@@ -7,6 +7,7 @@ import type {
   EffortLevel,
   CaveStyle,
   WorktreeFileTree,
+  WorktreeFileContent,
   PreflightResult,
 } from './types'
 
@@ -40,6 +41,13 @@ export const api = {
   listTasks: () => req<Task[]>('/api/tasks'),
   getEvents: (id: string) => req<TaskEvent[]>(`/api/tasks/${id}/events`),
   getFiles: (id: string) => req<WorktreeFileTree>(`/api/tasks/${id}/files`),
+  readFile: (id: string, path: string) =>
+    req<WorktreeFileContent>(`/api/tasks/${id}/file?path=${encodeURIComponent(path)}`),
+  writeFile: (id: string, path: string, content: string) =>
+    req<{ ok: true }>(`/api/tasks/${id}/file`, {
+      method: 'PUT',
+      body: JSON.stringify({ path, content }),
+    }),
   createTask: (
     title: string,
     body: string,

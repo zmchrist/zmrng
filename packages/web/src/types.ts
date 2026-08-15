@@ -104,6 +104,17 @@ export interface WorktreeFileTree {
   entries: WorktreeFileNode[]
 }
 
+/** How the Viewer (U2) should render a file, dispatched by extension. */
+export type WorktreeFileFormat = 'markdown' | 'code' | 'image' | 'pdf'
+
+/** Contents of one worktree file, fetched on demand when the Viewer opens it. */
+export interface WorktreeFileContent {
+  path: string
+  format: WorktreeFileFormat
+  encoding: 'utf8' | 'base64'
+  content: string
+}
+
 export type EventKind = 'claude' | 'status' | 'operator' | 'error'
 
 export type EventSub =

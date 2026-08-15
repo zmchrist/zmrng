@@ -5,21 +5,30 @@ import type { WorktreeFileNode } from '../types'
 interface NodeProps {
   node: WorktreeFileNode
   depth: number
+  onOpen: (path: string) => void
+  selectedPath: string | null
 }
 
 /** A single tree row: a collapsible dir or a leaf file. */
-function TreeNode({ node, depth }: NodeProps) {
+function TreeNode({ node, depth, onOpen, selectedPath }: NodeProps) {
   const [open, setOpen] = useState(depth === 0)
   const indent = { paddingLeft: `calc(${depth} * var(--tree-indent) + 10px)` }
 
   if (node.type === 'file') {
+    const selected = node.path === selectedPath
     return (
-      <div className={styles.file} style={indent} title={node.path}>
+      <button
+        type="button"
+        className={`${styles.file} ${selected ? styles.fileSelected : ''}`}
+        style={indent}
+        title={node.path}
+        onClick={() => onOpen(node.path)}
+      >
         <span className={styles.glyph} aria-hidden>
           ◦
         </span>
         <span className={styles.label}>{node.name}</span>
-      </div>
+      </button>
     )
   }
 
@@ -42,7 +51,7 @@ function TreeNode({ node, depth }: NodeProps) {
       {open && children.length > 0 && (
         <div className={styles.children}>
           {children.map((child) => (
-            <TreeNode key={child.path} node={child} depth={depth + 1} />
+            <TreeNode key={child.path} node={child} depth={depth + 1} onOpen={onOpen} selectedPath={selectedPath} />
           ))}
         </div>
       )}
@@ -52,13 +61,15 @@ function TreeNode({ node, depth }: NodeProps) {
 
 interface Props {
   entries: WorktreeFileNode[]
+  onOpen: (path: string) => void
+  selectedPath?: string | null
 }
 
-export function FileTree({ entries }: Props) {
+export function FileTree({ entries, onOpen, selectedPath = null }: Props) {
   return (
     <div className={styles.tree}>
       {entries.map((node) => (
-        <TreeNode key={node.path} node={node} depth={0} />
+        <TreeNode key={node.path} node={node} depth={0} onOpen={onOpen} selectedPath={selectedPath} />
       ))}
     </div>
   )

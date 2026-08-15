@@ -8,6 +8,7 @@ import { Db } from './db.js'
 import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { listWorktreeFiles } from './worktree.js'
+import { readWorktreeFile, writeWorktreeFile, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
 import type { WsEvent, EffortLevel, CaveStyle, WorktreeFileTree } from './types.js'
 
@@ -100,6 +101,39 @@ app.get('/api/tasks/:id/files', (req): WorktreeFileTree => {
   } catch (err) {
     app.log.error({ err, taskId: id }, 'failed to list worktree files')
     return { root: null, entries: [] }
+  }
+})
+
+// Read one worktree file's contents, dispatched by format (text vs base64).
+app.get('/api/tasks/:id/file', (req, reply) => {
+  const { id } = req.params as { id: string }
+  const { path } = req.query as { path?: string }
+  const task = db.getTask(id)
+  if (!task?.worktree || !path) return reply.code(400).send({ error: 'path is required' })
+  try {
+    return readWorktreeFile(task.worktree, path)
+  } catch (err) {
+    const code = err instanceof WorktreeFileError ? 400 : 500
+    app.log.error({ err, taskId: id, path }, 'failed to read worktree file')
+    return reply.code(code).send({ error: errMsg(err) })
+  }
+})
+
+// Write text content into a worktree file (rejects binary/image/pdf paths).
+app.put('/api/tasks/:id/file', (req, reply) => {
+  const { id } = req.params as { id: string }
+  const body = req.body as { path?: string; content?: string } | undefined
+  const task = db.getTask(id)
+  if (!task?.worktree || !body?.path || body.content === undefined) {
+    return reply.code(400).send({ error: 'path and content are required' })
+  }
+  try {
+    writeWorktreeFile(task.worktree, body.path, body.content)
+    return { ok: true }
+  } catch (err) {
+    const code = err instanceof WorktreeFileError ? 400 : 500
+    app.log.error({ err, taskId: id, path: body.path }, 'failed to write worktree file')
+    return reply.code(code).send({ error: errMsg(err) })
   }
 })
 
