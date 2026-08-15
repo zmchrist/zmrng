@@ -15,6 +15,7 @@ import type {
 import { TaskList } from './components/TaskList'
 import { NewTaskForm } from './components/NewTaskForm'
 import { TaskDetail } from './components/TaskDetail'
+import { AuthBanner } from './components/AuthBanner'
 import { STATUS_LABEL, statusColor } from './status'
 
 export default function App() {
@@ -110,6 +111,7 @@ export default function App() {
   return (
     <div className={`${styles.app} ${railCollapsed ? styles.appCollapsed : ''}`}>
       <div className={styles.dragbar} data-tauri-drag-region />
+      <AuthBanner />
       <aside className={styles.rail}>
         {railCollapsed ? (
           <div className={styles.mini}>

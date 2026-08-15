@@ -100,8 +100,24 @@ export interface Config {
   dataDir: string
   dbPath: string
   webDist: string
-  /** True if ANTHROPIC_API_KEY was present and stripped so claude uses Max OAuth. */
-  apiKeyStripped: boolean
+  /**
+   * `oauth` (default): ANTHROPIC_API_KEY is stripped from worker child envs so
+   * `claude` authenticates with the operator's Max OAuth login.
+   * `apikey`: the key is preserved, letting a stranger with no Max login run
+   * workers against the metered API instead.
+   */
+  authMode: AuthMode
+}
+
+export type AuthMode = 'oauth' | 'apikey'
+
+/**
+ * Parse `ZMRNG_AUTH_MODE` into an `AuthMode` — pure and unit-testable, mirroring
+ * `resolveRegistry`'s testability pattern. Any value other than `apikey`
+ * (case-insensitive) resolves to the safe default, `oauth`.
+ */
+export function resolveAuthMode(env: { ZMRNG_AUTH_MODE?: string }): AuthMode {
+  return env.ZMRNG_AUTH_MODE?.trim().toLowerCase() === 'apikey' ? 'apikey' : 'oauth'
 }
 
 /** True if `p` exists and is inside a git work tree. */
@@ -394,7 +410,7 @@ function buildConfig(): Config {
     dataDir: DATA_DIR,
     dbPath: path.join(DATA_DIR, 'zmrng.db'),
     webDist: process.env.ZMRNG_WEB_DIST ?? path.join(REPO_ROOT, 'packages', 'web', 'dist'),
-    apiKeyStripped: Boolean(process.env.ANTHROPIC_API_KEY),
+    authMode: resolveAuthMode(process.env),
   }
 }
 
