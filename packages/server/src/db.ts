@@ -9,6 +9,7 @@ import type {
   EffortLevel,
   CaveStyle,
   TaskUsage,
+  TaskComment,
 } from './types.js'
 
 const SCHEMA = `
@@ -32,6 +33,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   cost_usd REAL NOT NULL DEFAULT 0,
   turns INTEGER NOT NULL DEFAULT 0,
   queued INTEGER NOT NULL DEFAULT 0,
+  blocked_kind TEXT,
+  blocked_reason TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -43,6 +46,14 @@ CREATE TABLE IF NOT EXISTS events (
   payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, id);
+CREATE TABLE IF NOT EXISTS task_comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,
+  author TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id, id);
 `
 
 interface TaskRow {
@@ -65,6 +76,8 @@ interface TaskRow {
   cost_usd: number
   turns: number
   queued: number
+  blocked_kind: string | null
+  blocked_reason: string | null
   created_at: string
   updated_at: string
 }
@@ -75,6 +88,14 @@ interface EventRow {
   ts: string
   kind: string
   payload: string
+}
+
+interface TaskCommentRow {
+  id: number
+  task_id: string
+  author: string
+  body: string
+  created_at: string
 }
 
 function rowToTask(r: TaskRow): Task {
@@ -100,6 +121,8 @@ function rowToTask(r: TaskRow): Task {
       turns: r.turns,
     },
     queued: r.queued === 1,
+    blockedKind: r.blocked_kind,
+    blockedReason: r.blocked_reason,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -112,6 +135,16 @@ function rowToEvent(r: EventRow): TaskEvent {
     ts: r.ts,
     kind: r.kind as EventKind,
     payload: JSON.parse(r.payload) as EventPayload,
+  }
+}
+
+function rowToComment(r: TaskCommentRow): TaskComment {
+  return {
+    id: r.id,
+    taskId: r.task_id,
+    author: r.author,
+    body: r.body,
+    createdAt: r.created_at,
   }
 }
 
@@ -129,6 +162,8 @@ export type TaskPatch = Partial<
     | 'effort'
     | 'style'
     | 'queued'
+    | 'blockedKind'
+    | 'blockedReason'
   >
 >
 
@@ -143,6 +178,8 @@ const COLUMN_BY_FIELD: Record<keyof TaskPatch, string> = {
   effort: 'effort',
   style: 'style',
   queued: 'queued',
+  blockedKind: 'blocked_kind',
+  blockedReason: 'blocked_reason',
 }
 
 export class Db {
@@ -176,6 +213,8 @@ export class Db {
       ['tokens_cache', 'INTEGER NOT NULL DEFAULT 0'],
       ['cost_usd', 'REAL NOT NULL DEFAULT 0'],
       ['turns', 'INTEGER NOT NULL DEFAULT 0'],
+      ['blocked_kind', 'TEXT'],
+      ['blocked_reason', 'TEXT'],
     ]
     for (const [name, decl] of add) {
       if (!cols.has(name)) this.db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${decl}`)
@@ -274,5 +313,25 @@ export class Db {
       .prepare('SELECT * FROM events WHERE task_id = ? ORDER BY id ASC')
       .all(taskId) as EventRow[]
     return rows.map(rowToEvent)
+  }
+
+  addComment(taskId: string, author: string, body: string, now: string): TaskComment {
+    const info = this.db
+      .prepare('INSERT INTO task_comments (task_id, author, body, created_at) VALUES (?, ?, ?, ?)')
+      .run(taskId, author, body, now)
+    return {
+      id: Number(info.lastInsertRowid),
+      taskId,
+      author,
+      body,
+      createdAt: now,
+    }
+  }
+
+  listComments(taskId: string): TaskComment[] {
+    const rows = this.db
+      .prepare('SELECT * FROM task_comments WHERE task_id = ? ORDER BY id ASC')
+      .all(taskId) as TaskCommentRow[]
+    return rows.map(rowToComment)
   }
 }

@@ -38,6 +38,8 @@ const ADDED = [
   'turns',
 ]
 
+const ADDED_BOARD = ['blocked_kind', 'blocked_reason']
+
 describe('ensureColumns migration', () => {
   it('backfills columns missing from a pre-existing (old-schema) tasks table', () => {
     // Simulate a DB created before the added columns existed.
@@ -54,12 +56,118 @@ describe('ensureColumns migration', () => {
     for (const c of ADDED) expect(columns(dbPath).has(c)).toBe(true)
   })
 
+  it('backfills the board columns (blocked_kind, blocked_reason) on an old-schema table', () => {
+    const raw = new Database(dbPath)
+    raw.exec(`CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL,
+      session_id TEXT, branch TEXT, worktree TEXT, pr_url TEXT, model TEXT,
+      queued INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );`)
+    raw.close()
+    for (const c of ADDED_BOARD) expect(columns(dbPath).has(c)).toBe(false)
+
+    new Db(dbPath)
+    for (const c of ADDED_BOARD) expect(columns(dbPath).has(c)).toBe(true)
+  })
+
   it('is idempotent across two runs (second open adds nothing and does not throw)', () => {
     new Db(dbPath)
     const after1 = columns(dbPath)
     expect(() => new Db(dbPath)).not.toThrow()
     const after2 = columns(dbPath)
     expect([...after2].sort()).toEqual([...after1].sort())
+  })
+
+  it('survives a re-open on a populated db: existing task + comment rows are untouched', () => {
+    const db = new Db(dbPath)
+    db.createTask({
+      id: 't1',
+      title: 'x',
+      body: 'y',
+      model: 'opus',
+      effort: 'high',
+      style: 'normal',
+      repoId: 'zmrng',
+      now: '2026-07-27T00:00:00.000Z',
+    })
+    db.addComment('t1', 'operator', 'hello', '2026-07-27T00:00:01.000Z')
+    const colsBefore = columns(dbPath)
+
+    const db2 = new Db(dbPath) // re-open runs ensureColumns() again
+    expect(db2.getTask('t1')?.title).toBe('x')
+    expect(db2.listComments('t1')).toHaveLength(1)
+    expect(db2.listComments('t1')[0]?.body).toBe('hello')
+    expect([...columns(dbPath)].sort()).toEqual([...colsBefore].sort())
+  })
+
+  it('creates the task_comments table', () => {
+    new Db(dbPath)
+    const raw = new Database(dbPath)
+    const tables = new Set(
+      (
+        raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+          name: string
+        }[]
+      ).map((t) => t.name),
+    )
+    raw.close()
+    expect(tables.has('task_comments')).toBe(true)
+  })
+})
+
+describe('task_comments', () => {
+  const mk = (): Db => {
+    const db = new Db(dbPath)
+    db.createTask({
+      id: 't1',
+      title: 'x',
+      body: 'y',
+      model: 'opus',
+      effort: 'high',
+      style: 'normal',
+      repoId: 'zmrng',
+      now: '2026-07-27T00:00:00.000Z',
+    })
+    return db
+  }
+
+  it('addComment + listComments round-trip', () => {
+    const db = mk()
+    const c1 = db.addComment('t1', 'operator', 'first comment', '2026-07-27T00:00:01.000Z')
+    const c2 = db.addComment('t1', 'qa', 'second comment', '2026-07-27T00:00:02.000Z')
+    expect(c1.id).not.toBe(c2.id)
+
+    const listed = db.listComments('t1')
+    expect(listed).toHaveLength(2)
+    expect(listed[0]).toEqual(c1)
+    expect(listed[1]).toEqual(c2)
+  })
+})
+
+describe('blockedKind / blockedReason', () => {
+  it('updateTask can set and read back blockedKind/blockedReason', () => {
+    const db = new Db(dbPath)
+    db.createTask({
+      id: 't1',
+      title: 'x',
+      body: 'y',
+      model: 'opus',
+      effort: 'high',
+      style: 'normal',
+      repoId: 'zmrng',
+      now: '2026-07-27T00:00:00.000Z',
+    })
+    expect(db.getTask('t1')?.blockedKind).toBeNull()
+    expect(db.getTask('t1')?.blockedReason).toBeNull()
+
+    db.updateTask(
+      't1',
+      { blockedKind: 'toolchain', blockedReason: 'missing subagent' },
+      '2026-07-27T00:00:01.000Z',
+    )
+    const after = db.getTask('t1')
+    expect(after?.blockedKind).toBe('toolchain')
+    expect(after?.blockedReason).toBe('missing subagent')
   })
 })
 

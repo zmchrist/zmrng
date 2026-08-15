@@ -37,4 +37,5 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   done: 'Done',
   failed: 'Failed',
   building: 'Building',
+  archived: 'Archived',
 }
