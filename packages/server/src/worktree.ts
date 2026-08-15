@@ -264,6 +264,11 @@ export async function seedHarness(
     seeded.push('.claude/settings.local.json')
   }
 
+  // Notes (`.zmrng/notes/`) are worker-scoped scratch, not part of the seeded
+  // harness content, but must ride the same git-add exclusion so a worker can
+  // never sweep them into a PR.
+  seeded.push('.zmrng/')
+
   // Exclude every seeded path from `git add -A` in this worktree, idempotently.
   try {
     const gitCommonDir = await git(worktreePath, ['rev-parse', '--git-common-dir'])
@@ -384,6 +389,7 @@ const PRUNE_DIRS = new Set([
   '.cache',
   '.vite',
   'worktrees',
+  '.zmrng',
 ])
 
 /** Guard rails so a pathological tree can never stall the walk or blow the response. */

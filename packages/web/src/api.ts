@@ -48,6 +48,7 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ path, content }),
     }),
+  listNotes: (id: string) => req<string[]>(`/api/tasks/${id}/notes`),
   createTask: (
     title: string,
     body: string,

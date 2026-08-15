@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { existsSync, readFileSync, writeFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync } from 'node:fs'
 import type { WorktreeFileContent, WorktreeFileFormat } from './types.js'
 
 export class WorktreeFileError extends Error {}
@@ -62,5 +62,15 @@ export function writeWorktreeFile(worktreePath: string, relPath: string, content
     throw new WorktreeFileError('cannot write binary files')
   }
   const abs = resolveWithinWorktree(worktreePath, relPath)
+  mkdirSync(path.dirname(abs), { recursive: true })
   writeFileSync(abs, content, 'utf8')
+}
+
+/** Sorted `.md` basenames under `<worktreePath>/.zmrng/notes/`. `[]` if the dir/worktree is absent. */
+export function listNotes(worktreePath: string): string[] {
+  const dir = path.join(worktreePath, '.zmrng', 'notes')
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .filter((name) => name.toLowerCase().endsWith('.md'))
+    .sort((a, b) => a.localeCompare(b))
 }

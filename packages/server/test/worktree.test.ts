@@ -52,8 +52,8 @@ describe('listWorktreeFiles', () => {
     expect(p).toContain('src/index.ts')
   })
 
-  it('prunes .git, node_modules, and dist', () => {
-    for (const heavy of ['.git', 'node_modules', 'dist']) {
+  it('prunes .git, node_modules, dist, and .zmrng', () => {
+    for (const heavy of ['.git', 'node_modules', 'dist', '.zmrng']) {
       mkdirSync(path.join(dir, heavy))
       writeFileSync(path.join(dir, heavy, 'junk'), 'x')
     }
@@ -64,6 +64,7 @@ describe('listWorktreeFiles', () => {
     expect(p).not.toContain('.git')
     expect(p).not.toContain('node_modules')
     expect(p).not.toContain('dist')
+    expect(p).not.toContain('.zmrng')
   })
 
   it('sorts dirs before files, each alphabetically', () => {

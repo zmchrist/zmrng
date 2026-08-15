@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import styles from './WorkspaceView.module.css'
 import type { Task, TaskEvent, WorktreeFileTree } from '../types'
 import { api } from '../api'
 import { FileTree } from './FileTree'
 import { WorkerLog } from './WorkerLog'
 import { Viewer } from './Viewer'
+import { Notes } from './Notes'
 
 interface Props {
   task: Task | undefined
@@ -12,16 +13,19 @@ interface Props {
   live: string
 }
 
-/** A collapsible dock card in the right rail — a labelled slot for future U3/U4 content. */
+/** A collapsible dock card in the right rail — either a placeholder `slot` message
+ *  (dashed dockSlot box, for still-unbuilt cards) or real `children` content. */
 function RailCard({
   title,
   hint,
   slot,
+  children,
   defaultOpen = true,
 }: {
   title: string
   hint: string
-  slot: string
+  slot?: string
+  children?: ReactNode
   defaultOpen?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -41,7 +45,7 @@ function RailCard({
       </button>
       {open && (
         <div className={styles.cardBody}>
-          <div className={styles.dockSlot}>{slot}</div>
+          {children ?? <div className={styles.dockSlot}>{slot}</div>}
         </div>
       )}
     </section>
@@ -134,7 +138,9 @@ export function WorkspaceView({ task, events, live }: Props) {
 
       <aside className={styles.rightRail}>
         <RailCard title="Chat" hint="U4" slot="Chat with the worker — coming soon." />
-        <RailCard title="Notes" hint="U3" slot="Task notes — coming soon." />
+        <RailCard title="Notes" hint="U3">
+          <Notes taskId={taskId} selectedPath={effectiveOpenPath} onOpen={setOpenPath} />
+        </RailCard>
       </aside>
     </div>
   )
