@@ -124,4 +124,47 @@ describe('seedHarness', () => {
     expect(readFileSync(path.join(worktreeDir, 'CLAUDE.md'), 'utf8')).toContain('harness CLAUDE')
     expect(existsSync(path.join(worktreeDir, '.claude', 'rules', 'zmrng-lifecycle.md'))).toBe(false)
   })
+
+  it('skips all hook seeding + emits the operator note when python3 is unavailable', async () => {
+    const notes = await seedHarness(
+      worktreeDir,
+      '/some/target/repo',
+      harnessDir,
+      'zmrng-nonexistent-interpreter',
+    )
+
+    expect(notes).toContain(
+      'harness hooks skipped — python3 not found; security_guard/lint/validate inactive for this task',
+    )
+    expect(existsSync(path.join(worktreeDir, '.claude', 'zmrng-hooks', 'security_guard.py'))).toBe(
+      false,
+    )
+
+    // Non-hook seeding still proceeds.
+    expect(existsSync(path.join(worktreeDir, '.claude', 'rules', 'zmrng-testing.md'))).toBe(true)
+    expect(existsSync(path.join(worktreeDir, '.claude', 'agents', 'zmrng-qa.md'))).toBe(true)
+
+    // No hook commands registered in settings.local.json (file may not even exist).
+    const settingsPath = path.join(worktreeDir, '.claude', 'settings.local.json')
+    if (existsSync(settingsPath)) {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8'))
+      expect(settings.hooks).toBeUndefined()
+    }
+  })
+
+  it('registers hooks + copies hook scripts when python3 is available', async () => {
+    const notes = await seedHarness(worktreeDir, '/some/target/repo', harnessDir, 'python3')
+
+    expect(notes).not.toContain(
+      'harness hooks skipped — python3 not found; security_guard/lint/validate inactive for this task',
+    )
+    expect(existsSync(path.join(worktreeDir, '.claude', 'zmrng-hooks', 'security_guard.py'))).toBe(
+      true,
+    )
+
+    const settings = JSON.parse(
+      readFileSync(path.join(worktreeDir, '.claude', 'settings.local.json'), 'utf8'),
+    )
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('security_guard.py')
+  })
 })

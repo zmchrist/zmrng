@@ -16,6 +16,7 @@ Uses a flag file to prevent infinite loops — if validation was already
 attempted this turn, it passes through.
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -24,49 +25,23 @@ import tempfile
 from pathlib import Path
 
 
-# Prevent infinite loops: if the flag exists, pass through
-FLAG_FILE = os.path.join(tempfile.gettempdir(), "claude_stop_hook_active")
-
-
 def get_project_dir() -> Path:
     """Get the project directory from environment."""
     return Path(os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())).resolve()
 
 
-def find_active_project(projects_dir: Path) -> Path | None:
+def get_flag_file(project_dir: Path) -> str:
     """
-    Determine which project was being worked on by checking git status
-    for modified files. Returns the project subdirectory, or None if
-    we're working at the root level.
+    Per-worktree stop-flag file, keyed by hashing the resolved project dir.
+
+    zmrng runs concurrent lanes (multiple worktrees hitting this hook at the
+    same time). A single global flag file would race: one worktree's Stop
+    could consume the flag another worktree just set, letting it skip
+    validation. Keying the flag filename by project dir gives each worktree
+    its own flag.
     """
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"],
-            capture_output=True, text=True, timeout=10,
-            cwd=str(projects_dir),
-        )
-        if result.returncode != 0:
-            # Try unstaged changes
-            result = subprocess.run(
-                ["git", "diff", "--name-only"],
-                capture_output=True, text=True, timeout=10,
-                cwd=str(projects_dir),
-            )
-
-        if result.stdout.strip():
-            # Get the first-level directory from changed files
-            for line in result.stdout.strip().splitlines():
-                parts = line.split("/", 1)
-                if len(parts) > 1:
-                    candidate = projects_dir / parts[0]
-                    if candidate.is_dir():
-                        markers = ["pyproject.toml", "package.json", "Cargo.toml", "go.mod"]
-                        if any((candidate / m).exists() for m in markers):
-                            return candidate
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
-
-    return None
+    digest = hashlib.sha256(str(project_dir).encode()).hexdigest()[:16]
+    return os.path.join(tempfile.gettempdir(), f"claude_stop_hook_active_{digest}")
 
 
 def run_cmd(cmd: list[str], cwd: str, timeout: int = 120) -> tuple[bool, str]:
@@ -190,19 +165,16 @@ def validate_go(project_dir: Path) -> tuple[bool, list[str]]:
 
 
 def main() -> None:
+    project_dir = get_project_dir()
+    flag_file = get_flag_file(project_dir)
+
     # Prevent infinite loops
-    if os.path.exists(FLAG_FILE):
-        os.unlink(FLAG_FILE)
+    if os.path.exists(flag_file):
+        os.unlink(flag_file)
         sys.exit(0)
 
-    projects_dir = get_project_dir()
-    project_dir = find_active_project(projects_dir)
-
-    if not project_dir:
-        sys.exit(0)  # No recognizable project modified — pass through
-
     # Set the flag before running validation
-    Path(FLAG_FILE).touch()
+    Path(flag_file).touch()
 
     try:
         # Custom validation takes priority
@@ -250,8 +222,8 @@ def main() -> None:
 
     finally:
         # Clean up flag on any exit path
-        if os.path.exists(FLAG_FILE):
-            os.unlink(FLAG_FILE)
+        if os.path.exists(flag_file):
+            os.unlink(flag_file)
 
     sys.exit(0)
 
