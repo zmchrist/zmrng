@@ -110,7 +110,7 @@
 }
 /* the OS-rendered open list — tint it to smoke so it isn't a white slab */
 .select option {
-  background: #16191e;
+  background: var(--well);
   color: var(--text);
 }
 
