@@ -41,11 +41,29 @@ function checkGhAuth(): PreflightSignal {
   }
 }
 
+/**
+ * Best-effort presence check for a binary on PATH, distinct from the
+ * claude/gh auth signals above — this only asks "is it installed at all".
+ */
+function checkOnPath(bin: string): PreflightSignal {
+  try {
+    execFileSync('which', [bin], { stdio: 'ignore', timeout: PROBE_TIMEOUT_MS })
+    return { ok: true, detail: `${bin} found on PATH` }
+  } catch {
+    return { ok: false, detail: `${bin} not found on PATH` }
+  }
+}
+
 /** Fresh probe on every call — never cached, so a poller sees state changes live. */
 export function runPreflight(): PreflightResult {
   return {
     claude: safe(checkClaudeAuth),
     gh: safe(checkGhAuth),
+    path: {
+      git: safe(() => checkOnPath('git')),
+      gh: safe(() => checkOnPath('gh')),
+      claude: safe(() => checkOnPath('claude')),
+    },
   }
 }
 

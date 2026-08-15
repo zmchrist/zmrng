@@ -167,7 +167,14 @@ export interface PreflightSignal {
   detail: string
 }
 
+export interface PreflightPath {
+  git: PreflightSignal
+  gh: PreflightSignal
+  claude: PreflightSignal
+}
+
 export interface PreflightResult {
   claude: PreflightSignal
   gh: PreflightSignal
+  path: PreflightPath
 }
