@@ -1,32 +1,113 @@
 .app {
-  display: grid;
-  grid-template-columns: 348px 1fr;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   overflow: hidden;
   padding: 0 12px 12px;
   gap: 12px;
-  transition: grid-template-columns var(--spring);
 }
 
 .appCollapsed {
   grid-template-columns: 56px 1fr;
 }
 
-/* Slim full-width strip that clears the native Tauri window's traffic-light
-   band. Draggable via data-tauri-drag-region there; in a plain browser tab
-   there is no traffic-light chrome to clear, so it collapses to 0 height and
-   reserves no layout space.
+/* Full-width strip below the macOS traffic lights: holds the mode tabs and is
+   the window drag handle in the native Tauri window via data-tauri-drag-region
+   (inert in the browser dev view). Interactive children (tabs) sit above the
+   drag region and stay clickable.
    NOTE: -webkit-app-region is Electron-only; WKWebView (Tauri v2) ignores it.
    Drag is driven solely by the data-tauri-drag-region attribute. */
-.dragbar {
-  grid-column: 1 / -1;
-  height: 0;
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 44px;
+  padding: 0 6px 0 84px; /* left pad clears the macOS traffic lights */
+  flex-shrink: 0;
 }
 
-.rail,
-.detail {
-  grid-row: 2;
+/* ---- mode tabs: Tasks · Board · Workspace ------------------------------ */
+.modeTabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--hairline-soft);
+}
+
+.modeTab {
+  padding: 6px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  transition: color var(--transition), background var(--transition),
+    box-shadow var(--transition);
+}
+.modeTab:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.modeTabActive,
+.modeTabActive:hover {
+  color: var(--accent-ink);
+  background: var(--accent-grad);
+  box-shadow: var(--glow-accent);
+}
+
+.topbarRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: lowercase;
+  background: linear-gradient(120deg, var(--text) 28%, var(--accent-bright));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--text);
+}
+
+/* Static connection indicator — a small neutral dot that softly brightens to
+   silver when the socket is live. */
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  transition: background var(--transition), box-shadow var(--transition);
+}
+.dotOn {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---- Tasks mode: the classic 2-column layout -------------------------- */
+.tasksGrid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 348px 1fr;
+  gap: 12px;
+  transition: grid-template-columns var(--spring);
+}
+.tasksGridCollapsed {
+  grid-template-columns: 56px 1fr;
 }
 
 /* ---- left rail: a floating glass slab ---------------------------------- */
@@ -79,13 +160,15 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-/* ---- collapse / expand control ----------------------------------------- */
-.brandbarRight {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.railTitle {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
+/* ---- collapse / expand control ----------------------------------------- */
 .collapseBtn {
   display: grid;
   place-items: center;
@@ -167,6 +250,42 @@
   color: var(--text-faint);
   font-size: 15px;
   letter-spacing: var(--tracking-tight);
+}
+
+/* ---- generic mode panel (Board stub) ----------------------------------- */
+.modePanel {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--shadow), var(--hairline);
+  animation: detail-in var(--spring) both;
+}
+
+.boardStub {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 32px;
+}
+.stubTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text);
+}
+.stubSub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-faint);
 }
 
 @keyframes rail-in {
