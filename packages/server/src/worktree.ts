@@ -1,7 +1,16 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
-import { mkdirSync, readdirSync, existsSync } from 'node:fs'
+import {
+  mkdirSync,
+  readdirSync,
+  existsSync,
+  copyFileSync,
+  cpSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
+import { config } from './config.js'
 import type { WorktreeFileNode, WorktreeFileTree } from './types.js'
 
 const exec = promisify(execFile)
@@ -11,6 +20,10 @@ async function git(repo: string, args: string[]): Promise<string> {
     maxBuffer: 1024 * 1024 * 16,
   })
   return stdout.trim()
+}
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
 }
 
 /** Turn a task title into a branch-safe slug. */
@@ -75,6 +88,177 @@ export async function createWorktree(
   const base = await resolveBase(repoPath, defaultBranch)
   await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, base])
   return { branch, worktreePath }
+}
+
+/**
+ * Hook registrations seeded into `.claude/settings.local.json`, pointing at the
+ * copies under `.claude/zmrng-hooks/`. Merged additively with any settings the
+ * target worktree already has (never overwrites the target's own entries).
+ * H3 will adapt these scripts further; this is the minimal wiring so
+ * `security_guard.py` fires immediately.
+ */
+function zmrngHooksConfig(): Record<string, unknown[]> {
+  const hookPath = (name: string): string => `\${CLAUDE_PROJECT_DIR}/.claude/zmrng-hooks/${name}`
+  return {
+    PreToolUse: [
+      {
+        matcher: 'Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep',
+        hooks: [
+          {
+            type: 'command',
+            command: `python3 "${hookPath('security_guard.py')}"`,
+            timeout: 5,
+            statusMessage: 'Security check...',
+          },
+        ],
+      },
+    ],
+    PostToolUse: [
+      {
+        matcher: 'Edit|Write|MultiEdit',
+        hooks: [{ type: 'command', command: `python3 "${hookPath('post_tool_use_lint.py')}"`, timeout: 30 }],
+      },
+    ],
+    Stop: [
+      {
+        hooks: [{ type: 'command', command: `python3 "${hookPath('stop_validate.py')}"`, timeout: 120 }],
+      },
+    ],
+  }
+}
+
+/** List `<dir>/*` entries (files or dirs), or `[]` if `dir` doesn't exist. */
+function listEntries(dir: string): string[] {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir).sort()
+}
+
+/** Strip a file extension for use as a `zmrng-<name>` suffix. */
+function stem(fileName: string): string {
+  return fileName.replace(/\.[^.]+$/, '')
+}
+
+/**
+ * Copy zmrng's own `harness/` tree (rules, skills, agents, hooks, CLAUDE.md) into
+ * a task worktree under a `zmrng-` namespace, register the hooks, and exclude
+ * every seeded path from `git add -A` via `info/exclude` — so a worker can never
+ * sweep orchestrator tooling into its own PR. Always copies (never symlinks) and
+ * never clobbers anything the target repo already owns. Idempotent: safe to call
+ * more than once for the same worktree (e.g. a retried start()).
+ *
+ * Returns human-readable notes for the operator log, mirroring
+ * `syncLocalAfterMerge`'s convention.
+ */
+export async function seedHarness(
+  worktreePath: string,
+  targetRepoPath: string,
+  harnessDir: string = path.join(config.repoRoot, 'harness'),
+): Promise<string[]> {
+  const notes: string[] = []
+  if (!existsSync(harnessDir)) {
+    notes.push(`harness source dir not found at ${harnessDir} — skipped seeding`)
+    return notes
+  }
+
+  const claudeDir = path.join(worktreePath, '.claude')
+  const rulesDir = path.join(claudeDir, 'rules')
+  const skillsDir = path.join(claudeDir, 'skills')
+  const agentsDir = path.join(claudeDir, 'agents')
+  const hooksDestDir = path.join(claudeDir, 'zmrng-hooks')
+  mkdirSync(rulesDir, { recursive: true })
+  mkdirSync(skillsDir, { recursive: true })
+  mkdirSync(agentsDir, { recursive: true })
+  mkdirSync(hooksDestDir, { recursive: true })
+
+  // Relative (POSIX, worktree-rooted) paths of every seeded file/dir, for the
+  // info/exclude block below.
+  const seeded: string[] = []
+
+  for (const name of listEntries(path.join(harnessDir, 'rules'))) {
+    const destName = `zmrng-${name}`
+    copyFileSync(path.join(harnessDir, 'rules', name), path.join(rulesDir, destName))
+    seeded.push(`.claude/rules/${destName}`)
+  }
+
+  for (const name of listEntries(path.join(harnessDir, 'skills'))) {
+    const destName = `zmrng-${name}`
+    cpSync(path.join(harnessDir, 'skills', name), path.join(skillsDir, destName), { recursive: true })
+    seeded.push(`.claude/skills/${destName}/`)
+  }
+
+  for (const name of listEntries(path.join(harnessDir, 'agents'))) {
+    const destName = `zmrng-${stem(name)}.md`
+    copyFileSync(path.join(harnessDir, 'agents', name), path.join(agentsDir, destName))
+    seeded.push(`.claude/agents/${destName}`)
+  }
+
+  for (const name of listEntries(path.join(harnessDir, 'hooks'))) {
+    copyFileSync(path.join(harnessDir, 'hooks', name), path.join(hooksDestDir, name))
+  }
+  seeded.push('.claude/zmrng-hooks/')
+
+  // Root CLAUDE.md: never clobber a target's own — fall back to a rules file.
+  const harnessClaudeMd = path.join(harnessDir, 'CLAUDE.md')
+  if (existsSync(harnessClaudeMd)) {
+    const rootClaudeMd = path.join(worktreePath, 'CLAUDE.md')
+    if (existsSync(rootClaudeMd)) {
+      copyFileSync(harnessClaudeMd, path.join(rulesDir, 'zmrng-lifecycle.md'))
+      seeded.push('.claude/rules/zmrng-lifecycle.md')
+    } else {
+      copyFileSync(harnessClaudeMd, rootClaudeMd)
+      seeded.push('CLAUDE.md')
+    }
+  }
+
+  // Merge hook registrations into settings.local.json, additive only — never
+  // drop or overwrite entries the target worktree already has.
+  const settingsPath = path.join(claudeDir, 'settings.local.json')
+  let settings: Record<string, unknown> = {}
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<string, unknown>
+    } catch {
+      notes.push('settings.local.json was invalid JSON — starting fresh (original left unread)')
+      settings = {}
+    }
+  }
+  const hooks = (settings.hooks as Record<string, unknown[]> | undefined) ?? {}
+  for (const [event, entries] of Object.entries(zmrngHooksConfig())) {
+    const existing = hooks[event] ?? []
+    for (const entry of entries) {
+      const dupe = existing.some((e) => JSON.stringify(e) === JSON.stringify(entry))
+      if (!dupe) existing.push(entry)
+    }
+    hooks[event] = existing
+  }
+  settings.hooks = hooks
+  writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`)
+  seeded.push('.claude/settings.local.json')
+
+  // Exclude every seeded path from `git add -A` in this worktree, idempotently.
+  try {
+    const gitCommonDir = await git(worktreePath, ['rev-parse', '--git-common-dir'])
+    const absGitCommonDir = path.isAbsolute(gitCommonDir)
+      ? gitCommonDir
+      : path.resolve(worktreePath, gitCommonDir)
+    const infoDir = path.join(absGitCommonDir, 'info')
+    mkdirSync(infoDir, { recursive: true })
+    const excludePath = path.join(infoDir, 'exclude')
+    const marker = '# zmrng seedHarness — orchestrator-owned, never commit'
+    const current = existsSync(excludePath) ? readFileSync(excludePath, 'utf8') : ''
+    if (!current.includes(marker)) {
+      const block = [marker, ...seeded].join('\n')
+      writeFileSync(excludePath, `${current}${current.endsWith('\n') || !current ? '' : '\n'}${block}\n`)
+      notes.push(`excluded ${seeded.length} zmrng-seeded path(s) from git add in ${excludePath}`)
+    } else {
+      notes.push('zmrng-seeded paths already excluded from git add — skipped')
+    }
+  } catch (err) {
+    notes.push(`failed to update info/exclude: ${errMsg(err)}`)
+  }
+
+  notes.push(`seeded harness into ${worktreePath} (target repo: ${targetRepoPath}) from ${harnessDir}`)
+  return notes
 }
 
 /**

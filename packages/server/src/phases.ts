@@ -8,7 +8,7 @@ import {
   type RunnerFactory,
   type RunnerLike,
 } from './runner.js'
-import { createWorktree, removeWorktree, repoSlug, syncLocalAfterMerge } from './worktree.js'
+import { createWorktree, removeWorktree, repoSlug, seedHarness, syncLocalAfterMerge } from './worktree.js'
 import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
@@ -145,6 +145,8 @@ export function systemPrompt(
     '- ZMRNG_PLAN_READY model=<opus|sonnet> effort=<low|medium|high|xhigh|max> plan=<relative path to the plan file> — plan phase complete.',
     '- ZMRNG_VALIDATING — execute phase has moved from implementation into the QA/review/docs chain.',
     '- ZMRNG_BLOCKED: <reason> — you need a subagent that is missing from this repo; stop and wait for the operator to add it and resume you.',
+    '',
+    'ORCHESTRATOR-OWNED FILES (never stage or commit): everything under `.claude/rules/zmrng-*`, `.claude/skills/zmrng-*`, `.claude/agents/zmrng-*`, `.claude/zmrng-hooks/`, and `.claude/settings.local.json` was seeded by zmrng itself, not the target repo. It is already excluded from `git add -A` via this worktree\'s `info/exclude`; never `git add --force` it or reference it in a PR.',
     styleDirective(style),
   ].join('\n')
 }
@@ -643,6 +645,21 @@ export class TaskManager {
       this.fail(taskId, `worktree creation failed: ${errMsg(err)}`)
       return
     }
+    // Best-effort: copy zmrng's own harness (rules/skills/agents/hooks) into the
+    // worktree so the worker gets it too. Never fails the task — a seeding
+    // problem is logged to the operator and the worker proceeds regardless.
+    try {
+      const notes = await seedHarness(wt.worktreePath, repo.path, path.join(config.repoRoot, 'harness'))
+      for (const note of notes) {
+        this.emitEvent(taskId, 'status', { sub: 'status', note: `harness seed — ${note}` })
+      }
+    } catch (err) {
+      this.emitEvent(taskId, 'status', {
+        sub: 'status',
+        note: `harness seed — failed: ${errMsg(err)} (continuing without it)`,
+      })
+    }
+
     // Resolved once here (not per worker line) so PR detection can be scoped to
     // this task's own repo. `null` = local-only target; detection degrades to
     // first-URL-wins.
