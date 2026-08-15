@@ -7,7 +7,8 @@ import { config } from './config.js'
 import { Db } from './db.js'
 import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
-import type { WsEvent, EffortLevel, CaveStyle } from './types.js'
+import { listWorktreeFiles } from './worktree.js'
+import type { WsEvent, EffortLevel, CaveStyle, WorktreeFileTree } from './types.js'
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -81,6 +82,19 @@ app.post('/api/tasks', (req, reply) => {
 app.get('/api/tasks/:id/events', (req) => {
   const { id } = req.params as { id: string }
   return db.getEvents(id)
+})
+
+// Directory listing (not contents) of a task's worktree, for the Workspace file
+// tree. Always 200: a missing task / worktree yields an empty tree, never a 500.
+app.get('/api/tasks/:id/files', (req): WorktreeFileTree => {
+  const { id } = req.params as { id: string }
+  const task = db.getTask(id)
+  try {
+    return listWorktreeFiles(task?.worktree ?? null)
+  } catch (err) {
+    app.log.error({ err, taskId: id }, 'failed to list worktree files')
+    return { root: null, entries: [] }
+  }
 })
 
 app.post('/api/tasks/:id/start', async (req, reply) => {

@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readdirSync, existsSync } from 'node:fs'
+import type { WorktreeFileNode, WorktreeFileTree } from './types.js'
 
 const exec = promisify(execFile)
 
@@ -151,6 +152,85 @@ export async function syncLocalAfterMerge(
   }
 
   return notes
+}
+
+/**
+ * Directory names that are pruned from the worktree file listing: version
+ * control, dependency, and build-output dirs that are heavy and rarely useful
+ * for the operator to browse.
+ */
+const PRUNE_DIRS = new Set([
+  '.git',
+  'node_modules',
+  'dist',
+  'build',
+  'out',
+  'coverage',
+  '.next',
+  '.turbo',
+  '.cache',
+  '.vite',
+  'worktrees',
+])
+
+/** Guard rails so a pathological tree can never stall the walk or blow the response. */
+const MAX_DEPTH = 8
+const MAX_ENTRIES = 4000
+
+interface WalkBudget {
+  count: number
+}
+
+/** Recursively list `dir`, returning sorted nodes (dirs first, then files). */
+function walk(absDir: string, relDir: string, depth: number, budget: WalkBudget): WorktreeFileNode[] {
+  if (depth > MAX_DEPTH || budget.count >= MAX_ENTRIES) return []
+
+  let dirents: import('node:fs').Dirent[]
+  try {
+    dirents = readdirSync(absDir, { withFileTypes: true })
+  } catch {
+    return [] // unreadable dir — skip rather than throw
+  }
+
+  const dirs: WorktreeFileNode[] = []
+  const files: WorktreeFileNode[] = []
+  for (const dirent of dirents) {
+    if (budget.count >= MAX_ENTRIES) break
+    const isDir = dirent.isDirectory()
+    if (isDir && PRUNE_DIRS.has(dirent.name)) continue
+    // Skip symlinks: don't follow (cycle risk) and don't list dangling links.
+    if (dirent.isSymbolicLink()) continue
+
+    const relPath = relDir ? `${relDir}/${dirent.name}` : dirent.name
+    budget.count += 1
+    if (isDir) {
+      dirs.push({
+        name: dirent.name,
+        path: relPath,
+        type: 'dir',
+        children: walk(path.join(absDir, dirent.name), relPath, depth + 1, budget),
+      })
+    } else if (dirent.isFile()) {
+      files.push({ name: dirent.name, path: relPath, type: 'file' })
+    }
+  }
+
+  const byName = (a: WorktreeFileNode, b: WorktreeFileNode): number =>
+    a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })
+  dirs.sort(byName)
+  files.sort(byName)
+  return [...dirs, ...files]
+}
+
+/**
+ * List a task's worktree as a pruned, depth-capped file tree. Never throws:
+ * a null/missing worktree returns an empty tree with `root: null`. Prunes VCS,
+ * dependency, and build dirs; skips symlinks; caps depth and total node count.
+ */
+export function listWorktreeFiles(worktreePath: string | null): WorktreeFileTree {
+  if (!worktreePath || !existsSync(worktreePath)) return { root: null, entries: [] }
+  const entries = walk(worktreePath, '', 0, { count: 0 })
+  return { root: worktreePath, entries }
 }
 
 /** Remove a worktree (force, in case of uncommitted changes) and prune. */

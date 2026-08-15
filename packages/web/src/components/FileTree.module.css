@@ -1,0 +1,72 @@
+.tree {
+  --tree-indent: 14px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 6px 12px;
+  gap: 1px;
+}
+
+.dirGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.children {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dir,
+.file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-align: left;
+  transition: background var(--transition), color var(--transition);
+}
+
+.dir {
+  cursor: pointer;
+  color: var(--text);
+}
+
+.dir:hover,
+.file:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caret {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 10px;
+  color: var(--text-faint);
+  transition: transform var(--transition);
+}
+.caretOpen {
+  transform: rotate(90deg);
+}
+
+.glyph {
+  flex-shrink: 0;
+  width: 10px;
+  text-align: center;
+  color: var(--text-faint);
+}

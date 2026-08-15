@@ -66,6 +66,30 @@ export interface Task {
   updatedAt: string
 }
 
+/** Top-level workspace shell mode (UI-only; mirrored for type-parity). */
+export type WorkspaceMode = 'tasks' | 'board' | 'workspace'
+
+// ---- worktree file tree (Workspace file sidebar) ----
+
+export type WorktreeNodeType = 'file' | 'dir'
+
+/** One node in a task worktree's file tree. `path` is relative to the worktree root. */
+export interface WorktreeFileNode {
+  name: string
+  path: string
+  type: WorktreeNodeType
+  children?: WorktreeFileNode[]
+}
+
+/**
+ * The file listing of a task's worktree. `root` is the absolute worktree path,
+ * or `null` when the task has no worktree yet (or the dir is missing).
+ */
+export interface WorktreeFileTree {
+  root: string | null
+  entries: WorktreeFileNode[]
+}
+
 export type EventKind = 'claude' | 'status' | 'operator' | 'error'
 
 export type EventSub =

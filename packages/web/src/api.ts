@@ -6,6 +6,7 @@ import type {
   ModelAlias,
   EffortLevel,
   CaveStyle,
+  WorktreeFileTree,
 } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -36,6 +37,7 @@ export const api = {
   listRepos: () => req<RepoTarget[]>('/api/repos'),
   listTasks: () => req<Task[]>('/api/tasks'),
   getEvents: (id: string) => req<TaskEvent[]>(`/api/tasks/${id}/events`),
+  getFiles: (id: string) => req<WorktreeFileTree>(`/api/tasks/${id}/files`),
   createTask: (
     title: string,
     body: string,
