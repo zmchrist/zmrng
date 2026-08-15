@@ -7,6 +7,7 @@ import type {
   EffortLevel,
   CaveStyle,
   WorktreeFileTree,
+  PreflightResult,
 } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -35,6 +36,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   getConfig: () => req<ServerConfig>('/api/config'),
   listRepos: () => req<RepoTarget[]>('/api/repos'),
+  getPreflight: () => req<PreflightResult>('/api/preflight'),
   listTasks: () => req<Task[]>('/api/tasks'),
   getEvents: (id: string) => req<TaskEvent[]>(`/api/tasks/${id}/events`),
   getFiles: (id: string) => req<WorktreeFileTree>(`/api/tasks/${id}/files`),

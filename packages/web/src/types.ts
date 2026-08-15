@@ -147,10 +147,27 @@ export type WsEvent =
   | { type: 'event'; taskId: string; event: TaskEvent }
   | { type: 'partial'; taskId: string; text: string }
 
+export type AuthMode = 'oauth' | 'apikey'
+
 export interface ServerConfig {
   model: string
   maxLanes: number
   targetRepo: string
   defaultRepoId: string
+  /** Human-readable display string (back-compat with the existing badge). */
   authMode: string
+  /** Machine-readable form of the same setting. */
+  authModeKind: AuthMode
+}
+
+// ---- preflight (advisory auth presence probe) ----
+
+export interface PreflightSignal {
+  ok: boolean
+  detail: string
+}
+
+export interface PreflightResult {
+  claude: PreflightSignal
+  gh: PreflightSignal
 }

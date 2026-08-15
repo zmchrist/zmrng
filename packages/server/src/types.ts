@@ -159,6 +159,20 @@ export type WsEvent =
   /** transient token-delta stream, not persisted to the events table */
   | { type: 'partial'; taskId: string; text: string }
 
+// ---- preflight (advisory auth presence probe) ----
+
+/** One advisory presence signal — never a hard gate on Start. */
+export interface PreflightSignal {
+  ok: boolean
+  detail: string
+}
+
+/** `GET /api/preflight` response — fresh probe every call, poll-friendly. */
+export interface PreflightResult {
+  claude: PreflightSignal
+  gh: PreflightSignal
+}
+
 /** Minimal shape of a parsed line from `claude --output-format stream-json`. */
 export interface ClaudeStreamLine {
   type: string

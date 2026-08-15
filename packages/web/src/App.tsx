@@ -17,6 +17,7 @@ import { TaskList } from './components/TaskList'
 import { NewTaskForm } from './components/NewTaskForm'
 import { TaskDetail } from './components/TaskDetail'
 import { WorkspaceView } from './components/WorkspaceView'
+import { AuthBanner } from './components/AuthBanner'
 import { STATUS_LABEL, statusColor } from './status'
 
 const MODES: ReadonlyArray<{ id: WorkspaceMode; label: string }> = [
@@ -140,6 +141,7 @@ export default function App() {
           />
         </span>
       </div>
+      <AuthBanner />
 
       {mode === 'tasks' && (
         <div className={`${styles.tasksGrid} ${railCollapsed ? styles.tasksGridCollapsed : ''}`}>

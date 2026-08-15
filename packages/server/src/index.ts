@@ -8,6 +8,7 @@ import { Db } from './db.js'
 import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { listWorktreeFiles } from './worktree.js'
+import { runPreflight } from './preflight.js'
 import type { WsEvent, EffortLevel, CaveStyle, WorktreeFileTree } from './types.js'
 
 function errMsg(e: unknown): string {
@@ -44,12 +45,17 @@ app.get('/api/config', () => ({
   maxLanes: config.maxLanes,
   targetRepo: config.targetRepo,
   defaultRepoId: config.defaultRepoId,
-  authMode: config.apiKeyStripped
-    ? 'Max OAuth (ANTHROPIC_API_KEY stripped from workers)'
-    : 'Max OAuth',
+  authMode:
+    config.authMode === 'apikey'
+      ? 'API key (ANTHROPIC_API_KEY billed per task)'
+      : 'Max OAuth (ANTHROPIC_API_KEY stripped from workers)',
+  authModeKind: config.authMode,
 }))
 
 app.get('/api/repos', () => config.repos)
+
+// Fresh probe every call — advisory only, never a gate on Start.
+app.get('/api/preflight', () => runPreflight())
 
 app.get('/api/tasks', () => db.listTasks())
 

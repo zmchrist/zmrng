@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
-import { resolveRegistry, RegistryError, type RegistryEnv } from '../src/config.js'
+import { resolveRegistry, resolveAuthMode, RegistryError, type RegistryEnv } from '../src/config.js'
 
 let root: string
 const NO_SCAN = '/zmrng-nonexistent-projects-dir-xyz'
@@ -137,3 +137,21 @@ function mkdirp(p: string): string {
   mkdirSync(p, { recursive: true })
   return p
 }
+
+describe('resolveAuthMode', () => {
+  it('defaults to oauth when unset', () => {
+    expect(resolveAuthMode({})).toBe('oauth')
+  })
+
+  it('resolves apikey (case-insensitive)', () => {
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'apikey' })).toBe('apikey')
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'ApiKey' })).toBe('apikey')
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'APIKEY' })).toBe('apikey')
+  })
+
+  it('falls back to oauth for any other value', () => {
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'garbage' })).toBe('oauth')
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'oauth' })).toBe('oauth')
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: '' })).toBe('oauth')
+  })
+})
