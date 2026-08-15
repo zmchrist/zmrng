@@ -48,6 +48,8 @@
   --status-review: #c79bff;
   --status-done: #6ee7a8;
   --status-failed: #ff5a5a;
+  /* manual terminal board state — shelved, dimmest of the terminal hues */
+  --status-archived: #767c86;
   /* legacy single-phase status (old DB rows) */
   --status-building: #92b7d6;
 

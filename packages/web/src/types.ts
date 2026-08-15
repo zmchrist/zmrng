@@ -12,6 +12,8 @@ export type TaskStatus =
   | 'failed'
   /** Legacy single-phase autonomous status; retained for old DB rows/events. */
   | 'building'
+  /** Manual terminal state for the board — an operator archives a task out of view. */
+  | 'archived'
 
 // ---- per-task controls (model · effort · style) ----
 
@@ -62,8 +64,20 @@ export interface Task {
   repoId: string
   usage: TaskUsage
   queued: boolean
+  /** Categorises a block (e.g. 'toolchain' | 'auth' | 'subagent') — free string for forward-compat. */
+  blockedKind: string | null
+  /** Human-readable reason captured when a task enters `blocked`. */
+  blockedReason: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface TaskComment {
+  id: number
+  taskId: string
+  author: string // 'operator' | a subagent/actor label
+  body: string
+  createdAt: string
 }
 
 export type EventKind = 'claude' | 'status' | 'operator' | 'error'
