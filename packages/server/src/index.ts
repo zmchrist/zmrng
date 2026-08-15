@@ -8,7 +8,7 @@ import { Db } from './db.js'
 import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { listWorktreeFiles } from './worktree.js'
-import { readWorktreeFile, writeWorktreeFile, WorktreeFileError } from './files.js'
+import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
 import type { WsEvent, EffortLevel, CaveStyle, WorktreeFileTree } from './types.js'
 
@@ -134,6 +134,20 @@ app.put('/api/tasks/:id/file', (req, reply) => {
     const code = err instanceof WorktreeFileError ? 400 : 500
     app.log.error({ err, taskId: id, path: body.path }, 'failed to write worktree file')
     return reply.code(code).send({ error: errMsg(err) })
+  }
+})
+
+// List of note filenames under this task's `.zmrng/notes/`. Always 200: a
+// missing task/worktree/dir yields an empty list, never a 500.
+app.get('/api/tasks/:id/notes', (req): string[] => {
+  const { id } = req.params as { id: string }
+  const task = db.getTask(id)
+  if (!task?.worktree) return []
+  try {
+    return listNotes(task.worktree)
+  } catch (err) {
+    app.log.error({ err, taskId: id }, 'failed to list task notes')
+    return []
   }
 })
 

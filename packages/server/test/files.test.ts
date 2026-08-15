@@ -1,8 +1,8 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, readFileSync, existsSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
-import { readWorktreeFile, writeWorktreeFile, WorktreeFileError } from '../src/files.js'
+import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from '../src/files.js'
 
 let dir: string
 
@@ -93,5 +93,28 @@ describe('writeWorktreeFile', () => {
 
   it('rejects a path that escapes the worktree', () => {
     expect(() => writeWorktreeFile(dir, '../escape.txt', 'nope')).toThrow(WorktreeFileError)
+  })
+
+  it('creates missing parent dirs for a nested notes path', () => {
+    const realDir = realpathSync(dir)
+    const abs = path.join(realDir, '.zmrng', 'notes', 'new.md')
+    expect(existsSync(path.dirname(abs))).toBe(false)
+    writeWorktreeFile(realDir, '.zmrng/notes/new.md', 'hello note')
+    expect(readFileSync(abs, 'utf8')).toBe('hello note')
+  })
+})
+
+describe('listNotes', () => {
+  it('returns [] when .zmrng/notes is absent', () => {
+    expect(listNotes(dir)).toEqual([])
+  })
+
+  it('returns sorted .md basenames, ignoring non-.md files', () => {
+    const notesDir = path.join(dir, '.zmrng', 'notes')
+    mkdirSync(notesDir, { recursive: true })
+    writeFileSync(path.join(notesDir, 'b.md'), 'b')
+    writeFileSync(path.join(notesDir, 'a.md'), 'a')
+    writeFileSync(path.join(notesDir, 'ignore.txt'), 'nope')
+    expect(listNotes(dir)).toEqual(['a.md', 'b.md'])
   })
 })
