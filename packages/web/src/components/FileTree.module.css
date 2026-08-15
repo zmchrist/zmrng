@@ -47,6 +47,11 @@
   color: var(--text);
 }
 
+.fileSelected {
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+
 .label {
   overflow: hidden;
   text-overflow: ellipsis;

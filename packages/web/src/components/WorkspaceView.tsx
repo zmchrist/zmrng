@@ -4,6 +4,7 @@ import type { Task, TaskEvent, WorktreeFileTree } from '../types'
 import { api } from '../api'
 import { FileTree } from './FileTree'
 import { WorkerLog } from './WorkerLog'
+import { Viewer } from './Viewer'
 
 interface Props {
   task: Task | undefined
@@ -57,6 +58,7 @@ interface Loaded {
 export function WorkspaceView({ task, events, live }: Props) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [nonce, setNonce] = useState(0)
+  const [openPath, setOpenPath] = useState<string | null>(null)
 
   const taskId = task?.id ?? null
   // Re-fetch when the worktree appears/changes (it is null until the branch is cut).
@@ -78,6 +80,9 @@ export function WorkspaceView({ task, events, live }: Props) {
     }
     // `worktree` + `nonce` re-fetch when the worktree appears or on manual refresh.
   }, [taskId, worktree, nonce])
+
+  // A file opened against a previous task should never carry over.
+  const effectiveOpenPath = loaded && loaded.id === taskId ? openPath : null
 
   const current = loaded && loaded.id === taskId ? loaded.tree : null
   const hasTree = !!current && current.entries.length > 0
@@ -105,7 +110,7 @@ export function WorkspaceView({ task, events, live }: Props) {
           ) : !current ? (
             <div className={styles.empty}>Loading…</div>
           ) : hasTree ? (
-            <FileTree entries={current.entries} />
+            <FileTree entries={current.entries} onOpen={setOpenPath} selectedPath={effectiveOpenPath} />
           ) : (
             <div className={styles.empty}>
               No worktree yet — the file tree appears once this task starts working.
@@ -116,10 +121,7 @@ export function WorkspaceView({ task, events, live }: Props) {
 
       <div className={styles.center}>
         <div className={styles.viewer}>
-          <div className={styles.dockSlot}>
-            Viewer — open a file to preview it here.
-            <span className={styles.dockSlotSub}>Multi-format viewer coming soon.</span>
-          </div>
+          <Viewer taskId={taskId} path={effectiveOpenPath} />
         </div>
         <div className={styles.logPane}>
           {task ? (
