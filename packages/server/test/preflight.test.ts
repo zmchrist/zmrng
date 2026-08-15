@@ -11,6 +11,11 @@ describe('runPreflight', () => {
     expect(typeof result.claude.detail).toBe('string')
     expect(typeof result.gh.ok).toBe('boolean')
     expect(typeof result.gh.detail).toBe('string')
+    expect(result).toHaveProperty('path')
+    for (const bin of ['git', 'gh', 'claude'] as const) {
+      expect(typeof result.path[bin].ok).toBe('boolean')
+      expect(typeof result.path[bin].detail).toBe('string')
+    }
   })
 
   it('reports claude ok when ANTHROPIC_API_KEY is set', () => {

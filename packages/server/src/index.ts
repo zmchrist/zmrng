@@ -184,6 +184,11 @@ if (existsSync(config.webDist)) {
     }
     return reply.sendFile('index.html')
   })
+} else {
+  app.log.error(
+    { webDist: config.webDist },
+    'web UI not built — run `npm run build` first (serving API only, no UI at this URL)',
+  )
 }
 
 // ---- lifecycle ----

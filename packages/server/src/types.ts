@@ -167,10 +167,18 @@ export interface PreflightSignal {
   detail: string
 }
 
+/** PATH-only presence probes, distinct from the auth signals above. */
+export interface PreflightPath {
+  git: PreflightSignal
+  gh: PreflightSignal
+  claude: PreflightSignal
+}
+
 /** `GET /api/preflight` response — fresh probe every call, poll-friendly. */
 export interface PreflightResult {
   claude: PreflightSignal
   gh: PreflightSignal
+  path: PreflightPath
 }
 
 /** Minimal shape of a parsed line from `claude --output-format stream-json`. */
