@@ -13,14 +13,15 @@
   grid-template-columns: 56px 1fr;
 }
 
-/* Slim full-width strip below the macOS traffic lights. Draggable in the
-   native Tauri window via data-tauri-drag-region; inert in the browser dev
-   view. Height clears the traffic-light band.
+/* Slim full-width strip that clears the native Tauri window's traffic-light
+   band. Draggable via data-tauri-drag-region there; in a plain browser tab
+   there is no traffic-light chrome to clear, so it collapses to 0 height and
+   reserves no layout space.
    NOTE: -webkit-app-region is Electron-only; WKWebView (Tauri v2) ignores it.
    Drag is driven solely by the data-tauri-drag-region attribute. */
 .dragbar {
   grid-column: 1 / -1;
-  height: 28px;
+  height: 0;
 }
 
 .rail,
@@ -55,8 +56,8 @@
   font-family: var(--font-display);
   font-size: 23px;
   font-weight: 800;
-  letter-spacing: 0.13em;
-  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   background: linear-gradient(120deg, var(--text) 28%, var(--accent-bright));
   -webkit-background-clip: text;
   background-clip: text;
