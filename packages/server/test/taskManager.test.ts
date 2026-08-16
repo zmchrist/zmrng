@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
@@ -287,5 +287,37 @@ describe('TaskManager state machine (fake runner, real temp git repo)', () => {
     latest().say('opened https://github.com/anyone/anything/pull/9')
     expect(status(id)).toBe('review')
     expect(db.getTask(id)!.prUrl).toBe('https://github.com/anyone/anything/pull/9')
+  })
+})
+
+describe('deleteTask', () => {
+  it('hard-deletes a backlog task (no worktree) and broadcasts task-removed', async () => {
+    const task = mgr.createTask('never started', 'do the thing', undefined, undefined, 'normal', 'sandbox', 'direct')
+    await mgr.deleteTask(task.id)
+    expect(db.getTask(task.id)).toBeUndefined()
+    expect(events.some((e) => e.type === 'task-removed' && e.taskId === task.id)).toBe(true)
+  })
+
+  it('rejects deleting a task mid-flight (not in backlog/done/failed)', async () => {
+    const id = await startTask() // → clarify
+    expect(status(id)).toBe('clarify')
+    await expect(mgr.deleteTask(id)).rejects.toThrow(/cannot delete task in status 'clarify'/)
+    expect(db.getTask(id)).toBeDefined()
+  })
+
+  it('cleans up a leftover worktree/branch when deleting a failed task', async () => {
+    const id = await startTask()
+    latest().say('ZMRNG_READY')
+    latest().say('ZMRNG_PLAN_READY model=opus effort=high plan=p.md')
+    expect(status(id)).toBe('executing')
+    latest().result('', true) // error result, no PR → fails, worktree left behind
+    expect(status(id)).toBe('failed')
+    const worktreePath = db.getTask(id)!.worktree!
+    expect(existsSync(worktreePath)).toBe(true)
+
+    await mgr.deleteTask(id)
+
+    expect(db.getTask(id)).toBeUndefined()
+    expect(existsSync(worktreePath)).toBe(false)
   })
 })

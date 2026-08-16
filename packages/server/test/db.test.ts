@@ -273,6 +273,45 @@ describe('close() — WAL checkpoint durability', () => {
   })
 })
 
+describe('deleteTask', () => {
+  it('removes the task row and its events/comments/chat messages, leaving other tasks untouched', () => {
+    const db = new Db(dbPath)
+    db.createTask({
+      id: 't1',
+      title: 'delete me',
+      body: 'y',
+      model: 'opus',
+      effort: 'high',
+      style: 'normal',
+      flow: 'direct',
+      repoId: 'zmrng',
+      now: '2026-08-16T00:00:00.000Z',
+    })
+    db.createTask({
+      id: 't2',
+      title: 'keep me',
+      body: 'y',
+      model: 'opus',
+      effort: 'high',
+      style: 'normal',
+      flow: 'direct',
+      repoId: 'zmrng',
+      now: '2026-08-16T00:00:00.000Z',
+    })
+    db.insertEvent('t1', 'status', { sub: 'status' }, '2026-08-16T00:00:01.000Z')
+    db.addComment('t1', 'operator', 'hi', '2026-08-16T00:00:02.000Z')
+    db.addChatMessage('t1', 'a1', 'user', 'hi', '2026-08-16T00:00:03.000Z')
+
+    db.deleteTask('t1')
+
+    expect(db.getTask('t1')).toBeUndefined()
+    expect(db.getEvents('t1')).toEqual([])
+    expect(db.listComments('t1')).toEqual([])
+    expect(db.listChatMessages('t1', 'a1')).toEqual([])
+    expect(db.getTask('t2')?.title).toBe('keep me')
+  })
+})
+
 describe('addUsage', () => {
   const mk = (): Db => {
     const db = new Db(dbPath)
