@@ -400,8 +400,24 @@ interface WalkBudget {
   count: number
 }
 
+/** Optional tuning for {@link listWorktreeFiles}. */
+export interface WalkOptions {
+  /**
+   * Skip every entry (file or dir) whose name begins with a dot. Off for a task
+   * worktree (dotfiles like `.gitignore`/`.github` are useful there); on for the
+   * broad Projects-directory scan, where hidden config/cache dirs are noise.
+   */
+  skipDotEntries?: boolean
+}
+
 /** Recursively list `dir`, returning sorted nodes (dirs first, then files). */
-function walk(absDir: string, relDir: string, depth: number, budget: WalkBudget): WorktreeFileNode[] {
+function walk(
+  absDir: string,
+  relDir: string,
+  depth: number,
+  budget: WalkBudget,
+  options: WalkOptions,
+): WorktreeFileNode[] {
   if (depth > MAX_DEPTH || budget.count >= MAX_ENTRIES) return []
 
   let dirents: import('node:fs').Dirent[]
@@ -415,6 +431,7 @@ function walk(absDir: string, relDir: string, depth: number, budget: WalkBudget)
   const files: WorktreeFileNode[] = []
   for (const dirent of dirents) {
     if (budget.count >= MAX_ENTRIES) break
+    if (options.skipDotEntries && dirent.name.startsWith('.')) continue
     const isDir = dirent.isDirectory()
     if (isDir && PRUNE_DIRS.has(dirent.name)) continue
     // Skip symlinks: don't follow (cycle risk) and don't list dangling links.
@@ -427,7 +444,7 @@ function walk(absDir: string, relDir: string, depth: number, budget: WalkBudget)
         name: dirent.name,
         path: relPath,
         type: 'dir',
-        children: walk(path.join(absDir, dirent.name), relPath, depth + 1, budget),
+        children: walk(path.join(absDir, dirent.name), relPath, depth + 1, budget, options),
       })
     } else if (dirent.isFile()) {
       files.push({ name: dirent.name, path: relPath, type: 'file' })
@@ -442,13 +459,17 @@ function walk(absDir: string, relDir: string, depth: number, budget: WalkBudget)
 }
 
 /**
- * List a task's worktree as a pruned, depth-capped file tree. Never throws:
- * a null/missing worktree returns an empty tree with `root: null`. Prunes VCS,
+ * List a directory as a pruned, depth-capped file tree. Never throws:
+ * a null/missing directory returns an empty tree with `root: null`. Prunes VCS,
  * dependency, and build dirs; skips symlinks; caps depth and total node count.
+ * Used both for a task's worktree and (with `skipDotEntries`) the Projects dir.
  */
-export function listWorktreeFiles(worktreePath: string | null): WorktreeFileTree {
+export function listWorktreeFiles(
+  worktreePath: string | null,
+  options: WalkOptions = {},
+): WorktreeFileTree {
   if (!worktreePath || !existsSync(worktreePath)) return { root: null, entries: [] }
-  const entries = walk(worktreePath, '', 0, { count: 0 })
+  const entries = walk(worktreePath, '', 0, { count: 0 }, options)
   return { root: worktreePath, entries }
 }
 

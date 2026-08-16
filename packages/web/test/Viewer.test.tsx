@@ -15,7 +15,13 @@ vi.mock('../src/components/PdfViewer', () => ({
 }))
 
 const readFile = vi.fn()
-vi.mock('../src/api', () => ({ api: { readFile: (...a: unknown[]) => readFile(...a) } }))
+const readProjectFile = vi.fn()
+vi.mock('../src/api', () => ({
+  api: {
+    readFile: (...a: unknown[]) => readFile(...a),
+    readProjectFile: (...a: unknown[]) => readProjectFile(...a),
+  },
+}))
 
 function fileOf(format: WorktreeFileContent['format'], content: string): WorktreeFileContent {
   return {
@@ -27,7 +33,23 @@ function fileOf(format: WorktreeFileContent['format'], content: string): Worktre
 }
 
 describe('<Viewer>', () => {
-  beforeEach(() => readFile.mockReset())
+  beforeEach(() => {
+    readFile.mockReset()
+    readProjectFile.mockReset()
+  })
+
+  it('reads from the Projects dir (read-only) when no task is selected', async () => {
+    readProjectFile.mockResolvedValue(fileOf('code', 'const x = 1'))
+    render(<Viewer taskId={null} path="zmrng/README.md" />)
+
+    await screen.findByTestId('code-editor')
+    // No-task files come from the projects endpoint, never the task endpoint…
+    expect(readProjectFile).toHaveBeenCalledWith('zmrng/README.md')
+    expect(readFile).not.toHaveBeenCalled()
+    // …and are read-only, so there is no Save control.
+    expect(screen.queryByRole('button', { name: /save/i })).toBeNull()
+    expect(screen.getByText('read-only')).toBeInTheDocument()
+  })
 
   it('opens a markdown file in the editor (not a split) with a toggle to the preview', async () => {
     readFile.mockResolvedValue(fileOf('markdown', '# Heading'))

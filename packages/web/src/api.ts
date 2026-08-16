@@ -80,6 +80,11 @@ export const api = {
   getFiles: (id: string) => req<WorktreeFileTree>(`/api/tasks/${id}/files`),
   readFile: (id: string, path: string) =>
     req<WorktreeFileContent>(`/api/tasks/${id}/file?path=${encodeURIComponent(path)}`),
+  /** Projects-dir file tree, shown when no task is selected. */
+  getProjectFiles: () => req<WorktreeFileTree>('/api/projects/files'),
+  /** Read one file under the Projects dir (read-only; no-task viewing). */
+  readProjectFile: (path: string) =>
+    req<WorktreeFileContent>(`/api/projects/file?path=${encodeURIComponent(path)}`),
   writeFile: (id: string, path: string, content: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/file`, {
       method: 'PUT',
