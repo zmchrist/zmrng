@@ -8,6 +8,7 @@ worktrees/*
 !worktrees/.gitkeep
 .env
 config/repos.json
+config/agents.json
 .DS_Store
 
 # Tauri desktop — Rust build output + generated sidecar/web bundle

@@ -1,0 +1,10 @@
+[
+  {
+    "id": "openai-compatible",
+    "label": "My Agent",
+    "url": "https://api.example.com/v1/chat/completions",
+    "headers": {
+      "authorization": "Bearer sk-REPLACE_ME"
+    }
+  }
+]
