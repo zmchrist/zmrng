@@ -64,18 +64,23 @@
   display: flex;
 }
 
-.split {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.toggleBtn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
 }
-
-.split > :first-child {
-  border-right: 1px solid var(--border);
+.toggleBtn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
 .preview {
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 16px 20px;
