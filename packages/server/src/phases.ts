@@ -12,6 +12,7 @@ import { createWorktree, removeWorktree, repoSlug, seedHarness, syncLocalAfterMe
 import { pruneTask as pruneUiStateTask } from './uiState.js'
 import {
   DEFAULT_EFFORT,
+  DEFAULT_FLOW,
   DEFAULT_MODEL,
   DEFAULT_STYLE,
   type Task,
@@ -21,6 +22,7 @@ import {
   type WsEvent,
   type EffortLevel,
   type CaveStyle,
+  type FlowMode,
 } from './types.js'
 
 // ---- detection ----
@@ -259,6 +261,53 @@ export function executeKickoff(
   ].join('\n')
 }
 
+/**
+ * The lean execute kickoff for the `direct` flow. No plan file, no plan phase —
+ * the clarify transcript is the brief. Deliberately strips the heavy execute
+ * ceremony to stay snappy and cheap on menial work: NO `zmrng-qa`/
+ * `zmrng-code-reviewer`/`zmrng-doc-updater` subagent spawns (validation is run
+ * inline), TDD is conditional rather than mandatory, and doc-sync is
+ * conditional. The hard gates are kept: branch-only (from the system prompt), a
+ * green final validation, and a PR.
+ *
+ * Exported for prompt-contract tests.
+ */
+export function directKickoff(
+  branch: string,
+  defaultBranch: string,
+  task: Task,
+  transcript: string,
+): string {
+  return [
+    'DIRECT EXECUTE PHASE. This is a fresh session with no separate plan phase — implement the task now, fully autonomously, with no further questions. Move fast: this flow is for menial/self-contained work, so favour the simplest change that fully solves it.',
+    `You are already on branch \`${branch}\` in this worktree — do NOT create or switch branches.`,
+    `Task title: ${task.title}`,
+    `Task details: ${task.body}`,
+    '',
+    'Agreed scope from the clarify conversation (this is your brief — there is no plan file):',
+    transcript || '(no transcript captured — work from the task title/details)',
+    '',
+    'HOW TO WORK:',
+    '- Read the actual files you intend to change before editing — do not work from assumptions.',
+    '- Make the change directly. Do NOT spawn the `zmrng-qa`, `zmrng-code-reviewer`, or `zmrng-doc-updater` subagents and do NOT write a plan file; this flow trades that ceremony for speed. Do the review inline, in your own head, as you go.',
+    '- TESTS (conditional): if the change has behaviour worth locking in, add or update tests using this repo\'s existing test runner and land them in the SAME commit. If the change is a pure fix/config/merge-conflict resolution with nothing meaningful to test-drive, you may skip tests — but say so explicitly under "Testing" in the PR body, naming the reason. Never silently omit.',
+    '- DOCS (conditional): only run the `sync-docs` skill if your change actually touches a documented surface (public API, commands, schema, user-facing behaviour). For a self-contained fix that changes no documented surface, skip it.',
+    '',
+    'BEFORE OPENING THE PR:',
+    "- Run this repo's full validation INLINE yourself and ensure every check passes — fix every failure. For a Node repo that is `npm run typecheck && npm run lint && npm test && npm run build` (skip a script this repo does not define). This green run is the hard gate; do not open the PR until it passes.",
+    '- Commit with a descriptive Conventional Commit message.',
+    `- Push the branch: git push -u origin ${branch}`,
+    `- Write the PR body to \`${PR_BODY_FILE}\` (a path inside the git dir — never tracked, never committed). It MUST follow this template verbatim, with every box honestly checked or explicitly explained (mark the Plan/Spec/Review boxes as intentionally skipped for the direct flow, and the TDD box honestly per what you did above):`,
+    '',
+    PR_BODY_TEMPLATE,
+    '',
+    `- Open the PR with that file (NOT \`--fill\`): gh pr create --base ${defaultBranch} --head ${branch} --title "<conventional commit style title>" --body-file "${PR_BODY_FILE}"`,
+    '- Write the PR title and body in normal, professional English regardless of your narration style.',
+    'If you discover mid-flight that this task is genuinely architectural/multi-file and needs a real plan, STOP and output `ZMRNG_BLOCKED: needs the plan flow` on its own line rather than half-planning here.',
+    'Then output the PR URL on its own line.',
+  ].join('\n')
+}
+
 export class TaskManager {
   private runners = new Map<string, RunnerLike>()
   /** Tasks holding an autonomous lane (held from planning through to the PR). */
@@ -326,10 +375,11 @@ export class TaskManager {
     const next = this.executeQueue.shift()
     if (!next) return
     const task = this.db.getTask(next)
-    // A queued task is parked in `planning`; promote it by starting its plan child.
-    if (task && task.status === 'planning') {
+    // A queued task is parked in `planning` (plan flow) or `executing` (direct
+    // flow); promote it by starting the fresh child its flow calls for.
+    if (task && (task.status === 'planning' || task.status === 'executing')) {
       this.executeLanes.add(task.id)
-      this.beginPlan(task)
+      this.beginPhaseForFlow(task)
     }
   }
 
@@ -478,13 +528,16 @@ export class TaskManager {
 
   private onReady(task: Task): void {
     this.emitEvent(task.id, 'status', { sub: 'status', note: 'ZMRNG_READY detected' })
-    // Hand off the clarify session for a fresh planning session.
+    // Hand off the clarify session for a fresh autonomous session.
     this.replaceChild(task.id)
-    this.transition(task.id, 'planning')
+    // `plan` flow parks in `planning` (heavy pipeline); `direct` flow skips the
+    // plan phase entirely and parks in `executing`. Both consume one lane.
+    const parked: TaskStatus = task.flow === 'plan' ? 'planning' : 'executing'
+    this.transition(task.id, parked)
     if (this.executeLanes.size < config.maxLanes) {
       this.executeLanes.add(task.id)
       const fresh = this.db.getTask(task.id)
-      if (fresh) this.beginPlan(fresh)
+      if (fresh) this.beginPhaseForFlow(fresh)
     } else {
       this.patch(task.id, { queued: true })
       this.executeQueue.push(task.id)
@@ -493,6 +546,39 @@ export class TaskManager {
         note: `queued — ${this.executeLanes.size}/${config.maxLanes} lanes busy`,
       })
     }
+  }
+
+  /** Start the correct fresh session for a task's flow (holds an execute lane). */
+  private beginPhaseForFlow(task: Task): void {
+    if (task.flow === 'plan') this.beginPlan(task)
+    else this.beginDirect(task)
+  }
+
+  /**
+   * Start a fresh execute child for the `direct` flow — no plan phase. Uses the
+   * task's own model/effort (defaults sonnet/medium for menial work) and seeds
+   * the lean `directKickoff` with the clarify transcript as the brief.
+   */
+  private beginDirect(task: Task): void {
+    this.patch(task.id, { queued: false })
+    const model = task.model ?? DEFAULT_MODEL
+    const effort = task.effort ?? DEFAULT_EFFORT
+    if (!this.spawnPhase(task, model, effort)) return
+    this.emitEvent(task.id, 'status', {
+      sub: 'status',
+      note: `direct execute — fresh session (${model} · ${effort}), no plan phase`,
+    })
+    const defaultBranch = repoById(task.repoId)?.defaultBranch ?? 'main'
+    this.runners
+      .get(task.id)
+      ?.send(
+        directKickoff(
+          task.branch ?? 'unknown-branch',
+          defaultBranch,
+          task,
+          this.clarifyTranscript(task.id),
+        ),
+      )
   }
 
   /** Start a fresh planning child (always opus/high) seeded with the clarify transcript. */
@@ -602,6 +688,7 @@ export class TaskManager {
     effort?: EffortLevel,
     style?: CaveStyle,
     repoId?: string,
+    flow?: FlowMode,
   ): Task {
     const id = randomUUID()
     const resolvedRepoId = repoId && repoById(repoId) ? repoId : config.defaultRepoId
@@ -612,6 +699,7 @@ export class TaskManager {
       model: model ?? DEFAULT_MODEL,
       effort: effort ?? DEFAULT_EFFORT,
       style: style ?? DEFAULT_STYLE,
+      flow: flow ?? DEFAULT_FLOW,
       repoId: resolvedRepoId,
       now: now(),
     })

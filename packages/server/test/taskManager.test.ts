@@ -107,8 +107,11 @@ afterEach(() => {
 })
 
 /** Create a task and run it through `start` (real worktree creation). */
-async function startTask(title = 'Add a feature'): Promise<string> {
-  const task = mgr.createTask(title, 'do the thing', undefined, undefined, 'normal', 'sandbox')
+async function startTask(
+  title = 'Add a feature',
+  flow: 'plan' | 'direct' = 'plan',
+): Promise<string> {
+  const task = mgr.createTask(title, 'do the thing', undefined, undefined, 'normal', 'sandbox', flow)
   await mgr.start(task.id)
   return task.id
 }
@@ -151,6 +154,30 @@ describe('TaskManager state machine (fake runner, real temp git repo)', () => {
 
     // Prove the seam held: every worker was a fake; no real process/gh/network.
     expect(created.every((r) => r instanceof FakeRunner)).toBe(true)
+  })
+
+  it('direct flow skips the plan phase: ZMRNG_READY jumps straight to executing', async () => {
+    const id = await startTask('Resolve a merge conflict', 'direct')
+    expect(status(id)).toBe('clarify')
+    const clarifyRunner = latest()
+
+    // clarify → executing directly (NO planning session ever spawned)
+    clarifyRunner.say('scope clear\nZMRNG_READY\nresolve the conflict in x')
+    expect(status(id)).toBe('executing')
+    const execRunner = latest()
+    expect(execRunner).not.toBe(clarifyRunner)
+    expect(clarifyRunner.killed).toBe(true)
+    // The execute child got the lean direct kickoff, not the heavy plan/exec one.
+    expect(execRunner.sent.some((m) => /DIRECT EXECUTE PHASE/.test(m))).toBe(true)
+    expect(execRunner.sent.some((m) => /PLAN PHASE/.test(m))).toBe(false)
+
+    // executing → review straight off a PR URL (no ZMRNG_VALIDATING hop required)
+    execRunner.say('opened https://github.com/zmchrist/zmrng/pull/42')
+    expect(status(id)).toBe('review')
+    expect(db.getTask(id)!.prUrl).toBe('https://github.com/zmchrist/zmrng/pull/42')
+
+    // Prove no planning child was ever created: clarify + execute only.
+    expect(created.length).toBe(2)
   })
 
   it('parks in blocked on ZMRNG_BLOCKED and restores the prior status on resume', async () => {
