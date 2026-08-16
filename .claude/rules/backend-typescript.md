@@ -5,6 +5,7 @@
 - Fastify 5 for HTTP + `@fastify/websocket` for the WS surface
 - better-sqlite3 for persistence (WAL mode)
 - Node `child_process` (`spawn`) for the headless `claude` runner
+- `node-pty` for the Workspace bottom-dock terminal's PTY sessions (`GET /ws/terminal`)
 - Pino for structured logging
 - **No shared package** — `packages/server/src/types.ts` is the source of truth,
   manually mirrored into `packages/web/src/types.ts`
@@ -17,6 +18,7 @@ packages/server/src/
   db.ts        — SQLite schema, prepared statements, idempotent migrations
   types.ts     — Task/WsEvent/usage/RepoTarget types (SOURCE OF TRUTH)
   runner.ts    — spawn + parse the claude child (stream-json); strip API key
+  terminal.ts  — TerminalManager: node-pty shells for the Workspace bottom-dock terminal
   phases.ts    — phase state machine + system/kickoff prompts + lane queue
   worktree.ts  — git worktree create/remove per task
   ws.ts        — WebSocket broadcast hub
@@ -38,6 +40,9 @@ const env = { ...process.env }
 delete env.ANTHROPIC_API_KEY
 spawn('claude', args, { cwd, env })
 ```
+`terminal.ts`'s `TerminalManager.create()` mirrors this same strip (gated on
+`config.authMode === 'oauth'`) before handing the child env to its `PtyFactory`, so a
+`claude` launched inside the Workspace terminal is Max-OAuth-only too.
 
 ### Repo registry (config)
 Targets load with a fallback chain — `config/repos.json` → `ZMRNG_REPOS` env →
