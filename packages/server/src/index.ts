@@ -380,7 +380,16 @@ if (existsSync(config.webDist)) {
 function shutdown(signal: string): void {
   app.log.info({ signal }, 'shutting down — killing live claude workers')
   manager.shutdown()
-  app.close().finally(() => process.exit(0))
+  app.close().finally(() => {
+    // Checkpoint the WAL into the durable .db before exit so tasks survive the
+    // restart — tsx-watch/SIGTERM otherwise kill us before any clean close.
+    try {
+      db.close()
+    } catch (err) {
+      app.log.error({ err }, 'failed to checkpoint/close db on shutdown')
+    }
+    process.exit(0)
+  })
 }
 process.on('SIGINT', () => shutdown('SIGINT'))
 process.on('SIGTERM', () => shutdown('SIGTERM'))
@@ -395,6 +404,8 @@ try {
       maxLanes: config.maxLanes,
       model: config.defaultModel,
       dataDir: config.dataDir,
+      dbPath: config.dbPath,
+      tasks: db.taskCount(),
       port: config.port,
     },
     'zmrng server ready',
