@@ -1,3 +1,13 @@
+/* Vertical shell: the three-column grid on top, the full-width terminal dock
+   below it. */
+.shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
 .workspace {
   flex: 1;
   display: grid;

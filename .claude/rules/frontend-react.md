@@ -4,6 +4,8 @@
 - React 19, TypeScript, Vite
 - CSS Modules + design tokens (`theme.css`)
 - WebSocket for real-time updates (`useWs` hook)
+- `@xterm/xterm` + `@xterm/addon-fit` for the Workspace bottom-dock terminal (own
+  WebSocket to `/ws/terminal` per instance, not the `useWs` hub connection)
 - **No router** — single-page layout; two top-level modes, Workspace (default) and Board
 - **No shared package** — `packages/web/src/types.ts` is a MANUAL mirror of the server types
 
@@ -45,6 +47,13 @@ const { connected } = useWs(onWs) // auto-reconnect, 1s→30s backoff
 WsEvent types: `snapshot` | `task` | `event` | `partial`. Partial token-deltas
 stream into the live log; persisted events arrive as `event`.
 
+### Terminal WebSocket (separate from the `useWs` hub)
+`Terminal.tsx` opens its own `WebSocket` directly to `/ws/terminal` per mounted
+instance — it does **not** go through `useWs`/the `/ws` fan-out hub, since each
+terminal owns a dedicated PTY rather than sharing task/claude event broadcast state.
+Frames are encoded/decoded with the pure helpers in `terminalProtocol.ts`
+(`encodeInput`/`encodeResize`/`parseServerMsg`), never hand-rolled JSON inline.
+
 ### Type mirror
 `packages/web/src/types.ts` mirrors `packages/server/src/types.ts`. When a server
 type changes, update this file in the same change — there is no shared package.
@@ -59,7 +68,9 @@ packages/web/src/
   theme.css      — frosted-glass design tokens
   types.ts       — manual mirror of server types
   workspaceLayout.ts — pure reducer for the Workspace mode's Zed-style tab-pane layout (max 2 panes, single split axis)
-  components/     — TaskList, NewTaskForm, ClarifyChat (live composer, placeholder prop), WorkerLog (read-only tool/subagent rows), WorkerLogPanel (WorkerLog + steer composer), TaskControls (compact selected-task card + dropdown), WorkspaceView (Files sidebar + WorkspaceTabs center + task rail right bar), WorkspaceTabs (draggable tabs — file Viewers/WorkerLogPanel/Notes/Chat)
+  terminalDock.ts — pure reducer for the bottom-dock terminal's ephemeral tab list (emptyDock/addTerminal/closeTerminal/setActive)
+  terminalProtocol.ts — pure wire helpers for /ws/terminal (encodeInput/encodeResize/parseServerMsg)
+  components/     — TaskList, NewTaskForm, ClarifyChat (live composer, placeholder prop), WorkerLog (read-only tool/subagent rows), WorkerLogPanel (WorkerLog + steer composer), TaskControls (compact selected-task card + dropdown), WorkspaceView (Files sidebar + WorkspaceTabs center + task rail right bar + global TerminalDock), WorkspaceTabs (draggable tabs — file Viewers/WorkerLogPanel/Notes/Chat), TerminalDock (Zed-style bottom dock, ctrl+` toggle, drag-resize), Terminal (xterm.js glue, one WebSocket per instance)
 ```
 
 ## Anti-Patterns
