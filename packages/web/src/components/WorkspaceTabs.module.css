@@ -1,0 +1,163 @@
+.tabArea {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+/* ---- panel re-open button bar ----------------------------------------- */
+.buttonBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-strong);
+}
+
+.barLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.reopen {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+.reopen:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/* ---- pane grid --------------------------------------------------------- */
+.grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 1px;
+  background: var(--border);
+}
+
+/* ---- one pane ---------------------------------------------------------- */
+.pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  overflow: hidden;
+}
+.paneActive {
+  box-shadow: inset 0 2px 0 0 var(--accent-line);
+}
+
+.tabStrip {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  min-height: 34px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-strong);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  border-right: 1px solid var(--border);
+  background: var(--well);
+  white-space: nowrap;
+}
+
+.tabLabel {
+  padding: 7px 6px 7px 12px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color var(--transition);
+}
+.tabLabel:hover {
+  color: var(--text);
+}
+.tabActive {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ctrl {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+.ctrl:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.paneBody {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+
+/* ---- minimized log strip (click to expand) ---------------------------- */
+.miniStrip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--text-dim);
+  background: var(--surface-strong);
+  border: none;
+  border-top: 1px solid var(--border);
+  transition: var(--transition);
+}
+.miniStrip:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1.5;
+}
