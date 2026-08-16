@@ -44,6 +44,17 @@ export default function App() {
     [ui],
   )
   const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
+  // Bottom-dock terminal chrome (only open/height persist; shells are ephemeral).
+  const dockOpen = ui.state.global.terminalDock?.open ?? false
+  const dockHeight = ui.state.global.terminalDock?.height ?? 300
+  const setDockOpen = useCallback(
+    (v: boolean) => ui.patchGlobal({ terminalDock: { ...ui.state.global.terminalDock, open: v } }),
+    [ui],
+  )
+  const setDockHeight = useCallback(
+    (h: number) => ui.patchGlobal({ terminalDock: { ...ui.state.global.terminalDock, height: h } }),
+    [ui],
+  )
   const selectedIdRef = useRef<string | null>(null)
 
   const onWs = useCallback((e: WsEvent) => {
@@ -187,6 +198,10 @@ export default function App() {
           selectedId={selectedId}
           railCollapsed={railCollapsed}
           onRailCollapsedChange={setRailCollapsed}
+          dockOpen={dockOpen}
+          dockHeight={dockHeight}
+          onDockOpenChange={setDockOpen}
+          onDockHeightChange={setDockHeight}
           onSelect={select}
           onCreate={onCreate}
           onStart={() => (selected ? api.start(selected.id) : Promise.resolve())}

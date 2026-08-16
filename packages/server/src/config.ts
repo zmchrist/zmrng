@@ -109,6 +109,10 @@ export interface Config {
    * workers against the metered API instead.
    */
   authMode: AuthMode
+  /** Root dir for the workspace terminal's PTY (== PROJECTS_DIR). */
+  projectsDir: string
+  /** Login shell for the workspace terminal (SHELL env, else a sane default). */
+  shell: string
 }
 
 export type AuthMode = 'oauth' | 'apikey'
@@ -495,6 +499,8 @@ function buildConfig(): Config {
     dbPath: path.join(DATA_DIR, 'zmrng.db'),
     webDist: process.env.ZMRNG_WEB_DIST ?? path.join(REPO_ROOT, 'packages', 'web', 'dist'),
     authMode: resolveAuthMode(process.env),
+    projectsDir: PROJECTS_DIR,
+    shell: process.env.SHELL?.trim() || '/bin/sh',
   }
 }
 

@@ -21,6 +21,7 @@ import { WorkspaceTabs } from './WorkspaceTabs'
 import { NewTaskForm } from './NewTaskForm'
 import { TaskList } from './TaskList'
 import { TaskControls } from './TaskControls'
+import { TerminalDock } from './TerminalDock'
 import { STATUS_LABEL, statusColor } from '../status'
 import { hydrateLayout, openFile, pruneFileTabs } from '../workspaceLayout'
 
@@ -38,6 +39,11 @@ interface Props {
   selectedId: string | null
   railCollapsed: boolean
   onRailCollapsedChange: (v: boolean) => void
+  /** Bottom-dock terminal chrome (persisted global UI state, threaded from App). */
+  dockOpen: boolean
+  dockHeight: number
+  onDockOpenChange: (v: boolean) => void
+  onDockHeightChange: (h: number) => void
   onSelect: (id: string) => void
   onCreate: (
     title: string,
@@ -96,6 +102,10 @@ export function WorkspaceView({
   selectedId,
   railCollapsed,
   onRailCollapsedChange,
+  dockOpen,
+  dockHeight,
+  onDockOpenChange,
+  onDockHeightChange,
   onSelect,
   onCreate,
   onStart,
@@ -193,8 +203,9 @@ export function WorkspaceView({
   const selectedPath = activeFilePath(layout)
 
   return (
-    <div className={`${styles.workspace} ${railCollapsed ? styles.workspaceCollapsed : ''}`}>
-      <aside className={styles.sidebar}>
+    <div className={styles.shell}>
+      <div className={`${styles.workspace} ${railCollapsed ? styles.workspaceCollapsed : ''}`}>
+        <aside className={styles.sidebar}>
         <div className={styles.sidebarHead}>
           <span className={styles.sidebarTitle}>Files</span>
           {task && (
@@ -307,6 +318,14 @@ export function WorkspaceView({
           </>
         )}
       </aside>
+      </div>
+
+      <TerminalDock
+        open={dockOpen}
+        height={dockHeight}
+        onOpenChange={onDockOpenChange}
+        onHeightChange={onDockHeightChange}
+      />
     </div>
   )
 }
