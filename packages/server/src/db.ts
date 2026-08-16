@@ -10,6 +10,7 @@ import type {
   CaveStyle,
   TaskUsage,
   TaskComment,
+  ChatMessage,
 } from './types.js'
 
 const SCHEMA = `
@@ -54,6 +55,15 @@ CREATE TABLE IF NOT EXISTS task_comments (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id, id);
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_task ON chat_messages(task_id, agent_id, id);
 `
 
 interface TaskRow {
@@ -95,6 +105,15 @@ interface TaskCommentRow {
   task_id: string
   author: string
   body: string
+  created_at: string
+}
+
+interface ChatMessageRow {
+  id: number
+  task_id: string
+  agent_id: string
+  role: string
+  content: string
   created_at: string
 }
 
@@ -144,6 +163,17 @@ function rowToComment(r: TaskCommentRow): TaskComment {
     taskId: r.task_id,
     author: r.author,
     body: r.body,
+    createdAt: r.created_at,
+  }
+}
+
+function rowToChatMessage(r: ChatMessageRow): ChatMessage {
+  return {
+    id: r.id,
+    taskId: r.task_id,
+    agentId: r.agent_id,
+    role: r.role as ChatMessage['role'],
+    content: r.content,
     createdAt: r.created_at,
   }
 }
@@ -333,5 +363,36 @@ export class Db {
       .prepare('SELECT * FROM task_comments WHERE task_id = ? ORDER BY id ASC')
       .all(taskId) as TaskCommentRow[]
     return rows.map(rowToComment)
+  }
+
+  addChatMessage(
+    taskId: string,
+    agentId: string,
+    role: ChatMessage['role'],
+    content: string,
+    now: string,
+  ): ChatMessage {
+    const info = this.db
+      .prepare(
+        'INSERT INTO chat_messages (task_id, agent_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(taskId, agentId, role, content, now)
+    return {
+      id: Number(info.lastInsertRowid),
+      taskId,
+      agentId,
+      role,
+      content,
+      createdAt: now,
+    }
+  }
+
+  listChatMessages(taskId: string, agentId: string): ChatMessage[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM chat_messages WHERE task_id = ? AND agent_id = ? ORDER BY id ASC',
+      )
+      .all(taskId, agentId) as ChatMessageRow[]
+    return rows.map(rowToChatMessage)
   }
 }

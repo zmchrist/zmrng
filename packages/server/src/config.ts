@@ -2,7 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import type { RepoTarget } from './types.js'
+import type { AgentTarget, RepoTarget } from './types.js'
 
 /** Expand a leading ~ to the user's home directory. */
 function expandHome(p: string): string {
@@ -93,6 +93,8 @@ export interface Config {
   defaultRepoId: string
   /** Non-fatal registry problems (invalid entries skipped) — logged at startup. */
   repoWarnings: string[]
+  /** Optional external chat agents (U4). Empty when none are configured — the chat panel then hides. */
+  agents: AgentTarget[]
   defaultModel: string
   maxLanes: number
   repoRoot: string
@@ -118,6 +120,87 @@ export type AuthMode = 'oauth' | 'apikey'
  */
 export function resolveAuthMode(env: { ZMRNG_AUTH_MODE?: string }): AuthMode {
   return env.ZMRNG_AUTH_MODE?.trim().toLowerCase() === 'apikey' ? 'apikey' : 'oauth'
+}
+
+/**
+ * Normalise a raw agent entry into an `AgentTarget`, or `undefined` when it is
+ * missing a non-empty id/label/url. `headers` is kept only when it is a plain
+ * object of string values.
+ */
+function normalizeAgent(e: Partial<AgentTarget>): AgentTarget | undefined {
+  const id = e.id?.trim()
+  const label = e.label?.trim()
+  const url = e.url?.trim()
+  if (!id || !label || !url) return undefined
+  const agent: AgentTarget = { id, label, url }
+  if (e.headers && typeof e.headers === 'object') {
+    const headers: Record<string, string> = {}
+    for (const [k, v] of Object.entries(e.headers)) {
+      if (typeof v === 'string') headers[k] = v
+    }
+    if (Object.keys(headers).length) agent.headers = headers
+  }
+  return agent
+}
+
+/**
+ * Resolve the optional chat-agent registry — pure and unit-testable, mirroring
+ * `resolveRegistry`. Precedence: `<configDir>/agents.json` wins; else the
+ * `ZMRNG_AGENTS` env; else `[]` (chat panel hidden). Malformed entries are
+ * skipped so one bad entry never sinks the rest.
+ *
+ * `ZMRNG_AGENTS` accepts either a JSON array of `{id,label,url,headers?}`, or a
+ * comma-separated list of `id:label:url` triples (the url keeps everything after
+ * the second colon, so `https://…` is preserved). Env entries can't carry headers.
+ */
+export function resolveAgents(opts: {
+  configDir: string
+  env: { ZMRNG_AGENTS?: string }
+}): AgentTarget[] {
+  // 1. <configDir>/agents.json (gitignored; may hold secret headers)
+  const jsonPath = path.join(opts.configDir, 'agents.json')
+  if (existsSync(jsonPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(jsonPath, 'utf8')) as Partial<AgentTarget>[]
+      if (Array.isArray(parsed)) {
+        const entries = parsed.map(normalizeAgent).filter((a): a is AgentTarget => !!a)
+        if (entries.length) return entries
+      }
+    } catch {
+      // malformed JSON — fall through to env
+    }
+  }
+  // 2. ZMRNG_AGENTS env — JSON array or `id:label:url` triples
+  const raw = opts.env.ZMRNG_AGENTS?.trim()
+  if (raw) {
+    if (raw.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(raw) as Partial<AgentTarget>[]
+        if (Array.isArray(parsed)) {
+          const entries = parsed.map(normalizeAgent).filter((a): a is AgentTarget => !!a)
+          if (entries.length) return entries
+        }
+      } catch {
+        // fall through to triple parsing
+      }
+    }
+    const entries = raw
+      .split(',')
+      .map((triple) => {
+        const first = triple.indexOf(':')
+        if (first === -1) return undefined
+        const second = triple.indexOf(':', first + 1)
+        if (second === -1) return undefined
+        return normalizeAgent({
+          id: triple.slice(0, first),
+          label: triple.slice(first + 1, second),
+          url: triple.slice(second + 1),
+        })
+      })
+      .filter((a): a is AgentTarget => !!a)
+    if (entries.length) return entries
+  }
+  return []
 }
 
 /** True if `p` exists and is inside a git work tree. */
@@ -404,6 +487,7 @@ function buildConfig(): Config {
     repos,
     defaultRepoId,
     repoWarnings: warnings,
+    agents: resolveAgents({ configDir: CONFIG_DIR, env: process.env }),
     defaultModel: process.env.ZMRNG_MODEL ?? 'opus',
     maxLanes: Number(process.env.ZMRNG_MAX_LANES ?? 2),
     repoRoot: REPO_ROOT,

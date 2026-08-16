@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import styles from './WorkspaceView.module.css'
-import type { Task, TaskEvent, WorktreeFileTree } from '../types'
+import type { AgentSummary, Task, TaskEvent, WorktreeFileTree } from '../types'
 import { api } from '../api'
 import { FileTree } from './FileTree'
 import { WorkerLog } from './WorkerLog'
 import { Viewer } from './Viewer'
 import { Notes } from './Notes'
+import { Chat } from './Chat'
 
 interface Props {
   task: Task | undefined
@@ -63,6 +64,24 @@ export function WorkspaceView({ task, events, live }: Props) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [nonce, setNonce] = useState(0)
   const [openPath, setOpenPath] = useState<string | null>(null)
+  // Optional chat adapter (U4): fetched once. Empty ⇒ the Chat card is hidden
+  // entirely and the app is fully standalone.
+  const [agents, setAgents] = useState<AgentSummary[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .listAgents()
+      .then((list) => {
+        if (!cancelled) setAgents(list)
+      })
+      .catch(() => {
+        if (!cancelled) setAgents([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const taskId = task?.id ?? null
   // Re-fetch when the worktree appears/changes (it is null until the branch is cut).
@@ -137,7 +156,11 @@ export function WorkspaceView({ task, events, live }: Props) {
       </div>
 
       <aside className={styles.rightRail}>
-        <RailCard title="Chat" hint="U4" slot="Chat with the worker — coming soon." />
+        {agents.length > 0 && (
+          <RailCard title="Chat" hint="U4">
+            <Chat taskId={taskId} agents={agents} />
+          </RailCard>
+        )}
         <RailCard title="Notes" hint="U3">
           <Notes taskId={taskId} selectedPath={effectiveOpenPath} onOpen={setOpenPath} />
         </RailCard>

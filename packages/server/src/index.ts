@@ -10,7 +10,15 @@ import { TaskManager } from './phases.js'
 import { listWorktreeFiles } from './worktree.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
-import type { WsEvent, EffortLevel, CaveStyle, WorktreeFileTree } from './types.js'
+import { parseStreamedText } from './chat.js'
+import type {
+  WsEvent,
+  EffortLevel,
+  CaveStyle,
+  WorktreeFileTree,
+  AgentSummary,
+  ChatMessage,
+} from './types.js'
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -54,6 +62,11 @@ app.get('/api/config', () => ({
 }))
 
 app.get('/api/repos', () => config.repos)
+
+// Optional chat agents (U4). Only the client-safe fields — never leak url/headers.
+app.get('/api/agents', (): AgentSummary[] =>
+  config.agents.map((a) => ({ id: a.id, label: a.label })),
+)
 
 // Fresh probe every call — advisory only, never a gate on Start.
 app.get('/api/preflight', () => runPreflight())
@@ -148,6 +161,84 @@ app.get('/api/tasks/:id/notes', (req): string[] => {
   } catch (err) {
     app.log.error({ err, taskId: id }, 'failed to list task notes')
     return []
+  }
+})
+
+// Persisted chat history for a task/agent conversation. Always 200: unknown
+// task or agent yields an empty list, never a 500.
+app.get('/api/tasks/:id/chat', (req): ChatMessage[] => {
+  const { id } = req.params as { id: string }
+  const { agentId } = req.query as { agentId?: string }
+  if (!agentId) return []
+  return db.listChatMessages(id, agentId)
+})
+
+// Streaming chat proxy (U4). Persists the user message, POSTs the conversation
+// (plus per-task context) to the configured agent, relays the streamed bytes to
+// the client untouched, and persists the accumulated assistant text on close.
+// Read-only w.r.t. the worktree — chat never writes worktree files.
+app.post('/api/tasks/:id/chat', async (req, reply) => {
+  const { id } = req.params as { id: string }
+  const body = req.body as { agentId?: string; content?: string } | undefined
+  const agentId = body?.agentId?.trim()
+  const content = body?.content?.trim()
+  if (!agentId || !content) {
+    return reply.code(400).send({ error: 'agentId and content are required' })
+  }
+  const task = db.getTask(id)
+  if (!task) return reply.code(404).send({ error: 'task not found' })
+  const agent = config.agents.find((a) => a.id === agentId)
+  if (!agent) return reply.code(404).send({ error: 'unknown agent' })
+
+  const priorHistory = db.listChatMessages(id, agentId)
+  db.addChatMessage(id, agentId, 'user', content, new Date().toISOString())
+  const messages = [
+    ...priorHistory.map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user' as const, content },
+  ]
+  const upstreamBody = JSON.stringify({
+    messages,
+    context: { repoId: task.repoId, worktree: task.worktree, status: task.status },
+  })
+
+  // Take over the raw socket so we can stream chunks as they arrive.
+  reply.hijack()
+  const raw = reply.raw
+  raw.setHeader('content-type', 'text/event-stream')
+  raw.setHeader('cache-control', 'no-cache')
+
+  let assistant = ''
+  try {
+    const upstream = await fetch(agent.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...agent.headers },
+      body: upstreamBody,
+    })
+    if (!upstream.ok || !upstream.body) {
+      app.log.error(
+        { taskId: id, agentId, status: upstream.status },
+        'chat upstream returned an error',
+      )
+      raw.write(`event: error\ndata: ${JSON.stringify({ error: `upstream ${upstream.status}` })}\n\n`)
+      raw.end()
+      return
+    }
+    const reader = upstream.body.getReader()
+    const decoder = new TextDecoder()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = decoder.decode(value, { stream: true })
+      assistant += chunk
+      raw.write(chunk)
+    }
+  } catch (err) {
+    app.log.error({ err, taskId: id, agentId }, 'chat stream failed')
+    raw.write(`event: error\ndata: ${JSON.stringify({ error: errMsg(err) })}\n\n`)
+  } finally {
+    const text = parseStreamedText(assistant).trim()
+    if (text) db.addChatMessage(id, agentId, 'assistant', text, new Date().toISOString())
+    raw.end()
   }
 })
 
