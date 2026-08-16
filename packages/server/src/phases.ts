@@ -888,6 +888,34 @@ export class TaskManager {
     this.transition(taskId, 'failed', 'cancelled by operator')
   }
 
+  /**
+   * Hard-delete a task: removes its DB rows (task + events) and, if a worktree/
+   * branch still exists (e.g. a `failed` task that never reached `done`), cleans
+   * it up via the same worktree-removal path `done()`/`cancel()` use. Only
+   * permitted for terminal statuses that can't have a live runner attached.
+   */
+  async deleteTask(taskId: string): Promise<void> {
+    const task = this.db.getTask(taskId)
+    if (!task) throw new Error('task not found')
+    const deletable: TaskStatus[] = ['backlog', 'done', 'failed']
+    if (!deletable.includes(task.status)) {
+      throw new Error(`cannot delete task in status '${task.status}'`)
+    }
+    this.runners.get(taskId)?.kill()
+    this.runners.delete(taskId)
+    this.blockedFrom.delete(taskId)
+    this.interrupting.delete(taskId)
+    this.repoSlugs.delete(taskId)
+    this.freeLane(taskId)
+    if (task.worktree) {
+      const repoPath = repoById(task.repoId)?.path ?? config.targetRepo
+      await removeWorktree(repoPath, task.worktree)
+    }
+    pruneUiStateTask(taskId)
+    this.db.deleteTask(taskId)
+    this.broadcast({ type: 'task-removed', taskId })
+  }
+
   /** Manual board action — shelve a finished task out of the active columns. */
   archive(taskId: string): void {
     const task = this.db.getTask(taskId)

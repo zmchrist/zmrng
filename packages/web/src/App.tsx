@@ -94,6 +94,19 @@ export default function App() {
         if (e.taskId !== selectedIdRef.current) return
         setLive((prev) => prev + e.text)
         break
+      case 'task-removed':
+        setTasks((prev) => {
+          const next = { ...prev }
+          delete next[e.taskId]
+          return next
+        })
+        if (e.taskId === selectedIdRef.current) {
+          selectedIdRef.current = null
+          setSelectedId(null)
+          setLive('')
+          setEvents([])
+        }
+        break
     }
   }, [])
 
@@ -269,6 +282,7 @@ export default function App() {
           onInterrupt={() => (selected ? api.interrupt(selected.id) : Promise.resolve())}
           onDone={() => (selected ? api.done(selected.id) : Promise.resolve())}
           onCancel={() => (selected ? api.cancel(selected.id) : Promise.resolve())}
+          onDelete={() => (selected ? api.deleteTask(selected.id) : Promise.resolve())}
         />
       </div>
 
