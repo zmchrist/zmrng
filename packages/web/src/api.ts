@@ -6,6 +6,7 @@ import type {
   ModelAlias,
   EffortLevel,
   CaveStyle,
+  FlowMode,
   WorktreeFileTree,
   WorktreeFileContent,
   PreflightResult,
@@ -164,6 +165,7 @@ export const api = {
       model?: ModelAlias
       effort?: EffortLevel
       style?: CaveStyle
+      flow?: FlowMode
       repoId?: string
     },
   ) =>

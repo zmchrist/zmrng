@@ -26,6 +26,17 @@ export type CaveStyle =
   | 'caveman-ultra'
   | 'wenyan-full'
 
+/**
+ * How autonomous a task runs after clarify.
+ * - `direct` — clarify → executing. Skip the plan session entirely; the clarify
+ *   transcript is the brief. A lean execute chain (inline validation, conditional
+ *   TDD/docs, no subagent spawns) keeps menial fixes snappy and cheap.
+ * - `plan`   — clarify → planning → executing. Full PIV pipeline: grill + write a
+ *   plan file + `code-reviewer` QA, then the heavy TDD/subagent execute chain.
+ *   Opt into this for architectural/multi-file work that earns the ceremony.
+ */
+export type FlowMode = 'direct' | 'plan'
+
 /** Accumulated token/cost usage for a task, summed across all `result` events. */
 export interface TaskUsage {
   tokensIn: number // input_tokens (sum)
@@ -38,6 +49,8 @@ export interface TaskUsage {
 export const DEFAULT_MODEL: ModelAlias = 'opus'
 export const DEFAULT_EFFORT: EffortLevel = 'high'
 export const DEFAULT_STYLE: CaveStyle = 'caveman-full'
+/** New tasks jump straight to work; opt into `plan` for the heavy pipeline. */
+export const DEFAULT_FLOW: FlowMode = 'direct'
 
 // ---- multi-target repo registry ----
 
@@ -90,6 +103,8 @@ export interface Task {
   model: string | null
   effort: EffortLevel | null
   style: CaveStyle | null
+  /** Post-clarify autonomy: `direct` skips the plan phase, `plan` runs the full pipeline. */
+  flow: FlowMode
   /** id of the RepoTarget this task drives (from the repo registry). */
   repoId: string
   usage: TaskUsage

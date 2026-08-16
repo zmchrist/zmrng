@@ -10,6 +10,7 @@ import type {
   ModelAlias,
   EffortLevel,
   CaveStyle,
+  FlowMode,
   RepoTarget,
   WorkspaceMode,
 } from './types'
@@ -105,6 +106,7 @@ export default function App() {
         model: ModelAlias
         effort: EffortLevel
         style: CaveStyle
+        flow: FlowMode
         repoId: string
       },
     ) => {

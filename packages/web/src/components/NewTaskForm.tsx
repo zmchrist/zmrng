@@ -2,10 +2,12 @@ import { useState } from 'react'
 import styles from './NewTaskForm.module.css'
 import {
   DEFAULT_EFFORT,
+  DEFAULT_FLOW,
   DEFAULT_MODEL,
   DEFAULT_STYLE,
   type CaveStyle,
   type EffortLevel,
+  type FlowMode,
   type ModelAlias,
   type RepoTarget,
 } from '../types'
@@ -20,6 +22,7 @@ interface Props {
       model: ModelAlias
       effort: EffortLevel
       style: CaveStyle
+      flow: FlowMode
       repoId: string
     },
   ) => Promise<void>
@@ -34,14 +37,31 @@ const STYLE_OPTIONS: CaveStyle[] = [
   'caveman-ultra',
   'wenyan-full',
 ]
+const FLOW_OPTIONS: FlowMode[] = ['direct', 'plan']
+
+// Snappy defaults per flow: `direct` is for menial work (sonnet · medium),
+// `plan` earns the heavier opus · high (the plan phase re-picks these anyway).
+const FLOW_DEFAULTS: Record<FlowMode, { model: ModelAlias; effort: EffortLevel }> = {
+  direct: { model: 'sonnet', effort: 'medium' },
+  plan: { model: DEFAULT_MODEL, effort: DEFAULT_EFFORT },
+}
 
 export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [model, setModel] = useState<ModelAlias>(DEFAULT_MODEL)
-  const [effort, setEffort] = useState<EffortLevel>(DEFAULT_EFFORT)
+  const [flow, setFlow] = useState<FlowMode>(DEFAULT_FLOW)
+  const [model, setModel] = useState<ModelAlias>(FLOW_DEFAULTS[DEFAULT_FLOW].model)
+  const [effort, setEffort] = useState<EffortLevel>(FLOW_DEFAULTS[DEFAULT_FLOW].effort)
   const [style, setStyle] = useState<CaveStyle>(DEFAULT_STYLE)
+
+  // Switching flow snaps model/effort to that flow's snappy defaults; the
+  // operator can still override afterward.
+  function onFlowChange(next: FlowMode) {
+    setFlow(next)
+    setModel(FLOW_DEFAULTS[next].model)
+    setEffort(FLOW_DEFAULTS[next].effort)
+  }
   // '' means "follow the server default" until the operator explicitly picks a repo.
   const [repoId, setRepoId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -57,12 +77,14 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
         model,
         effort,
         style,
+        flow,
         repoId: effectiveRepoId,
       })
       setTitle('')
       setBody('')
-      setModel(DEFAULT_MODEL)
-      setEffort(DEFAULT_EFFORT)
+      setFlow(DEFAULT_FLOW)
+      setModel(FLOW_DEFAULTS[DEFAULT_FLOW].model)
+      setEffort(FLOW_DEFAULTS[DEFAULT_FLOW].effort)
       setStyle(DEFAULT_STYLE)
       setRepoId('')
       setOpen(false)
@@ -98,6 +120,20 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
         onChange={(e) => setBody(e.target.value)}
       />
       <div className={styles.controls}>
+        <label className={styles.control}>
+          <span className={styles.controlLabel}>Flow</span>
+          <select
+            className={styles.select}
+            value={flow}
+            onChange={(e) => onFlowChange(e.target.value as FlowMode)}
+          >
+            {FLOW_OPTIONS.map((f) => (
+              <option key={f} value={f}>
+                {f === 'direct' ? 'direct (skip plan)' : 'plan (full pipeline)'}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className={styles.control}>
           <span className={styles.controlLabel}>Repo</span>
           <select
