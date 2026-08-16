@@ -23,6 +23,9 @@ const STOPPABLE: ReadonlySet<string> = new Set([
   'validating',
 ])
 
+/** Terminal statuses (no live runner attached) where a hard delete is safe. */
+const DELETABLE: ReadonlySet<string> = new Set(['backlog', 'done', 'failed'])
+
 interface Props {
   task: Task
   config: ServerConfig | null
@@ -32,6 +35,7 @@ interface Props {
   onInterrupt: () => Promise<unknown>
   onDone: () => Promise<unknown>
   onCancel: () => Promise<unknown>
+  onDelete: () => Promise<unknown>
 }
 
 /** Compact controls for the selected task, tucked into the Workspace right bar.
@@ -47,6 +51,7 @@ export function TaskControls({
   onInterrupt,
   onDone,
   onCancel,
+  onDelete,
 }: Props) {
   const repoLabel = repos.find((r) => r.id === task.repoId)?.label ?? task.repoId
   const [err, setErr] = useState<string | null>(null)
@@ -114,6 +119,11 @@ export function TaskControls({
         {task.status !== 'done' && task.status !== 'backlog' && (
           <button type="button" className={styles.danger} disabled={busy} onClick={() => run(onCancel)}>
             Cancel
+          </button>
+        )}
+        {DELETABLE.has(task.status) && (
+          <button type="button" className={styles.danger} disabled={busy} onClick={() => run(onDelete)}>
+            Delete
           </button>
         )}
       </div>

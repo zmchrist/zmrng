@@ -70,6 +70,7 @@ interface Props {
   onInterrupt: () => Promise<unknown>
   onDone: () => Promise<unknown>
   onCancel: () => Promise<unknown>
+  onDelete: () => Promise<unknown>
 }
 
 /** Collect every file node's path in the tree — the set a persisted tab path
@@ -131,6 +132,7 @@ export function WorkspaceView({
   onInterrupt,
   onDone,
   onCancel,
+  onDelete,
 }: Props) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [nonce, setNonce] = useState(0)
@@ -339,6 +341,7 @@ export function WorkspaceView({
                   onInterrupt={onInterrupt}
                   onDone={onDone}
                   onCancel={onCancel}
+                  onDelete={onDelete}
                 />
               )}
               <TaskList tasks={tasks} repos={repos} selectedId={selectedId} onSelect={onSelect} />
