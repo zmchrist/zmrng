@@ -17,6 +17,7 @@ function makeTask(over: Partial<Task> = {}): Task {
     model: 'opus',
     effort: 'high',
     style: 'normal',
+    flow: 'plan',
     repoId: 'zmrng',
     usage: { tokensIn: 0, tokensOut: 0, tokensCache: 0, costUsd: 0, turns: 0 },
     queued: false,

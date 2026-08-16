@@ -16,6 +16,7 @@ import type {
   WsEvent,
   EffortLevel,
   CaveStyle,
+  FlowMode,
   WorktreeFileTree,
   AgentSummary,
   ChatMessage,
@@ -40,6 +41,10 @@ function asEffort(v: unknown): EffortLevel | undefined {
 }
 function asStyle(v: unknown): CaveStyle | undefined {
   return STYLES.includes(v as CaveStyle) ? (v as CaveStyle) : undefined
+}
+const FLOWS: readonly FlowMode[] = ['direct', 'plan']
+function asFlow(v: unknown): FlowMode | undefined {
+  return FLOWS.includes(v as FlowMode) ? (v as FlowMode) : undefined
 }
 
 const app = Fastify({ logger: true })
@@ -109,6 +114,7 @@ app.post('/api/tasks', (req, reply) => {
         model?: string
         effort?: string
         style?: string
+        flow?: string
         repoId?: string
       }
     | undefined
@@ -124,6 +130,7 @@ app.post('/api/tasks', (req, reply) => {
     asEffort(body?.effort),
     asStyle(body?.style),
     body?.repoId,
+    asFlow(body?.flow),
   )
 })
 
