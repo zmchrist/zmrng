@@ -424,4 +424,15 @@ export class Db {
       .all(taskId, agentId) as ChatMessageRow[]
     return rows.map(rowToChatMessage)
   }
+
+  /** Hard-delete a task and all its rows (events, comments, chat messages). */
+  deleteTask(id: string): void {
+    const run = this.db.transaction((taskId: string) => {
+      this.db.prepare('DELETE FROM events WHERE task_id = ?').run(taskId)
+      this.db.prepare('DELETE FROM task_comments WHERE task_id = ?').run(taskId)
+      this.db.prepare('DELETE FROM chat_messages WHERE task_id = ?').run(taskId)
+      this.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+    })
+    run(id)
+  }
 }
