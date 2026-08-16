@@ -131,6 +131,14 @@ export interface GlobalUiState {
   splitSizes?: Record<string, number>
   /** Bottom-dock terminal chrome. Only open/height persist — shells are ephemeral. */
   terminalDock?: { open?: boolean; height?: number }
+  /**
+   * Bottom-nav pane visibility. The Tasks right rail and the Workspace center
+   * pane each toggle from the bottom nav bar; both default closed so a fresh
+   * load shows only the locked-left Files tree. The Terminal pane's visibility
+   * lives in `terminalDock.open`; the Settings modal is an ephemeral overlay
+   * that is never persisted.
+   */
+  panes?: { tasks?: boolean; workspace?: boolean }
 }
 
 // ---- workspace tab-pane layout (Zed-style collapsible tabs) ----

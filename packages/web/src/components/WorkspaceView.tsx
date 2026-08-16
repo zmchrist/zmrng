@@ -44,6 +44,13 @@ interface Props {
   dockHeight: number
   onDockOpenChange: (v: boolean) => void
   onDockHeightChange: (h: number) => void
+  /** Bottom-nav pane visibility (persisted global UI state) + Settings modal. */
+  tasksOpen: boolean
+  workspaceOpen: boolean
+  onTasksOpenChange: (v: boolean) => void
+  onWorkspaceOpenChange: (v: boolean) => void
+  settingsOpen: boolean
+  onSettingsToggle: () => void
   onSelect: (id: string) => void
   onCreate: (
     title: string,
@@ -83,8 +90,12 @@ function activeFilePath(layout: WorkspaceLayout): string | null {
   return tab?.kind === 'file' ? (tab.path ?? null) : null
 }
 
-/** File tree tagged with the task id it was fetched for, so a stale tree from a
- *  previous selection is never shown against the wrong task. */
+/** Sentinel tree key for the no-task Projects-dir listing. */
+const PROJECTS_KEY = '__projects__'
+
+/** File tree tagged with the key it was fetched for (a task id, or PROJECTS_KEY
+ *  for the no-task Projects-dir tree), so a stale tree from a previous selection
+ *  is never shown against the wrong source. */
 interface Loaded {
   id: string
   tree: WorktreeFileTree
@@ -106,6 +117,12 @@ export function WorkspaceView({
   dockHeight,
   onDockOpenChange,
   onDockHeightChange,
+  tasksOpen,
+  workspaceOpen,
+  onTasksOpenChange,
+  onWorkspaceOpenChange,
+  settingsOpen,
+  onSettingsToggle,
   onSelect,
   onCreate,
   onStart,
@@ -145,23 +162,24 @@ export function WorkspaceView({
   const taskId = task?.id ?? null
   // Re-fetch when the worktree appears/changes (it is null until the branch is cut).
   const worktree = task?.worktree ?? null
+  // With a task selected, show its worktree; with none, the Projects-dir tree.
+  const treeKey = taskId ?? PROJECTS_KEY
 
   useEffect(() => {
-    if (!taskId) return
     let cancelled = false
-    api
-      .getFiles(taskId)
+    const fetchTree = taskId ? api.getFiles(taskId) : api.getProjectFiles()
+    fetchTree
       .then((tree) => {
-        if (!cancelled) setLoaded({ id: taskId, tree })
+        if (!cancelled) setLoaded({ id: treeKey, tree })
       })
       .catch(() => {
-        if (!cancelled) setLoaded({ id: taskId, tree: { root: null, entries: [] } })
+        if (!cancelled) setLoaded({ id: treeKey, tree: { root: null, entries: [] } })
       })
     return () => {
       cancelled = true
     }
     // `worktree` + `nonce` re-fetch when the worktree appears or on manual refresh.
-  }, [taskId, worktree, nonce])
+  }, [taskId, treeKey, worktree, nonce])
 
   // Restore the persisted tab layout when the selected task changes. Adjusted
   // during render (not an effect) per the "adjusting state on a prop change"
@@ -174,7 +192,7 @@ export function WorkspaceView({
     setLayout(hydrateLayout(stored, legacy ?? null))
   }
 
-  const current = loaded && loaded.id === taskId ? loaded.tree : null
+  const current = loaded && loaded.id === treeKey ? loaded.tree : null
   const hasTree = !!current && current.entries.length > 0
 
   // Drop file tabs whose path no longer exists in the freshly fetched tree
@@ -195,63 +213,73 @@ export function WorkspaceView({
     [taskId, onPerTaskChange],
   )
 
+  // Opening a file always reveals the Workspace pane so its content is visible,
+  // even when the pane was toggled closed (matches the "open file → show it" ask).
   const openInLayout = useCallback(
-    (path: string) => applyLayout(openFile(layout, path)),
-    [applyLayout, layout],
+    (path: string) => {
+      applyLayout(openFile(layout, path))
+      if (!workspaceOpen) onWorkspaceOpenChange(true)
+    },
+    [applyLayout, layout, workspaceOpen, onWorkspaceOpenChange],
   )
 
   const selectedPath = activeFilePath(layout)
 
+  // The Files sidebar is always locked to the left; the Workspace centre pane and
+  // Tasks rail each appear only when toggled open from the bottom nav bar. Columns
+  // are sized to whichever regions are visible (all closed → just the sidebar).
+  const columns = ['240px']
+  if (workspaceOpen) columns.push('minmax(0, 1fr)')
+  if (tasksOpen) columns.push(railCollapsed ? '56px' : '348px')
+  const gridTemplateColumns = columns.join(' ')
+
   return (
     <div className={styles.shell}>
-      <div className={`${styles.workspace} ${railCollapsed ? styles.workspaceCollapsed : ''}`}>
+      <div className={styles.workspace} style={{ gridTemplateColumns }}>
         <aside className={styles.sidebar}>
         <div className={styles.sidebarHead}>
-          <span className={styles.sidebarTitle}>Files</span>
-          {task && (
-            <button
-              type="button"
-              className={styles.refresh}
-              onClick={() => setNonce((n) => n + 1)}
-              aria-label="Refresh file tree"
-              title="Refresh file tree"
-            >
-              ↻
-            </button>
-          )}
+          <span className={styles.sidebarTitle}>{task ? 'Files' : 'Projects'}</span>
+          <button
+            type="button"
+            className={styles.refresh}
+            onClick={() => setNonce((n) => n + 1)}
+            aria-label="Refresh file tree"
+            title="Refresh file tree"
+          >
+            ↻
+          </button>
         </div>
         <div className={styles.sidebarBody}>
-          {!task ? (
-            <div className={styles.empty}>Select a task to browse its worktree.</div>
-          ) : !current ? (
+          {!current ? (
             <div className={styles.empty}>Loading…</div>
           ) : hasTree ? (
             <FileTree entries={current.entries} onOpen={openInLayout} selectedPath={selectedPath} />
-          ) : (
+          ) : task ? (
             <div className={styles.empty}>
               No worktree yet — the file tree appears once this task starts working.
             </div>
+          ) : (
+            <div className={styles.empty}>No projects found in the configured directory.</div>
           )}
         </div>
       </aside>
 
-      <div className={styles.center}>
-        {task ? (
+      {workspaceOpen && (
+        <div className={styles.center}>
           <WorkspaceTabs
             taskId={taskId}
-            status={task.status}
+            status={task?.status ?? null}
             events={events}
             live={live}
             agents={agents}
             layout={layout}
             onLayoutChange={applyLayout}
-            onMessage={onMessage}
+            onMessage={task ? onMessage : undefined}
           />
-        ) : (
-          <div className={styles.empty}>Select a task to open its workspace.</div>
-        )}
-      </div>
+        </div>
+      )}
 
+      {tasksOpen && (
       <aside className={`${styles.rightbar} ${railCollapsed ? styles.rightbarMini : ''}`}>
         {railCollapsed ? (
           <div className={styles.mini}>
@@ -318,6 +346,7 @@ export function WorkspaceView({
           </>
         )}
       </aside>
+      )}
       </div>
 
       <TerminalDock
@@ -325,6 +354,12 @@ export function WorkspaceView({
         height={dockHeight}
         onOpenChange={onDockOpenChange}
         onHeightChange={onDockHeightChange}
+        tasksOpen={tasksOpen}
+        workspaceOpen={workspaceOpen}
+        settingsOpen={settingsOpen}
+        onTasksToggle={() => onTasksOpenChange(!tasksOpen)}
+        onWorkspaceToggle={() => onWorkspaceOpenChange(!workspaceOpen)}
+        onSettingsToggle={onSettingsToggle}
       />
     </div>
   )

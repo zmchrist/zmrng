@@ -86,4 +86,22 @@ describe('listWorktreeFiles', () => {
     expect(p).toContain('real')
     expect(p).not.toContain('link')
   })
+
+  it('keeps dotfiles by default (task worktree) but drops them with skipDotEntries (Projects scan)', () => {
+    writeFileSync(path.join(dir, '.gitignore'), 'node_modules')
+    mkdirSync(path.join(dir, '.github'))
+    writeFileSync(path.join(dir, '.github', 'ci.yml'), '')
+    writeFileSync(path.join(dir, 'keep.txt'), 'ok')
+
+    // Default (worktree) behavior: dotfiles are useful and kept.
+    const kept = paths(listWorktreeFiles(dir).entries)
+    expect(kept).toContain('.gitignore')
+    expect(kept).toContain('.github')
+
+    // Projects scan: hidden entries are noise and dropped, real files stay.
+    const scanned = paths(listWorktreeFiles(dir, { skipDotEntries: true }).entries)
+    expect(scanned).toContain('keep.txt')
+    expect(scanned).not.toContain('.gitignore')
+    expect(scanned).not.toContain('.github')
+  })
 })

@@ -70,7 +70,7 @@ packages/web/src/
   workspaceLayout.ts — pure reducer for the Workspace mode's Zed-style tab-pane layout (max 2 panes, single split axis)
   terminalDock.ts — pure reducer for the bottom-dock terminal's ephemeral tab list (emptyDock/addTerminal/closeTerminal/setActive)
   terminalProtocol.ts — pure wire helpers for /ws/terminal (encodeInput/encodeResize/parseServerMsg)
-  components/     — TaskList, NewTaskForm, ClarifyChat (live composer, placeholder prop), WorkerLog (read-only tool/subagent rows), WorkerLogPanel (WorkerLog + steer composer), TaskControls (compact selected-task card + dropdown), WorkspaceView (Files sidebar + WorkspaceTabs center + task rail right bar + global TerminalDock), WorkspaceTabs (draggable tabs — file Viewers/WorkerLogPanel/Notes/Chat), TerminalDock (Zed-style bottom dock, ctrl+` toggle, drag-resize), Terminal (xterm.js glue, one WebSocket per instance)
+  components/     — TaskList, NewTaskForm, ClarifyChat (live composer, placeholder prop), WorkerLog (read-only tool/subagent rows), WorkerLogPanel (WorkerLog + steer composer), TaskControls (compact selected-task card + dropdown), WorkspaceView (locked-left Files sidebar + toggleable WorkspaceTabs center + toggleable task rail right bar + global TerminalDock; Files tree shows the Projects dir when no task is selected), WorkspaceTabs (draggable tabs — file Viewers/WorkerLogPanel/Notes/Chat), TerminalDock (Zed-style bottom dock + bottom nav bar of Terminal/Tasks/Workspace/Settings pane toggles, ctrl+` toggle, drag-resize), SettingsModal (ephemeral focused overlay, placeholder shell), Terminal (xterm.js glue, one WebSocket per instance)
 ```
 
 ## Anti-Patterns
