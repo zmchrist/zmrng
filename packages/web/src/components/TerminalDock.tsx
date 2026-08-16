@@ -14,16 +14,35 @@ interface Props {
   height: number
   onOpenChange: (v: boolean) => void
   onHeightChange: (h: number) => void
+  /** Bottom-nav pane visibility + toggles (the other panes this bar controls). */
+  tasksOpen: boolean
+  workspaceOpen: boolean
+  settingsOpen: boolean
+  onTasksToggle: () => void
+  onWorkspaceToggle: () => void
+  onSettingsToggle: () => void
 }
 
 /**
- * The Zed-style bottom terminal dock: a slim always-visible status bar that
- * toggles an expandable body of N terminal tabs. Each tab is a live `<Terminal>`
- * (one PTY / WebSocket per tab). The ephemeral tab list is owned here via the
- * pure `terminalDock` reducer; only `open`/`height` persist (via props). No
- * terminal is mounted while the dock is closed — so no PTY exists.
+ * The Zed-style bottom bar: a slim always-visible nav bar of pane toggles, plus
+ * an expandable terminal body above it. The Terminal button toggles the body of
+ * N terminal tabs (each a live `<Terminal>` — one PTY / WebSocket per tab; no
+ * terminal is mounted while the dock is closed). The Tasks / Workspace / Settings
+ * buttons toggle their regions in place. The ephemeral terminal tab list is owned
+ * here via the pure `terminalDock` reducer; only `open`/`height` persist.
  */
-export function TerminalDock({ open, height, onOpenChange, onHeightChange }: Props) {
+export function TerminalDock({
+  open,
+  height,
+  onOpenChange,
+  onHeightChange,
+  tasksOpen,
+  workspaceOpen,
+  settingsOpen,
+  onTasksToggle,
+  onWorkspaceToggle,
+  onSettingsToggle,
+}: Props) {
   const [dock, setDock] = useState(emptyDock)
   // Monotonic seed for stable, collision-free terminal ids (never Math.random).
   const [seed, setSeed] = useState(0)
@@ -146,18 +165,56 @@ export function TerminalDock({ open, height, onOpenChange, onHeightChange }: Pro
           </div>
         </div>
       )}
-      <button
-        type="button"
-        className={styles.statusBar}
-        aria-expanded={open}
-        aria-label={open ? 'Hide terminal' : 'Show terminal'}
-        onClick={() => onOpenChange(!open)}
-      >
-        <span className={styles.glyph} aria-hidden="true">
-          {'>_'}
-        </span>
-        <span className={styles.statusLabel}>Terminal</span>
-      </button>
+      <div className={styles.navBar} role="toolbar" aria-label="Panes">
+        <button
+          type="button"
+          className={`${styles.navBtn} ${open ? styles.navBtnActive : ''}`}
+          aria-pressed={open}
+          aria-label={open ? 'Hide terminal' : 'Show terminal'}
+          onClick={() => onOpenChange(!open)}
+        >
+          <span className={styles.glyph} aria-hidden="true">
+            {'>_'}
+          </span>
+          <span className={styles.navLabel}>Terminal</span>
+        </button>
+        <button
+          type="button"
+          className={`${styles.navBtn} ${tasksOpen ? styles.navBtnActive : ''}`}
+          aria-pressed={tasksOpen}
+          aria-label={tasksOpen ? 'Hide tasks' : 'Show tasks'}
+          onClick={onTasksToggle}
+        >
+          <span className={styles.glyph} aria-hidden="true">
+            ☰
+          </span>
+          <span className={styles.navLabel}>Tasks</span>
+        </button>
+        <button
+          type="button"
+          className={`${styles.navBtn} ${workspaceOpen ? styles.navBtnActive : ''}`}
+          aria-pressed={workspaceOpen}
+          aria-label={workspaceOpen ? 'Hide workspace' : 'Show workspace'}
+          onClick={onWorkspaceToggle}
+        >
+          <span className={styles.glyph} aria-hidden="true">
+            ▦
+          </span>
+          <span className={styles.navLabel}>Workspace</span>
+        </button>
+        <button
+          type="button"
+          className={`${styles.navBtn} ${settingsOpen ? styles.navBtnActive : ''}`}
+          aria-pressed={settingsOpen}
+          aria-label={settingsOpen ? 'Close settings' : 'Open settings'}
+          onClick={onSettingsToggle}
+        >
+          <span className={styles.glyph} aria-hidden="true">
+            ⚙
+          </span>
+          <span className={styles.navLabel}>Settings</span>
+        </button>
+      </div>
     </div>
   )
 }

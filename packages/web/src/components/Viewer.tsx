@@ -83,9 +83,10 @@ function ViewerBody({
 }
 
 /** A fetch result tagged with the (taskId, path) it was fetched for, so a
- *  fetch that lands after the user opened a different file is never shown. */
+ *  fetch that lands after the user opened a different file is never shown.
+ *  `taskId` is null when the file was read from the Projects dir (no task). */
 interface Fetched {
-  taskId: string
+  taskId: string | null
   path: string
   file: WorktreeFileContent | null
   error: string | null
@@ -103,10 +104,12 @@ export function Viewer({ taskId, path }: Props) {
   const [mdView, setMdView] = useState<MarkdownView>('edit')
 
   useEffect(() => {
-    if (!taskId || !path) return
+    if (!path) return
     let cancelled = false
-    api
-      .readFile(taskId, path)
+    // With a task, read/write its worktree; with no task, read-only from the
+    // Projects dir (arbitrary project browsing).
+    const read = taskId ? api.readFile(taskId, path) : api.readProjectFile(path)
+    read
       .then((f) => {
         if (cancelled) return
         setFetched({ taskId, path, file: f, error: null })
@@ -122,11 +125,12 @@ export function Viewer({ taskId, path }: Props) {
   }, [taskId, path])
 
   const current = fetched && fetched.taskId === taskId && fetched.path === path ? fetched : null
-  const loading = !!taskId && !!path && !current
+  const loading = !!path && !current
   const error = current?.error ?? null
   const file = current?.file ?? null
 
-  const editable = file?.encoding === 'utf8'
+  // Only a task worktree is writable; Projects-dir files are read-only.
+  const editable = !!taskId && file?.encoding === 'utf8'
   const dirty = editable && draft !== file.content
 
   const save = useCallback(() => {
@@ -155,7 +159,7 @@ export function Viewer({ taskId, path }: Props) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [editable, save])
 
-  if (!taskId || !path) {
+  if (!path) {
     return (
       <div className={styles.dockSlot}>
         Viewer — open a file to preview it here.

@@ -141,6 +141,32 @@ app.put('/api/ui-state', (req, reply) => {
   }
 })
 
+// Directory listing of the configured Projects dir, for the Workspace file tree
+// when no task is selected. Skips dotfiles/heavy dirs. Always 200: a
+// missing/unreadable dir yields an empty tree, never a 500.
+app.get('/api/projects/files', (): WorktreeFileTree => {
+  try {
+    return listWorktreeFiles(config.projectsDir, { skipDotEntries: true })
+  } catch (err) {
+    app.log.error({ err }, 'failed to list projects dir')
+    return { root: null, entries: [] }
+  }
+})
+
+// Read one file under the Projects dir (no-task file viewing). Read-only:
+// arbitrary project files are never written through this route.
+app.get('/api/projects/file', (req, reply) => {
+  const { path } = req.query as { path?: string }
+  if (!path) return reply.code(400).send({ error: 'path is required' })
+  try {
+    return readWorktreeFile(config.projectsDir, path)
+  } catch (err) {
+    const code = err instanceof WorktreeFileError ? 400 : 500
+    app.log.error({ err, path }, 'failed to read project file')
+    return reply.code(code).send({ error: errMsg(err) })
+  }
+})
+
 app.get('/api/tasks', () => db.listTasks())
 
 app.post('/api/tasks', (req, reply) => {

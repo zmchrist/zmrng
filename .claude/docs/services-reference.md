@@ -179,9 +179,12 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`.
   `interrupt` is bodyless; mirrors the `resume` route's try/catch + 400 on error shape.
   (This list predates several routes — `/api/agents`, `/api/preflight`, `/api/ui-state`,
-  `/api/tasks/:id/{files,file,notes,chat}`, `/api/tasks/:id/archive` — that already exist
-  in `index.ts`; a fuller pass is owed here, tracked as a doc-sync gap rather than
-  documented speculatively in this change.)
+  `/api/tasks/:id/{files,file,notes,chat}`, `/api/tasks/:id/archive`, and the
+  Projects-dir browsing pair `GET /api/projects/files` (dotfile-skipping, depth-capped
+  tree of `config.projectsDir`) + `GET /api/projects/file?path=` (read-only read of an
+  arbitrary project file, for no-task file viewing) — that already exist in `index.ts`; a
+  fuller pass is owed here, tracked as a doc-sync gap rather than documented speculatively
+  in this change.)
 - **WS:** `GET /ws` — adds the socket to the hub, sends a `snapshot`. `GET /ws/terminal` —
   one PTY per socket via `TerminalManager.create()`; forwards PTY output as
   `{type:'data', data}` frames and relays the exit code as `{type:'exit', code}` before
@@ -229,7 +232,13 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
     `◂ {subagentType}: {summary}`; all actor rows left-accented with `actorColor(...)`
     as a sanctioned dynamic inline style.
   - `TerminalDock` (`components/TerminalDock.tsx`) — the Zed-style bottom-dock terminal,
-    global (not per-task), rendered by `WorkspaceView` regardless of task selection.
+    now doubling as the **bottom nav bar**: its always-visible bar holds four
+    content-sized pane toggles — **Terminal** (the dock body, unchanged), **Tasks** (the
+    right rail), **Workspace** (the centre tab pane), **Settings** (an overlay modal). Each
+    button highlights while its pane is open. Tasks/Workspace visibility persists in
+    `GlobalUiState.panes` (both default closed → a fresh load shows only the Files tree);
+    Settings is an ephemeral, non-persisted modal (`SettingsModal`). Global (not per-task),
+    rendered by `WorkspaceView` regardless of task selection.
     `open`/`height` are controlled props sourced from `App.tsx`'s
     `GlobalUiState.terminalDock` (default closed / 300px, clamped `[120, 640]`); the tab
     list itself is local `useState` driven by the pure `terminalDock.ts` reducer
