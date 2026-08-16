@@ -1,16 +1,15 @@
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: 260px 1fr 300px;
+  grid-template-columns: 260px 1fr;
   gap: 12px;
   min-height: 0;
   animation: ws-in var(--spring) both;
 }
 
-/* Shared glass slab for the three regions. */
+/* Shared glass slab for the two regions (Files sidebar | tab area). */
 .sidebar,
-.center,
-.rightRail {
+.center {
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--border);
@@ -73,120 +72,11 @@
   overflow-y: auto;
 }
 
-/* ---- center: vertical split (viewer slot + worker log) ----------------- */
+/* ---- center: Zed-style tab area (WorkspaceTabs) ------------------------ */
 .center {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1.4fr);
-  gap: 1px;
-  background: var(--border);
-}
-
-.viewer,
-.logPane {
-  min-height: 0;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: var(--surface);
-  display: flex;
-  flex-direction: column;
-}
-
-.logPane {
-  background: var(--surface-strong);
-}
-
-/* ---- right: stacked collapsible cards ---------------------------------- */
-.rightRail {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  overflow-y: auto;
-}
-
-.card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-strong);
-  box-shadow: var(--hairline-soft);
-  overflow: hidden;
-}
-
-.cardHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 12px 14px;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  transition: background var(--transition);
-}
-.cardHead:hover {
-  background: var(--surface-hover);
-}
-
-.cardTitle {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: var(--tracking-tight);
-}
-
-.cardHint {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border);
-  background: var(--well);
-}
-
-.cardBody {
-  padding: 0 14px 14px;
-}
-
-.caret {
-  flex-shrink: 0;
-  display: inline-block;
-  width: 10px;
-  color: var(--text-faint);
-  transition: transform var(--transition);
-}
-.caretOpen {
-  transform: rotate(90deg);
-}
-
-/* ---- empty dock slots (placeholders for U2/U3/U4) ---------------------- */
-.dockSlot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 88px;
-  height: 100%;
-  padding: 20px;
-  text-align: center;
-  color: var(--text-faint);
-  font-size: 12.5px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--well);
-}
-
-.dockSlotSub {
-  font-size: 11px;
-  color: var(--text-faint);
-  opacity: 0.75;
-}
-
-.viewer {
-  padding: 0;
 }
 
 .empty {
