@@ -181,12 +181,15 @@ export default function App() {
     // Fallback clear — the reconnect effect below also clears on the socket return.
     setTimeout(() => setRebooting(false), 8000)
   }, [])
-  // Clear the rebooting flag only after the socket actually dropped and returned
-  // (connected is still true at click time, so wait for the down→up transition).
+  // Wait for the socket to actually drop and return (connected is still true at
+  // click time, so wait for the down→up transition), then hard-reload. The page
+  // is often served by the server itself (no Vite), so a manual refresh during
+  // the ~1.5s respawn window hits connection-refused. Reloading only once the
+  // socket is back guarantees the server is up and picks up fresh built assets.
   useEffect(() => {
     if (!rebooting) return
     if (!connected) sawDropRef.current = true
-    else if (sawDropRef.current) setRebooting(false)
+    else if (sawDropRef.current) window.location.reload()
   }, [rebooting, connected])
 
   return (
