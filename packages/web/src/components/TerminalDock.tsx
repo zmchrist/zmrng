@@ -107,8 +107,11 @@ export function TerminalDock({
 
   return (
     <div className={styles.dock}>
-      {open && (
-        <div className={styles.body} style={{ height: clampedHeight }}>
+      {dock.tabs.length > 0 && (
+        <div
+          className={styles.body}
+          style={{ height: clampedHeight, display: open ? 'flex' : 'none' }}
+        >
           <div
             className={styles.resizeHandle}
             onPointerDown={onResizeStart}
