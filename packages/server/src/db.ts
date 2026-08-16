@@ -225,8 +225,29 @@ export class Db {
     this.db = new Database(dbPath)
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('busy_timeout = 5000')
+    // Bound WAL growth during long runs: checkpoint into the durable .db file
+    // every ~1000 pages instead of letting the -wal sidecar grow unbounded.
+    // Defense-in-depth against a stale main file if the process dies uncleanly.
+    this.db.pragma('wal_autocheckpoint = 1000')
     this.db.exec(SCHEMA)
     this.ensureColumns()
+  }
+
+  /**
+   * Force a full WAL checkpoint into the durable `.db` file, then close the
+   * handle. Called from the graceful shutdown path so tasks are never left
+   * living only in the `-wal` sidecar — otherwise a dropped/reset WAL reverts
+   * the durable file to its last checkpoint and recent tasks "vanish".
+   */
+  close(): void {
+    this.db.pragma('wal_checkpoint(TRUNCATE)')
+    this.db.close()
+  }
+
+  /** Count of persisted tasks — logged at startup to confirm the loaded DB. */
+  taskCount(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM tasks').get() as { n: number }
+    return row.n
   }
 
   /**
