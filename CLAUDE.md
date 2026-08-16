@@ -203,6 +203,16 @@ npm install
 npm run dev:server       # Fastify server (tsx watch)
 npm run dev:web          # Vite dev server
 npm run dev              # both
+#
+# DEV LOOP — view http://localhost:5174 (Vite), NOT :4500. `npm run dev` runs
+# BOTH watchers: Vite (:5174, HMR — web edits/merges hot-reload instantly, no
+# rebuild, no browser cache) and tsx watch (:4500, server edits auto-restart
+# ~1.6s). Vite proxies /api + /ws to :4500. To pick up merged code automatically,
+# just keep `npm run dev` running and browse :5174 — never `npm run build` in dev.
+# `npm run build` only refreshes web/dist for the shipped app; it does NOT restart
+# a running server or bust browser cache, so it's the wrong tool for a dev loop.
+# Pitfall: `npm start`/a bare-built server on :4500 has NO watcher — merges land on
+# disk but nothing reloads and the browser serves a stale cached bundle (looks dead).
 
 # Build & validate
 npm run build            # tsc (server) + vite build (web)
