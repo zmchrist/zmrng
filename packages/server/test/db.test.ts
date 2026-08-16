@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
@@ -218,6 +218,58 @@ describe('blockedKind / blockedReason', () => {
     const after = db.getTask('t1')
     expect(after?.blockedKind).toBe('toolchain')
     expect(after?.blockedReason).toBe('missing subagent')
+  })
+})
+
+describe('close() — WAL checkpoint durability', () => {
+  const seed = (db: Db): void => {
+    db.createTask({
+      id: 't1',
+      title: 'persist me',
+      body: 'y',
+      model: 'opus',
+      effort: 'high',
+      style: 'normal',
+      flow: 'plan',
+      repoId: 'zmrng',
+      now: '2026-08-16T00:00:00.000Z',
+    })
+  }
+
+  it('checkpoints the WAL into the durable .db file (row survives losing the -wal sidecar)', () => {
+    const db = new Db(dbPath)
+    seed(db)
+    // Before close, the write lives in the WAL sidecar, not yet the main file.
+    expect(existsSync(`${dbPath}-wal`)).toBe(true)
+    db.close()
+
+    // Simulate the sidecar being dropped/reset (crash, cleanup, external tool).
+    // If close() truly checkpointed into the durable file, the task survives.
+    rmSync(`${dbPath}-wal`, { force: true })
+    rmSync(`${dbPath}-shm`, { force: true })
+
+    const reopened = new Db(dbPath)
+    expect(reopened.getTask('t1')?.title).toBe('persist me')
+    expect(reopened.taskCount()).toBe(1)
+    reopened.close()
+  })
+
+  it('truncates the -wal sidecar to empty on close', () => {
+    const db = new Db(dbPath)
+    seed(db)
+    expect(statSync(`${dbPath}-wal`).size).toBeGreaterThan(0)
+    db.close()
+    // TRUNCATE checkpoint zeroes the sidecar (0 bytes, or removed entirely).
+    const walSize = existsSync(`${dbPath}-wal`) ? statSync(`${dbPath}-wal`).size : 0
+    expect(walSize).toBe(0)
+  })
+
+  it('taskCount reflects persisted rows', () => {
+    const db = new Db(dbPath)
+    expect(db.taskCount()).toBe(0)
+    seed(db)
+    expect(db.taskCount()).toBe(1)
+    db.close()
   })
 })
 

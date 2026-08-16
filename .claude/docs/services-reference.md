@@ -92,9 +92,15 @@ SQLite (better-sqlite3, WAL).
   (autoincrement id, task_id, ts, kind, payload JSON) + `idx_events_task`.
 - **Migrations:** `ensureColumns()` reads `PRAGMA table_info(tasks)` and `ALTER`s any
   missing column (idempotent); columns also live in `SCHEMA` for fresh DBs.
+- **Durability:** constructor sets `wal_autocheckpoint = 1000` to bound in-run WAL
+  growth. **`close()`** runs `wal_checkpoint(TRUNCATE)` then closes the handle — called
+  from the `shutdown()` (SIGINT/SIGTERM) path in `index.ts` so recent tasks are flushed
+  into the durable `.db` and never left living only in the `-wal` sidecar (which, if
+  dropped/reset, would revert the DB to a stale checkpoint and "vanish" tasks).
 - **`rowToTask`** maps `repo_id` → `repoId`, backfilling `config.defaultRepoId` when null.
 - **`createTask`**, **`addUsage`** (atomic `col = col + delta`), `getTask`, `listTasks`,
-  `updateTask` (field→column patch), `insertEvent`, `getEvents`.
+  `updateTask` (field→column patch), `insertEvent`, `getEvents`, **`taskCount`** (logged
+  at startup alongside `dbPath` to surface which DB loaded).
 
 ## Config — `packages/server/src/config.ts`
 
