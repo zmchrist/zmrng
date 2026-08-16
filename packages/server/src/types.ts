@@ -291,6 +291,8 @@ export type WsEvent =
   | { type: 'event'; taskId: string; event: TaskEvent }
   /** transient token-delta stream, not persisted to the events table */
   | { type: 'partial'; taskId: string; text: string }
+  /** a task was hard-deleted — the client should drop it from local state */
+  | { type: 'task-removed'; taskId: string }
 
 // ---- terminal (bottom-dock PTY) --------------------------------------------
 
