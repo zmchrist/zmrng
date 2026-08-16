@@ -83,6 +83,35 @@ The phase state machine and orchestration.
   `ZMRNG_VALIDATING` → qa/code-reviewer/doc-updater chain → commit → push →
   `gh pr create --base <defaultBranch>` → print PR URL.
 
+## Terminal — `packages/server/src/terminal.ts`
+
+Owns the PTY sessions backing the Workspace bottom-dock terminal (one shell per
+`GET /ws/terminal` WebSocket). Mirrors `runner.ts`'s factory-seam pattern so tests never
+spawn a real shell.
+
+- **`PtySession`** — `write(data)` / `resize(cols, rows)` / `kill()`; a node-pty handle
+  satisfies this, and so can a test double.
+- **`PtyCallbacks`** — `onData(data)` / `onExit(code)`, forwarded by the PTY to its owner.
+- **`PtySpawnOptions`** — `{ cwd, shell, env }`, everything a factory needs to spawn one shell.
+- **`PtyFactory`** — `(opts: PtySpawnOptions, cb: PtyCallbacks) => PtySession`; swappable
+  for tests/adapters. **`defaultPtyFactory`** wraps `node-pty`'s `pty.spawn` (`name:
+  'xterm-color'`, `cols: 80`/`rows: 24` initial geometry) and adapts its `onData`/`onExit`
+  events onto `PtyCallbacks`; `kill()` is wrapped in try/catch for an already-exited shell.
+- **`parseClientMsg(raw: string): TermClientMsg | undefined`** — pure, tolerant parse of one
+  client→server frame: malformed JSON, a non-object, an unknown `type`, or an ill-typed
+  field all yield `undefined` rather than throwing. Accepts `{type:'input', data:string}`
+  and `{type:'resize', cols:number, rows:number}`.
+- **`TerminalManager`** — tracks live sessions in a `Set<PtySession>`.
+  - **`create(cb: PtyCallbacks): PtySession`** — copies `process.env`, deletes
+    `ANTHROPIC_API_KEY` when `config.authMode === 'oauth'` (mirrors the runner so a
+    `claude` launched inside the terminal uses Max OAuth, never the metered API), spawns
+    via the injected `factory` at `cwd: config.projectsDir` / `shell: config.shell`, wraps
+    `onExit` to self-remove the session from the tracked set *before* notifying the caller
+    (so a later `killAll()` never double-kills an already-exited shell), and tracks the
+    result.
+  - **`killAll(): void`** — best-effort `kill()` (try/catch) on every tracked session, then
+    clears the set. Called from `index.ts`'s `shutdown()` alongside `manager.shutdown()`.
+
 ## Db — `packages/server/src/db.ts`
 
 SQLite (better-sqlite3, WAL).
@@ -107,9 +136,16 @@ SQLite (better-sqlite3, WAL).
 Env parsing + repo registry.
 
 - **`config`**: `port`, `targetRepo` (default repo path, back-compat), `repos[]`,
-  `defaultRepoId`, `repoWarnings[]`, `defaultModel`, `maxLanes`, `repoRoot`, `dbPath`,
-  `webDist`, `apiKeyStripped`. (`worktreesDir` was removed — each task derives the
-  worktrees dir from `path.join(repo.path, 'worktrees')` at spawn time.)
+  `defaultRepoId`, `repoWarnings[]`, `agents[]`, `defaultModel`, `maxLanes`, `repoRoot`,
+  `dataDir` (writable per-user data dir — `REPO_ROOT` in dev, `~/Library/Application
+  Support/zmrng` in the bundled app), `dbPath`, `webDist`, `authMode` (`'oauth'` default
+  strips `ANTHROPIC_API_KEY` from worker/terminal child envs; `'apikey'` preserves it),
+  **`projectsDir`** (root dir for the workspace terminal's PTY, == `PROJECTS_DIR`),
+  **`shell`** (login shell for the workspace terminal — `SHELL` env, else `/bin/sh`).
+  (`worktreesDir` was removed — each task derives the worktrees dir from
+  `path.join(repo.path, 'worktrees')` at spawn time.)
+- **`resolveAuthMode(env)`** — pure: any `ZMRNG_AUTH_MODE` other than `'apikey'`
+  (case-insensitive) resolves to the safe default, `'oauth'`.
 - **Registry fallback chain:** `config/repos.json` → `ZMRNG_REPOS` env (`id:path`
   pairs, comma-separated) → legacy single `ZMRNG_TARGET_REPO`.
 - **Validation:** each candidate path checked via `git rev-parse --is-inside-work-tree`;
@@ -142,13 +178,28 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   (title/body/model/effort/style/repoId), `GET /api/tasks/:id/events`,
   `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`.
   `interrupt` is bodyless; mirrors the `resume` route's try/catch + 400 on error shape.
-- **WS:** `GET /ws` — adds the socket to the hub, sends a `snapshot`.
+  (This list predates several routes — `/api/agents`, `/api/preflight`, `/api/ui-state`,
+  `/api/tasks/:id/{files,file,notes,chat}`, `/api/tasks/:id/archive` — that already exist
+  in `index.ts`; a fuller pass is owed here, tracked as a doc-sync gap rather than
+  documented speculatively in this change.)
+- **WS:** `GET /ws` — adds the socket to the hub, sends a `snapshot`. `GET /ws/terminal` —
+  one PTY per socket via `TerminalManager.create()`; forwards PTY output as
+  `{type:'data', data}` frames and relays the exit code as `{type:'exit', code}` before
+  closing the socket; client `input`/`resize` frames are parsed with the tolerant
+  `parseClientMsg()` from `terminal.ts`. Spawn failures and mid-session errors close the
+  socket rather than throwing.
 - **Static:** serves `web/dist` in production with an SPA not-found fallback.
-- **Lifecycle:** SIGINT/SIGTERM → `manager.shutdown()` (kill workers) → close. Logs
-  `repoWarnings` at startup.
+- **Lifecycle:** SIGINT/SIGTERM → `manager.shutdown()` (kill workers) + `terminals.killAll()`
+  (kill PTYs) → close. Logs `repoWarnings` at startup.
 - `asEffort` / `asStyle` validate enum inputs from the request body.
 
 ## Web (frontend) — `packages/web/src/`
+
+> The `App.tsx`/`components/` bullets below predate the Workspace/Board merge (see the
+> root `CLAUDE.md` project-structure tree for the current `App.tsx`/`WorkspaceView`
+> shape — `TaskDetail` no longer exists, replaced by `TaskControls` + `WorkspaceTabs`).
+> Left as-is rather than speculatively rewritten in this change; the terminal-dock
+> bullets at the end of this section are current as of 2026-08-16.
 
 - **App.tsx** — layout (TaskList rail | TaskDetail pane); fetches config + repos +
   tasks on mount; routes WsEvents into a task map + per-task event list.
@@ -177,3 +228,31 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
     `subagent` as `▸ {subagentType} — {summary}`, and `subagent_result` as
     `◂ {subagentType}: {summary}`; all actor rows left-accented with `actorColor(...)`
     as a sanctioned dynamic inline style.
+  - `TerminalDock` (`components/TerminalDock.tsx`) — the Zed-style bottom-dock terminal,
+    global (not per-task), rendered by `WorkspaceView` regardless of task selection.
+    `open`/`height` are controlled props sourced from `App.tsx`'s
+    `GlobalUiState.terminalDock` (default closed / 300px, clamped `[120, 640]`); the tab
+    list itself is local `useState` driven by the pure `terminalDock.ts` reducer
+    (`emptyDock`/`addTerminal`/`closeTerminal`/`setActive`) — ephemeral, never persisted,
+    so a reload always starts with no shells. Auto-seeds one terminal only on the
+    closed→open transition (derived-during-render pattern, not a `useEffect`, per the
+    `react-hooks/set-state-in-effect` rule). Ctrl+` toggles the dock at the window level;
+    a drag handle resizes the body via `pointerdown`/`pointermove`/`pointerup`. Tabs are
+    unmounted (not just hidden) while the dock is closed, so no PTY exists until opened.
+  - `Terminal` (`components/Terminal.tsx`) — one `@xterm/xterm` instance + one WebSocket to
+    `/ws/terminal` per mounted instance (keyed by the dock tab's `id`). `@xterm/addon-fit`
+    + a `ResizeObserver` keep the PTY geometry in sync, sending a `resize` frame on open
+    and on every observed resize. Terminal colors are read live from the `--font-mono`,
+    `--well`, `--text`, `--accent` CSS custom properties (no hard-coded values).
+    `attachCustomKeyEventHandler` swallows ctrl+` so the dock-toggle chord never reaches a
+    focused shell. Not unit-tested (jsdom has no canvas) — the protocol logic it depends on
+    (`terminalProtocol.ts`) is.
+- **terminalDock.ts** — pure reducer, `DockState { tabs: DockTab[]; activeId: string | null
+  }`. `emptyDock()`, `addTerminal(state, id)` (appends + focuses), `closeTerminal(state,
+  id)` (focus falls to the left neighbor, or `null` once empty), `setActive(state, id)`.
+  Ids are always caller-supplied (never `Math.random`/`Date.now` inside the module) so it
+  stays pure and deterministic to test.
+- **terminalProtocol.ts** — `encodeInput(data)` / `encodeResize(cols, rows)` produce exactly
+  the frames the server's `parseClientMsg` accepts; `parseServerMsg(raw)` tolerantly parses
+  a server→client `TermServerMsg` (`data` | `exit`), returning `undefined` on anything
+  malformed rather than throwing.

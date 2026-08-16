@@ -28,3 +28,7 @@ packages/desktop/src-tauri/icons/*
 
 # Sub-agent private memory (per-agent scratch, not project docs)
 .claude/agent-memory/
+
+# Python bytecode (harness hooks)
+__pycache__/
+*.pyc
