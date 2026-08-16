@@ -13,7 +13,12 @@
   background: color-mix(in srgb, var(--well-strong) 88%, black);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
-  animation: settings-fade var(--transition) both;
+}
+.backdropEnter {
+  animation: settings-fade-in var(--panel-duration) var(--panel-ease) both;
+}
+.backdropExit {
+  animation: settings-fade-out var(--panel-duration) var(--panel-ease) both;
 }
 
 .panel {
@@ -26,7 +31,12 @@
   background: var(--surface-strong);
   box-shadow: var(--shadow), var(--hairline);
   overflow: hidden;
-  animation: settings-in var(--spring) both;
+}
+.panelEnter {
+  animation: settings-in var(--panel-duration) var(--panel-ease) both;
+}
+.panelExit {
+  animation: settings-out var(--panel-duration) var(--panel-ease) both;
 }
 
 .head {
@@ -80,12 +90,21 @@
   font-size: 13px;
 }
 
-@keyframes settings-fade {
+@keyframes settings-fade-in {
   from {
     opacity: 0;
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes settings-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 
@@ -97,5 +116,16 @@
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@keyframes settings-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
   }
 }
