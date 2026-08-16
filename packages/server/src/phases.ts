@@ -800,6 +800,16 @@ export class TaskManager {
     this.transition(taskId, 'failed', 'cancelled by operator')
   }
 
+  /** Manual board action — shelve a finished task out of the active columns. */
+  archive(taskId: string): void {
+    const task = this.db.getTask(taskId)
+    if (!task) throw new Error('task not found')
+    if (task.status !== 'done' && task.status !== 'failed') {
+      throw new Error('only a done or failed task can be archived')
+    }
+    this.transition(taskId, 'archived')
+  }
+
   /** Kill all live processes (graceful shutdown). */
   shutdown(): void {
     for (const runner of this.runners.values()) runner.kill()

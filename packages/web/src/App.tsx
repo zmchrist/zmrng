@@ -18,6 +18,7 @@ import { NewTaskForm } from './components/NewTaskForm'
 import { TaskDetail } from './components/TaskDetail'
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
+import { Board } from './components/Board'
 import { STATUS_LABEL, statusColor } from './status'
 import { useUiState } from './uiState'
 
@@ -121,6 +122,18 @@ export default function App() {
       ),
     [tasks],
   )
+
+  const onBoardSelectTask = useCallback(
+    (id: string) => {
+      setMode('tasks')
+      void select(id)
+    },
+    [select, setMode],
+  )
+
+  const onBoardArchive = useCallback((id: string) => {
+    void api.archive(id)
+  }, [])
 
   const selected = selectedId ? tasks[selectedId] : undefined
 
@@ -227,12 +240,12 @@ export default function App() {
       )}
 
       {mode === 'board' && (
-        <div className={styles.modePanel}>
-          <div className={styles.boardStub}>
-            <h2 className={styles.stubTitle}>Board — coming soon</h2>
-            <p className={styles.stubSub}>A kanban view of every task lands here (U6).</p>
-          </div>
-        </div>
+        <Board
+          tasks={sorted}
+          repos={repos}
+          onSelectTask={onBoardSelectTask}
+          onArchive={onBoardArchive}
+        />
       )}
 
       {mode === 'workspace' && (

@@ -333,6 +333,16 @@ app.post('/api/tasks/:id/cancel', async (req, reply) => {
   }
 })
 
+app.post('/api/tasks/:id/archive', (req, reply) => {
+  const { id } = req.params as { id: string }
+  try {
+    manager.archive(id)
+    return { ok: true }
+  } catch (err) {
+    return reply.code(400).send({ error: errMsg(err) })
+  }
+})
+
 // ---- WebSocket ----
 
 app.get('/ws', { websocket: true }, (socket: WebSocket) => {
