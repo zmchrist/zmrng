@@ -1,81 +1,44 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import styles from './WorkspaceView.module.css'
 import type {
   AgentSummary,
   PerTaskUiState,
   Task,
   TaskEvent,
+  WorkspaceLayout,
   WorktreeFileNode,
   WorktreeFileTree,
 } from '../types'
 import { api } from '../api'
 import { FileTree } from './FileTree'
-import { WorkerLog } from './WorkerLog'
-import { Viewer } from './Viewer'
-import { Notes } from './Notes'
-import { Chat } from './Chat'
+import { WorkspaceTabs } from './WorkspaceTabs'
+import { hydrateLayout, openFile, pruneFileTabs } from '../workspaceLayout'
 
 interface Props {
   task: Task | undefined
   events: TaskEvent[]
   live: string
-  /** Right-rail dock-card open states, keyed by card title (U5). */
-  railCards: Record<string, boolean>
-  onRailCardChange: (card: string, open: boolean) => void
-  /** Per-task open-file state, keyed by task id (U5). */
+  /** Per-task UI state, keyed by task id (U5). */
   perTask: Record<string, PerTaskUiState>
   onPerTaskChange: (taskId: string, patch: Partial<PerTaskUiState>) => void
 }
 
-/** A collapsible dock card in the right rail — either a placeholder `slot` message
- *  (dashed dockSlot box, for still-unbuilt cards) or real `children` content. Open
- *  state is controlled by the parent so it can be persisted (U5). */
-function RailCard({
-  title,
-  hint,
-  slot,
-  children,
-  open,
-  onToggle,
-}: {
-  title: string
-  hint: string
-  slot?: string
-  children?: ReactNode
-  open: boolean
-  onToggle: (open: boolean) => void
-}) {
-  return (
-    <section className={styles.card}>
-      <button
-        type="button"
-        className={styles.cardHead}
-        aria-expanded={open}
-        onClick={() => onToggle(!open)}
-      >
-        <span className={`${styles.caret} ${open ? styles.caretOpen : ''}`} aria-hidden>
-          ▸
-        </span>
-        <span className={styles.cardTitle}>{title}</span>
-        <span className={styles.cardHint}>{hint}</span>
-      </button>
-      {open && (
-        <div className={styles.cardBody}>
-          {children ?? <div className={styles.dockSlot}>{slot}</div>}
-        </div>
-      )}
-    </section>
-  )
+/** Collect every file node's path in the tree — the set a persisted tab path
+ *  must still belong to, else its tab is pruned (the deleted-file case). */
+function collectFilePaths(entries: WorktreeFileNode[], acc: string[] = []): string[] {
+  for (const entry of entries) {
+    if (entry.type === 'file') acc.push(entry.path)
+    if (entry.children) collectFilePaths(entry.children, acc)
+  }
+  return acc
 }
 
-/** True when `target` names a node somewhere in the tree — used to silently
- *  drop a persisted open-file path that no longer exists in the worktree. */
-function treeContains(entries: WorktreeFileNode[], target: string): boolean {
-  for (const entry of entries) {
-    if (entry.path === target) return true
-    if (entry.children && treeContains(entry.children, target)) return true
-  }
-  return false
+/** The active file path in the active pane, if any — used to highlight the tree
+ *  row and to give Notes its `selectedPath`. */
+function activeFilePath(layout: WorkspaceLayout): string | null {
+  const pane = layout.panes[layout.activePane]
+  const tab = pane?.tabs.find((t) => t.id === pane.activeId)
+  return tab?.kind === 'file' ? (tab.path ?? null) : null
 }
 
 /** File tree tagged with the task id it was fetched for, so a stale tree from a
@@ -85,23 +48,17 @@ interface Loaded {
   tree: WorktreeFileTree
 }
 
-export function WorkspaceView({
-  task,
-  events,
-  live,
-  railCards,
-  onRailCardChange,
-  perTask,
-  onPerTaskChange,
-}: Props) {
+export function WorkspaceView({ task, events, live, perTask, onPerTaskChange }: Props) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [nonce, setNonce] = useState(0)
-  const [openPathState, setOpenPathState] = useState<string | null>(null)
-  // Tracks which task `openPathState` was hydrated for, so a task switch
-  // resets it during render rather than via an effect (see below).
+  const [layout, setLayout] = useState<WorkspaceLayout>(() => hydrateLayout())
+  // Tracks which task `layout` was hydrated for, so a task switch re-hydrates it
+  // during render (not via an effect) — same pattern as the old open-file state.
   const [hydratedFor, setHydratedFor] = useState<string | null>(null)
-  // Optional chat adapter (U4): fetched once. Empty ⇒ the Chat card is hidden
-  // entirely and the app is fully standalone.
+  // Tracks which fetched tree the layout was last pruned against, so stale file
+  // tabs are dropped once per tree load without a set-state-in-effect.
+  const [prunedFor, setPrunedFor] = useState<Loaded | null>(null)
+  // Optional chat adapter (U4): fetched once. Empty ⇒ Chat is unavailable.
   const [agents, setAgents] = useState<AgentSummary[]>([])
 
   useEffect(() => {
@@ -140,34 +97,44 @@ export function WorkspaceView({
     // `worktree` + `nonce` re-fetch when the worktree appears or on manual refresh.
   }, [taskId, worktree, nonce])
 
-  // Restore the persisted open file when the selected task changes. Adjusted
+  // Restore the persisted tab layout when the selected task changes. Adjusted
   // during render (not an effect) per the "adjusting state on a prop change"
-  // pattern — avoids an extra render/effect round trip and the
-  // react-hooks/set-state-in-effect rule.
+  // pattern — avoids the react-hooks/set-state-in-effect rule.
   if (taskId !== hydratedFor) {
     setHydratedFor(taskId)
-    setOpenPathState(taskId ? (perTask[taskId]?.activePath ?? null) : null)
+    setPrunedFor(null)
+    const stored = taskId ? perTask[taskId]?.layout : undefined
+    const legacy = taskId ? perTask[taskId]?.activePath : undefined
+    setLayout(hydrateLayout(stored, legacy ?? null))
   }
-
-  const setOpenPath = useCallback(
-    (path: string | null) => {
-      setOpenPathState(path)
-      if (taskId) onPerTaskChange(taskId, { activePath: path })
-    },
-    [taskId, onPerTaskChange],
-  )
-
-  // A file opened against a previous task should never carry over.
-  const rawOpenPath = loaded && loaded.id === taskId && taskId === hydratedFor ? openPathState : null
 
   const current = loaded && loaded.id === taskId ? loaded.tree : null
   const hasTree = !!current && current.entries.length > 0
 
-  // A persisted path that no longer exists in the fetched worktree tree
-  // (e.g. the file was deleted) is dropped silently — purely derived, no
-  // state or effect needed, so it can never throw or flash the stale file.
-  const pathIsStale = !!current && hasTree && !!rawOpenPath && !treeContains(current.entries, rawOpenPath)
-  const effectiveOpenPath = pathIsStale ? null : rawOpenPath
+  // Drop file tabs whose path no longer exists in the freshly fetched tree
+  // (deleted files). Reconciled once per tree load, in render, without an effect.
+  if (current && loaded && loaded !== prunedFor && taskId === hydratedFor) {
+    setPrunedFor(loaded)
+    if (current.entries.length > 0) {
+      const pruned = pruneFileTabs(layout, collectFilePaths(current.entries))
+      if (JSON.stringify(pruned) !== JSON.stringify(layout)) setLayout(pruned)
+    }
+  }
+
+  const applyLayout = useCallback(
+    (next: WorkspaceLayout) => {
+      setLayout(next)
+      if (taskId) onPerTaskChange(taskId, { layout: next })
+    },
+    [taskId, onPerTaskChange],
+  )
+
+  const openInLayout = useCallback(
+    (path: string) => applyLayout(openFile(layout, path)),
+    [applyLayout, layout],
+  )
+
+  const selectedPath = activeFilePath(layout)
 
   return (
     <div className={styles.workspace}>
@@ -192,7 +159,7 @@ export function WorkspaceView({
           ) : !current ? (
             <div className={styles.empty}>Loading…</div>
           ) : hasTree ? (
-            <FileTree entries={current.entries} onOpen={setOpenPath} selectedPath={effectiveOpenPath} />
+            <FileTree entries={current.entries} onOpen={openInLayout} selectedPath={selectedPath} />
           ) : (
             <div className={styles.empty}>
               No worktree yet — the file tree appears once this task starts working.
@@ -202,38 +169,20 @@ export function WorkspaceView({
       </aside>
 
       <div className={styles.center}>
-        <div className={styles.viewer}>
-          <Viewer taskId={taskId} path={effectiveOpenPath} />
-        </div>
-        <div className={styles.logPane}>
-          {task ? (
-            <WorkerLog events={events} live={live} />
-          ) : (
-            <div className={styles.empty}>Select a task to follow its worker log.</div>
-          )}
-        </div>
-      </div>
-
-      <aside className={styles.rightRail}>
-        {agents.length > 0 && (
-          <RailCard
-            title="Chat"
-            hint="U4"
-            open={railCards.Chat ?? true}
-            onToggle={(open) => onRailCardChange('Chat', open)}
-          >
-            <Chat taskId={taskId} agents={agents} />
-          </RailCard>
+        {task ? (
+          <WorkspaceTabs
+            taskId={taskId}
+            status={task.status}
+            events={events}
+            live={live}
+            agents={agents}
+            layout={layout}
+            onLayoutChange={applyLayout}
+          />
+        ) : (
+          <div className={styles.empty}>Select a task to open its workspace.</div>
         )}
-        <RailCard
-          title="Notes"
-          hint="U3"
-          open={railCards.Notes ?? true}
-          onToggle={(open) => onRailCardChange('Notes', open)}
-        >
-          <Notes taskId={taskId} selectedPath={effectiveOpenPath} onOpen={setOpenPath} />
-        </RailCard>
-      </aside>
+      </div>
     </div>
   )
 }

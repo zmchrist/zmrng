@@ -255,10 +255,6 @@ export default function App() {
           task={selected}
           events={events}
           live={live}
-          railCards={ui.state.global.railCards ?? {}}
-          onRailCardChange={(card, open) =>
-            ui.patchGlobal({ railCards: { ...ui.state.global.railCards, [card]: open } })
-          }
           perTask={ui.state.perTask}
           onPerTaskChange={ui.patchTask}
         />
