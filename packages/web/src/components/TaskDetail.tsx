@@ -88,6 +88,7 @@ export function TaskDetail({
         </div>
         <div className={styles.badges}>
           {repoLabel && <span className={styles.badge}>⌂ {repoLabel}</span>}
+          <span className={styles.badge}>flow: {task.flow}</span>
           {task.model && <span className={styles.badge}>model: {task.model}</span>}
           {task.effort && <span className={styles.badge}>effort: {task.effort}</span>}
           {task.style && <span className={styles.badge}>style: {task.style}</span>}

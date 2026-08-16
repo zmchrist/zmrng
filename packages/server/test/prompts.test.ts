@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   PR_BODY_FILE,
   PR_BODY_TEMPLATE,
+  directKickoff,
   executeKickoff,
   planKickoff,
   systemPrompt,
@@ -28,6 +29,7 @@ const task: Task = {
   model: 'opus',
   effort: 'high',
   style: 'normal',
+  flow: 'plan',
   branch: 'feat/zmrng/add-a-widget-t1',
   worktree: '/tmp/wt',
   planPath: null,
@@ -141,6 +143,39 @@ describe('executeKickoff', () => {
     expect(prompt).toMatch(/zmrng-code-reviewer/)
     expect(prompt).toMatch(/zmrng-doc-updater/)
     expect(prompt).toMatch(/guaranteed present/i)
+  })
+})
+
+describe('directKickoff', () => {
+  const prompt = directKickoff('feat/zmrng/x-1', 'main', task, 'OPERATOR: fix the conflict')
+
+  it('names itself the direct execute phase and carries the clarify transcript as the brief', () => {
+    expect(prompt).toMatch(/DIRECT EXECUTE PHASE/)
+    expect(prompt).toContain('OPERATOR: fix the conflict')
+    expect(prompt).toMatch(/there is no plan file/)
+  })
+
+  it('forbids the zmrng-* subagent chain (inline validation instead)', () => {
+    expect(prompt).toMatch(/Do NOT spawn the `zmrng-qa`, `zmrng-code-reviewer`, or `zmrng-doc-updater`/)
+    expect(prompt).toMatch(/validation INLINE yourself/)
+  })
+
+  it('makes TDD and doc-sync conditional, not mandatory', () => {
+    expect(prompt).toMatch(/TESTS \(conditional\)/)
+    expect(prompt).toMatch(/DOCS \(conditional\)/)
+    // The heavy execute phase's mandatory RED/GREEN wording must NOT be present.
+    expect(prompt).not.toMatch(/RED —/)
+  })
+
+  it('keeps the hard gates: green validation and a PR via --body-file', () => {
+    expect(prompt).toMatch(/green run is the hard gate/)
+    expect(prompt).toContain(`--body-file "${PR_BODY_FILE}"`)
+    expect(prompt).not.toContain('gh pr create --fill')
+    expect(prompt).toContain(PR_BODY_TEMPLATE)
+  })
+
+  it('does not write or reference a plan file', () => {
+    expect(prompt).not.toMatch(/\.agents\/plans\//)
   })
 })
 
