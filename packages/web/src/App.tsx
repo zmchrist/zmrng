@@ -14,19 +14,17 @@ import type {
   RepoTarget,
   WorkspaceMode,
 } from './types'
-import { TaskList } from './components/TaskList'
-import { NewTaskForm } from './components/NewTaskForm'
-import { TaskDetail } from './components/TaskDetail'
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
 import { Board } from './components/Board'
-import { STATUS_LABEL, statusColor } from './status'
 import { useUiState } from './uiState'
 
+// The former standalone Tasks pane is merged into Workspace; only Workspace and
+// Board remain as top-level modes. The legacy `'tasks'` value is still accepted
+// from persisted UI state and migrated to `'workspace'` below.
 const MODES: ReadonlyArray<{ id: WorkspaceMode; label: string }> = [
-  { id: 'tasks', label: 'Tasks' },
-  { id: 'board', label: 'Board' },
   { id: 'workspace', label: 'Workspace' },
+  { id: 'board', label: 'Board' },
 ]
 
 export default function App() {
@@ -38,7 +36,9 @@ export default function App() {
   const [repos, setRepos] = useState<RepoTarget[]>([])
   const ui = useUiState()
   const railCollapsed = ui.state.global.railCollapsed ?? false
-  const mode = ui.state.global.mode ?? 'tasks'
+  // Workspace is the default home; migrate the retired `'tasks'` mode to it.
+  const storedMode = ui.state.global.mode ?? 'workspace'
+  const mode: WorkspaceMode = storedMode === 'tasks' ? 'workspace' : storedMode
   const setRailCollapsed = useCallback(
     (v: boolean) => ui.patchGlobal({ railCollapsed: v }),
     [ui],
@@ -127,7 +127,7 @@ export default function App() {
 
   const onBoardSelectTask = useCallback(
     (id: string) => {
-      setMode('tasks')
+      setMode('workspace')
       void select(id)
     },
     [select, setMode],
@@ -165,82 +165,6 @@ export default function App() {
       </div>
       <AuthBanner />
 
-      {mode === 'tasks' && (
-        <div className={`${styles.tasksGrid} ${railCollapsed ? styles.tasksGridCollapsed : ''}`}>
-          <aside className={styles.rail}>
-            {railCollapsed ? (
-              <div className={styles.mini}>
-                <button
-                  type="button"
-                  className={styles.collapseBtn}
-                  aria-expanded={false}
-                  aria-label="Expand task pane"
-                  title="Expand task pane"
-                  onClick={() => setRailCollapsed(false)}
-                >
-                  ›
-                </button>
-                <div className={styles.miniDots}>
-                  {sorted.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      className={`${styles.miniDot} ${t.id === selectedId ? styles.miniDotActive : ''}`}
-                      style={{ background: statusColor(t.status) }}
-                      aria-label={`${t.title} — ${STATUS_LABEL[t.status]}`}
-                      aria-current={t.id === selectedId ? 'true' : undefined}
-                      title={`${t.title} — ${STATUS_LABEL[t.status]}`}
-                      onClick={() => select(t.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className={styles.brandbar}>
-                  <span className={styles.railTitle}>Tasks</span>
-                  <button
-                    type="button"
-                    className={styles.collapseBtn}
-                    aria-expanded={true}
-                    aria-label="Collapse task pane"
-                    title="Collapse task pane"
-                    onClick={() => setRailCollapsed(true)}
-                  >
-                    ‹
-                  </button>
-                </div>
-                <NewTaskForm
-                  repos={repos}
-                  defaultRepoId={cfg?.defaultRepoId ?? ''}
-                  onCreate={onCreate}
-                />
-                <TaskList tasks={sorted} repos={repos} selectedId={selectedId} onSelect={select} />
-              </>
-            )}
-          </aside>
-          <main className={styles.detail}>
-            {selected ? (
-              <TaskDetail
-                task={selected}
-                events={events}
-                live={live}
-                config={cfg}
-                repos={repos}
-                onStart={() => api.start(selected.id)}
-                onMessage={(text) => api.message(selected.id, text)}
-                onResume={() => api.resume(selected.id)}
-                onInterrupt={() => api.interrupt(selected.id)}
-                onDone={() => api.done(selected.id)}
-                onCancel={() => api.cancel(selected.id)}
-              />
-            ) : (
-              <div className={styles.empty}>Select a task, or create one to begin.</div>
-            )}
-          </main>
-        </div>
-      )}
-
       {mode === 'board' && (
         <Board
           tasks={sorted}
@@ -257,6 +181,20 @@ export default function App() {
           live={live}
           perTask={ui.state.perTask}
           onPerTaskChange={ui.patchTask}
+          tasks={sorted}
+          repos={repos}
+          config={cfg}
+          selectedId={selectedId}
+          railCollapsed={railCollapsed}
+          onRailCollapsedChange={setRailCollapsed}
+          onSelect={select}
+          onCreate={onCreate}
+          onStart={() => (selected ? api.start(selected.id) : Promise.resolve())}
+          onMessage={(text) => (selected ? api.message(selected.id, text) : Promise.resolve())}
+          onResume={() => (selected ? api.resume(selected.id) : Promise.resolve())}
+          onInterrupt={() => (selected ? api.interrupt(selected.id) : Promise.resolve())}
+          onDone={() => (selected ? api.done(selected.id) : Promise.resolve())}
+          onCancel={() => (selected ? api.cancel(selected.id) : Promise.resolve())}
         />
       )}
     </div>
