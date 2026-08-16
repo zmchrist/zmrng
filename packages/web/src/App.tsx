@@ -229,16 +229,16 @@ export default function App() {
       </div>
       <AuthBanner />
 
-      {mode === 'board' && (
+      <div style={{ display: mode === 'board' ? 'contents' : 'none' }}>
         <Board
           tasks={sorted}
           repos={repos}
           onSelectTask={onBoardSelectTask}
           onArchive={onBoardArchive}
         />
-      )}
+      </div>
 
-      {mode === 'workspace' && (
+      <div style={{ display: mode === 'workspace' ? 'contents' : 'none' }}>
         <WorkspaceView
           task={selected}
           events={events}
@@ -270,7 +270,7 @@ export default function App() {
           onDone={() => (selected ? api.done(selected.id) : Promise.resolve())}
           onCancel={() => (selected ? api.cancel(selected.id) : Promise.resolve())}
         />
-      )}
+      </div>
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
