@@ -3,7 +3,13 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
-import { resolveRegistry, RegistryError, type RegistryEnv } from '../src/config.js'
+import {
+  resolveRegistry,
+  resolveAuthMode,
+  resolveAgents,
+  RegistryError,
+  type RegistryEnv,
+} from '../src/config.js'
 
 let root: string
 const NO_SCAN = '/zmrng-nonexistent-projects-dir-xyz'
@@ -137,3 +143,91 @@ function mkdirp(p: string): string {
   mkdirSync(p, { recursive: true })
   return p
 }
+
+describe('resolveAuthMode', () => {
+  it('defaults to oauth when unset', () => {
+    expect(resolveAuthMode({})).toBe('oauth')
+  })
+
+  it('resolves apikey (case-insensitive)', () => {
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'apikey' })).toBe('apikey')
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'ApiKey' })).toBe('apikey')
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'APIKEY' })).toBe('apikey')
+  })
+
+  it('falls back to oauth for any other value', () => {
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'garbage' })).toBe('oauth')
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'oauth' })).toBe('oauth')
+    expect(resolveAuthMode({ ZMRNG_AUTH_MODE: '' })).toBe('oauth')
+  })
+})
+
+describe('resolveAgents', () => {
+  /** Write an agents.json into a fresh config dir and return that dir. */
+  function agentsConfigDir(json: unknown): string {
+    const dir = path.join(root, 'agents-config')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, 'agents.json'), JSON.stringify(json))
+    return dir
+  }
+
+  it('returns [] when no config and no env (chat panel hidden — standalone)', () => {
+    expect(resolveAgents({ configDir: emptyConfigDir(), env: {} })).toEqual([])
+  })
+
+  it('reads agents.json, preserving headers', () => {
+    const configDir = agentsConfigDir([
+      { id: 'a', label: 'Agent A', url: 'https://x/v1', headers: { authorization: 'Bearer t' } },
+    ])
+    const agents = resolveAgents({ configDir, env: {} })
+    expect(agents).toEqual([
+      { id: 'a', label: 'Agent A', url: 'https://x/v1', headers: { authorization: 'Bearer t' } },
+    ])
+  })
+
+  it('agents.json wins over ZMRNG_AGENTS env', () => {
+    const configDir = agentsConfigDir([{ id: 'json', label: 'JSON', url: 'https://json/v1' }])
+    const agents = resolveAgents({
+      configDir,
+      env: { ZMRNG_AGENTS: 'env:Env:https://env/v1' },
+    })
+    expect(agents.map((a) => a.id)).toEqual(['json'])
+  })
+
+  it('parses ZMRNG_AGENTS id:label:url triples, keeping the url past the second colon', () => {
+    const agents = resolveAgents({
+      configDir: emptyConfigDir(),
+      env: { ZMRNG_AGENTS: 'a:Agent A:https://x/v1,b:Agent B:https://y/v1' },
+    })
+    expect(agents).toEqual([
+      { id: 'a', label: 'Agent A', url: 'https://x/v1' },
+      { id: 'b', label: 'Agent B', url: 'https://y/v1' },
+    ])
+  })
+
+  it('parses ZMRNG_AGENTS as a JSON array', () => {
+    const agents = resolveAgents({
+      configDir: emptyConfigDir(),
+      env: { ZMRNG_AGENTS: JSON.stringify([{ id: 'j', label: 'J', url: 'https://j/v1' }]) },
+    })
+    expect(agents).toEqual([{ id: 'j', label: 'J', url: 'https://j/v1' }])
+  })
+
+  it('skips malformed entries (missing id/label/url)', () => {
+    const configDir = agentsConfigDir([
+      { id: '', label: 'no id', url: 'https://x' },
+      { id: 'nolabel', url: 'https://x' },
+      { id: 'nourl', label: 'no url' },
+      { id: 'ok', label: 'OK', url: 'https://ok/v1' },
+    ])
+    expect(resolveAgents({ configDir, env: {} }).map((a) => a.id)).toEqual(['ok'])
+  })
+
+  it('falls back to env when agents.json is malformed JSON', () => {
+    const dir = path.join(root, 'bad-agents')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, 'agents.json'), '{ not json')
+    const agents = resolveAgents({ configDir: dir, env: { ZMRNG_AGENTS: 'e:E:https://e/v1' } })
+    expect(agents.map((a) => a.id)).toEqual(['e'])
+  })
+})

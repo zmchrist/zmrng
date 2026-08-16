@@ -12,6 +12,8 @@ export type TaskStatus =
   | 'failed'
   /** Legacy single-phase autonomous status; retained for old DB rows/events. */
   | 'building'
+  /** Manual terminal state for the board — an operator archives a task out of view. */
+  | 'archived'
 
 // ---- per-task controls (model · effort · style) ----
 
@@ -47,6 +49,32 @@ export interface RepoTarget {
   defaultBranch: string
 }
 
+// ---- optional agent-chat adapter (U4) ----
+
+/** A configured external chat agent (optional adapter). */
+export interface AgentTarget {
+  id: string
+  label: string
+  url: string
+  headers?: Record<string, string>
+}
+
+/** Client-facing agent view — never leaks `url`/`headers` (which may hold secrets). */
+export interface AgentSummary {
+  id: string
+  label: string
+}
+
+/** One persisted chat message for a task/agent conversation. */
+export interface ChatMessage {
+  id: number
+  taskId: string
+  agentId: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+}
+
 export interface Task {
   id: string
   title: string
@@ -67,8 +95,83 @@ export interface Task {
   usage: TaskUsage
   /** Set while a task that reached READY is waiting for a free build lane. */
   queued: boolean
+  /** Categorises a block (e.g. 'toolchain' | 'auth' | 'subagent') — free string for forward-compat. */
+  blockedKind: string | null
+  /** Human-readable reason captured when a task enters `blocked`. */
+  blockedReason: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface TaskComment {
+  id: number
+  taskId: string
+  author: string // 'operator' | a subagent/actor label
+  body: string
+  createdAt: string
+}
+
+/** Top-level workspace shell mode (UI-only; mirrored for type-parity). */
+export type WorkspaceMode = 'tasks' | 'board' | 'workspace'
+
+// ---- workspace persistence (U5) ----
+
+/**
+ * GLOBAL (not task-scoped) UI chrome: active mode, left-rail collapsed flag,
+ * right-rail dock-card open states (keyed by card title), and pane split
+ * sizes (keyed by pane id, reserved for future resizable panes). Kept
+ * permissive/forward-compatible — the server never validates individual
+ * fields, it just round-trips whatever the client sends.
+ */
+export interface GlobalUiState {
+  mode?: WorkspaceMode
+  railCollapsed?: boolean
+  railCards?: Record<string, boolean>
+  splitSizes?: Record<string, number>
+}
+
+/** PER-TASK UI state: the Workspace file viewer's open paths + active path. */
+export interface PerTaskUiState {
+  openPaths?: string[]
+  activePath?: string | null
+}
+
+/** Whole-document shape persisted to `~/.zmrng/ui-state.json` (never `zmrng.db`). */
+export interface UiState {
+  global: GlobalUiState
+  perTask: Record<string, PerTaskUiState>
+}
+
+// ---- worktree file tree (Workspace file sidebar) ----
+
+export type WorktreeNodeType = 'file' | 'dir'
+
+/** One node in a task worktree's file tree. `path` is relative to the worktree root. */
+export interface WorktreeFileNode {
+  name: string
+  path: string
+  type: WorktreeNodeType
+  children?: WorktreeFileNode[]
+}
+
+/**
+ * The file listing of a task's worktree. `root` is the absolute worktree path,
+ * or `null` when the task has no worktree yet (or the dir is missing).
+ */
+export interface WorktreeFileTree {
+  root: string | null
+  entries: WorktreeFileNode[]
+}
+
+/** How the Viewer (U2) should render a file, dispatched by extension. */
+export type WorktreeFileFormat = 'markdown' | 'code' | 'image' | 'pdf'
+
+/** Contents of one worktree file, fetched on demand when the Viewer opens it. */
+export interface WorktreeFileContent {
+  path: string
+  format: WorktreeFileFormat
+  encoding: 'utf8' | 'base64'
+  content: string
 }
 
 export type EventKind = 'claude' | 'status' | 'operator' | 'error'
@@ -120,6 +223,28 @@ export type WsEvent =
   | { type: 'event'; taskId: string; event: TaskEvent }
   /** transient token-delta stream, not persisted to the events table */
   | { type: 'partial'; taskId: string; text: string }
+
+// ---- preflight (advisory auth presence probe) ----
+
+/** One advisory presence signal — never a hard gate on Start. */
+export interface PreflightSignal {
+  ok: boolean
+  detail: string
+}
+
+/** PATH-only presence probes, distinct from the auth signals above. */
+export interface PreflightPath {
+  git: PreflightSignal
+  gh: PreflightSignal
+  claude: PreflightSignal
+}
+
+/** `GET /api/preflight` response — fresh probe every call, poll-friendly. */
+export interface PreflightResult {
+  claude: PreflightSignal
+  gh: PreflightSignal
+  path: PreflightPath
+}
 
 /** Minimal shape of a parsed line from `claude --output-format stream-json`. */
 export interface ClaudeStreamLine {

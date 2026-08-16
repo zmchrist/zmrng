@@ -11,11 +11,22 @@ import type {
   EffortLevel,
   CaveStyle,
   RepoTarget,
+  WorkspaceMode,
 } from './types'
 import { TaskList } from './components/TaskList'
 import { NewTaskForm } from './components/NewTaskForm'
 import { TaskDetail } from './components/TaskDetail'
+import { WorkspaceView } from './components/WorkspaceView'
+import { AuthBanner } from './components/AuthBanner'
+import { Board } from './components/Board'
 import { STATUS_LABEL, statusColor } from './status'
+import { useUiState } from './uiState'
+
+const MODES: ReadonlyArray<{ id: WorkspaceMode; label: string }> = [
+  { id: 'tasks', label: 'Tasks' },
+  { id: 'board', label: 'Board' },
+  { id: 'workspace', label: 'Workspace' },
+]
 
 export default function App() {
   const [tasks, setTasks] = useState<Record<string, Task>>({})
@@ -24,7 +35,14 @@ export default function App() {
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
   const [repos, setRepos] = useState<RepoTarget[]>([])
-  const [railCollapsed, setRailCollapsed] = useState(false)
+  const ui = useUiState()
+  const railCollapsed = ui.state.global.railCollapsed ?? false
+  const mode = ui.state.global.mode ?? 'tasks'
+  const setRailCollapsed = useCallback(
+    (v: boolean) => ui.patchGlobal({ railCollapsed: v }),
+    [ui],
+  )
+  const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
   const selectedIdRef = useRef<string | null>(null)
 
   const onWs = useCallback((e: WsEvent) => {
@@ -105,88 +123,144 @@ export default function App() {
     [tasks],
   )
 
+  const onBoardSelectTask = useCallback(
+    (id: string) => {
+      setMode('tasks')
+      void select(id)
+    },
+    [select, setMode],
+  )
+
+  const onBoardArchive = useCallback((id: string) => {
+    void api.archive(id)
+  }, [])
+
   const selected = selectedId ? tasks[selectedId] : undefined
 
   return (
-    <div className={`${styles.app} ${railCollapsed ? styles.appCollapsed : ''}`}>
-      <div className={styles.dragbar} data-tauri-drag-region />
-      <aside className={styles.rail}>
-        {railCollapsed ? (
-          <div className={styles.mini}>
+    <div className={styles.app}>
+      <div className={styles.topbar} data-tauri-drag-region>
+        <nav className={styles.modeTabs} aria-label="Workspace mode">
+          {MODES.map((m) => (
             <button
+              key={m.id}
               type="button"
-              className={styles.collapseBtn}
-              aria-expanded={false}
-              aria-label="Expand task pane"
-              title="Expand task pane"
-              onClick={() => setRailCollapsed(false)}
+              className={`${styles.modeTab} ${mode === m.id ? styles.modeTabActive : ''}`}
+              aria-pressed={mode === m.id}
+              onClick={() => setMode(m.id)}
             >
-              ›
+              {m.label}
             </button>
-            <div className={styles.miniDots}>
-              {sorted.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`${styles.miniDot} ${t.id === selectedId ? styles.miniDotActive : ''}`}
-                  style={{ background: statusColor(t.status) }}
-                  aria-label={`${t.title} — ${STATUS_LABEL[t.status]}`}
-                  aria-current={t.id === selectedId ? 'true' : undefined}
-                  title={`${t.title} — ${STATUS_LABEL[t.status]}`}
-                  onClick={() => select(t.id)}
-                />
-              ))}
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className={styles.brandbar} data-tauri-drag-region>
-              <span className={styles.brand}>zmrng</span>
-              <span className={styles.brandbarRight}>
-                <span
-                  className={`${styles.dot} ${connected ? styles.dotOn : ''}`}
-                  title={connected ? 'connected' : 'disconnected'}
-                />
+          ))}
+        </nav>
+        <span className={styles.topbarRight}>
+          <span className={styles.brand}>zmrng</span>
+          <span
+            className={`${styles.dot} ${connected ? styles.dotOn : ''}`}
+            title={connected ? 'connected' : 'disconnected'}
+          />
+        </span>
+      </div>
+      <AuthBanner />
+
+      {mode === 'tasks' && (
+        <div className={`${styles.tasksGrid} ${railCollapsed ? styles.tasksGridCollapsed : ''}`}>
+          <aside className={styles.rail}>
+            {railCollapsed ? (
+              <div className={styles.mini}>
                 <button
                   type="button"
                   className={styles.collapseBtn}
-                  aria-expanded={true}
-                  aria-label="Collapse task pane"
-                  title="Collapse task pane"
-                  onClick={() => setRailCollapsed(true)}
+                  aria-expanded={false}
+                  aria-label="Expand task pane"
+                  title="Expand task pane"
+                  onClick={() => setRailCollapsed(false)}
                 >
-                  ‹
+                  ›
                 </button>
-              </span>
-            </div>
-            <NewTaskForm
-              repos={repos}
-              defaultRepoId={cfg?.defaultRepoId ?? ''}
-              onCreate={onCreate}
-            />
-            <TaskList tasks={sorted} repos={repos} selectedId={selectedId} onSelect={select} />
-          </>
-        )}
-      </aside>
-      <main className={styles.detail}>
-        {selected ? (
-          <TaskDetail
-            task={selected}
-            events={events}
-            live={live}
-            config={cfg}
-            repos={repos}
-            onStart={() => api.start(selected.id)}
-            onMessage={(text) => api.message(selected.id, text)}
-            onResume={() => api.resume(selected.id)}
-            onInterrupt={() => api.interrupt(selected.id)}
-            onDone={() => api.done(selected.id)}
-            onCancel={() => api.cancel(selected.id)}
-          />
-        ) : (
-          <div className={styles.empty}>Select a task, or create one to begin.</div>
-        )}
-      </main>
+                <div className={styles.miniDots}>
+                  {sorted.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`${styles.miniDot} ${t.id === selectedId ? styles.miniDotActive : ''}`}
+                      style={{ background: statusColor(t.status) }}
+                      aria-label={`${t.title} — ${STATUS_LABEL[t.status]}`}
+                      aria-current={t.id === selectedId ? 'true' : undefined}
+                      title={`${t.title} — ${STATUS_LABEL[t.status]}`}
+                      onClick={() => select(t.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className={styles.brandbar}>
+                  <span className={styles.railTitle}>Tasks</span>
+                  <button
+                    type="button"
+                    className={styles.collapseBtn}
+                    aria-expanded={true}
+                    aria-label="Collapse task pane"
+                    title="Collapse task pane"
+                    onClick={() => setRailCollapsed(true)}
+                  >
+                    ‹
+                  </button>
+                </div>
+                <NewTaskForm
+                  repos={repos}
+                  defaultRepoId={cfg?.defaultRepoId ?? ''}
+                  onCreate={onCreate}
+                />
+                <TaskList tasks={sorted} repos={repos} selectedId={selectedId} onSelect={select} />
+              </>
+            )}
+          </aside>
+          <main className={styles.detail}>
+            {selected ? (
+              <TaskDetail
+                task={selected}
+                events={events}
+                live={live}
+                config={cfg}
+                repos={repos}
+                onStart={() => api.start(selected.id)}
+                onMessage={(text) => api.message(selected.id, text)}
+                onResume={() => api.resume(selected.id)}
+                onInterrupt={() => api.interrupt(selected.id)}
+                onDone={() => api.done(selected.id)}
+                onCancel={() => api.cancel(selected.id)}
+              />
+            ) : (
+              <div className={styles.empty}>Select a task, or create one to begin.</div>
+            )}
+          </main>
+        </div>
+      )}
+
+      {mode === 'board' && (
+        <Board
+          tasks={sorted}
+          repos={repos}
+          onSelectTask={onBoardSelectTask}
+          onArchive={onBoardArchive}
+        />
+      )}
+
+      {mode === 'workspace' && (
+        <WorkspaceView
+          task={selected}
+          events={events}
+          live={live}
+          railCards={ui.state.global.railCards ?? {}}
+          onRailCardChange={(card, open) =>
+            ui.patchGlobal({ railCards: { ...ui.state.global.railCards, [card]: open } })
+          }
+          perTask={ui.state.perTask}
+          onPerTaskChange={ui.patchTask}
+        />
+      )}
     </div>
   )
 }
