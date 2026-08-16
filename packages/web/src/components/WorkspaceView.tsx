@@ -24,6 +24,7 @@ import { TaskControls } from './TaskControls'
 import { TerminalDock } from './TerminalDock'
 import { STATUS_LABEL, statusColor } from '../status'
 import { hydrateLayout, openFile, pruneFileTabs } from '../workspaceLayout'
+import { usePanelMount } from '../usePanelMount'
 
 interface Props {
   task: Task | undefined
@@ -47,8 +48,10 @@ interface Props {
   /** Bottom-nav pane visibility (persisted global UI state) + Settings modal. */
   tasksOpen: boolean
   workspaceOpen: boolean
+  filesOpen: boolean
   onTasksOpenChange: (v: boolean) => void
   onWorkspaceOpenChange: (v: boolean) => void
+  onFilesOpenChange: (v: boolean) => void
   settingsOpen: boolean
   onSettingsToggle: () => void
   onSelect: (id: string) => void
@@ -119,8 +122,10 @@ export function WorkspaceView({
   onDockHeightChange,
   tasksOpen,
   workspaceOpen,
+  filesOpen,
   onTasksOpenChange,
   onWorkspaceOpenChange,
+  onFilesOpenChange,
   settingsOpen,
   onSettingsToggle,
   onSelect,
@@ -225,18 +230,26 @@ export function WorkspaceView({
 
   const selectedPath = activeFilePath(layout)
 
-  // The Files sidebar is always locked to the left; the Workspace centre pane and
-  // Tasks rail each appear only when toggled open from the bottom nav bar. Columns
-  // are sized to whichever regions are visible (all closed → just the sidebar).
-  const columns = ['240px']
-  if (workspaceOpen) columns.push('minmax(0, 1fr)')
-  if (tasksOpen) columns.push(railCollapsed ? '56px' : '348px')
-  const gridTemplateColumns = columns.join(' ')
+  // The Files sidebar, the Workspace centre pane, and the Tasks rail each toggle
+  // from the bottom nav bar. Each stays mounted a beat past its toggle-off so its
+  // closing (minimize) animation can play — `usePanelMount` — while `columns`
+  // reserves grid space for the whole mounted lifetime so the exit animation has
+  // room to play before its column collapses.
+  const sidebarMounted = usePanelMount(filesOpen)
+  const centerMounted = usePanelMount(workspaceOpen)
+  const rightMounted = usePanelMount(tasksOpen)
+
+  const columns: string[] = []
+  if (sidebarMounted) columns.push('240px')
+  if (centerMounted) columns.push('minmax(0, 1fr)')
+  if (rightMounted) columns.push(railCollapsed ? '56px' : '348px')
+  const gridTemplateColumns = columns.join(' ') || '0px'
 
   return (
     <div className={styles.shell}>
       <div className={styles.workspace} style={{ gridTemplateColumns }}>
-        <aside className={styles.sidebar}>
+        {sidebarMounted && (
+        <aside className={`${styles.sidebar} ${filesOpen ? styles.paneEnter : styles.paneExit}`}>
         <div className={styles.sidebarHead}>
           <span className={styles.sidebarTitle}>{task ? 'Files' : 'Projects'}</span>
           <button
@@ -263,9 +276,10 @@ export function WorkspaceView({
           )}
         </div>
       </aside>
+      )}
 
-      {workspaceOpen && (
-        <div className={styles.center}>
+      {centerMounted && (
+        <div className={`${styles.center} ${workspaceOpen ? styles.paneEnter : styles.paneExit}`}>
           <WorkspaceTabs
             taskId={taskId}
             status={task?.status ?? null}
@@ -279,8 +293,10 @@ export function WorkspaceView({
         </div>
       )}
 
-      {tasksOpen && (
-      <aside className={`${styles.rightbar} ${railCollapsed ? styles.rightbarMini : ''}`}>
+      {rightMounted && (
+      <aside
+        className={`${styles.rightbar} ${railCollapsed ? styles.rightbarMini : ''} ${tasksOpen ? styles.paneEnter : styles.paneExit}`}
+      >
         {railCollapsed ? (
           <div className={styles.mini}>
             <button
@@ -356,9 +372,11 @@ export function WorkspaceView({
         onHeightChange={onDockHeightChange}
         tasksOpen={tasksOpen}
         workspaceOpen={workspaceOpen}
+        filesOpen={filesOpen}
         settingsOpen={settingsOpen}
         onTasksToggle={() => onTasksOpenChange(!tasksOpen)}
         onWorkspaceToggle={() => onWorkspaceOpenChange(!workspaceOpen)}
+        onFilesToggle={() => onFilesOpenChange(!filesOpen)}
         onSettingsToggle={onSettingsToggle}
       />
     </div>
