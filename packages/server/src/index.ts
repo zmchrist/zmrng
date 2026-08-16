@@ -1,7 +1,8 @@
 import Fastify from 'fastify'
 import websocket from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
-import { existsSync } from 'node:fs'
+import { existsSync, utimesSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import type { WebSocket } from 'ws'
 import { config } from './config.js'
 import { Db } from './db.js'
@@ -49,6 +50,12 @@ function asFlow(v: unknown): FlowMode | undefined {
   return FLOWS.includes(v as FlowMode) ? (v as FlowMode) : undefined
 }
 
+// True only under `npm run dev` (tsx runs the .ts source directly). In a built
+// deploy the entry is dist/index.js. The restart button touches the entry file
+// to trigger a tsx-watch respawn, which is meaningless (and would hang dead)
+// without tsx supervising — so the endpoint is gated on this.
+const IS_DEV = import.meta.url.endsWith('.ts')
+
 const app = Fastify({ logger: true })
 const db = new Db(config.dbPath)
 const hub = new WsHub()
@@ -69,9 +76,36 @@ app.get('/api/config', () => ({
       ? 'API key (ANTHROPIC_API_KEY billed per task)'
       : 'Max OAuth (ANTHROPIC_API_KEY stripped from workers)',
   authModeKind: config.authMode,
+  // Whether the dev-only restart endpoint is available (tsx watch supervising).
+  dev: IS_DEV,
 }))
 
 app.get('/api/repos', () => config.repos)
+
+// Dev-only: restart the server so a fresh boot re-reads config/repos.json,
+// .env, and starts with clean worker state. Touching the entry file's mtime
+// makes tsx-watch send SIGTERM (→ our shutdown() handler kills live workers +
+// checkpoints the WAL) then respawn a fresh process. Guarded to dev because a
+// built deploy (node dist/index.js) has no supervisor — it would exit and stay
+// dead. Reply first, then touch, so the client gets its 200 before we go down.
+app.post('/api/restart', (_req, reply) => {
+  if (!IS_DEV) {
+    return reply
+      .code(409)
+      .send({ error: 'restart is only available under `npm run dev` (tsx watch)' })
+  }
+  const entry = fileURLToPath(import.meta.url)
+  app.log.info({ entry }, 'restart requested — touching entry to trigger tsx watch respawn')
+  reply.send({ ok: true })
+  setTimeout(() => {
+    try {
+      const now = new Date()
+      utimesSync(entry, now, now)
+    } catch (err) {
+      app.log.error({ err }, 'failed to touch entry file for restart')
+    }
+  }, 50)
+})
 
 // Optional chat agents (U4). Only the client-safe fields — never leak url/headers.
 app.get('/api/agents', (): AgentSummary[] =>

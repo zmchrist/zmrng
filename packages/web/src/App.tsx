@@ -150,6 +150,30 @@ export default function App() {
 
   const selected = selectedId ? tasks[selectedId] : undefined
 
+  // Dev-only restart: POST /api/restart touches the server entry so tsx-watch
+  // respawns a fresh process (re-reads config/repos.json + .env, clean workers).
+  // The socket drops mid-reply; useWs auto-reconnects and flips `connected` back.
+  const [rebooting, setRebooting] = useState(false)
+  const sawDropRef = useRef(false)
+  const onReboot = useCallback(async () => {
+    sawDropRef.current = false
+    setRebooting(true)
+    try {
+      await api.restart()
+    } catch {
+      // expected: the server may drop the socket before the reply lands.
+    }
+    // Fallback clear — the reconnect effect below also clears on the socket return.
+    setTimeout(() => setRebooting(false), 8000)
+  }, [])
+  // Clear the rebooting flag only after the socket actually dropped and returned
+  // (connected is still true at click time, so wait for the down→up transition).
+  useEffect(() => {
+    if (!rebooting) return
+    if (!connected) sawDropRef.current = true
+    else if (sawDropRef.current) setRebooting(false)
+  }, [rebooting, connected])
+
   return (
     <div className={styles.app}>
       <div className={styles.topbar} data-tauri-drag-region>
@@ -167,6 +191,17 @@ export default function App() {
           ))}
         </nav>
         <span className={styles.topbarRight}>
+          {cfg?.dev && (
+            <button
+              type="button"
+              className={styles.reboot}
+              onClick={onReboot}
+              disabled={rebooting}
+              title="Restart the dev server — reloads config/repos.json + .env, clean workers"
+            >
+              {rebooting ? 'rebooting…' : 'reboot'}
+            </button>
+          )}
           <span className={styles.brand}>zmrng</span>
           <span
             className={`${styles.dot} ${connected ? styles.dotOn : ''}`}
