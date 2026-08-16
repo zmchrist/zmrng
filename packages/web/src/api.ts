@@ -11,6 +11,7 @@ import type {
   PreflightResult,
   AgentSummary,
   ChatMessage,
+  UiState,
 } from './types'
 
 /** Pull a text delta out of one parsed SSE `data:` payload (OpenAI-compatible + plain shapes). */
@@ -185,4 +186,10 @@ export const api = {
     req<{ ok: true }>(`/api/tasks/${id}/done`, { method: 'POST' }),
   cancel: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/cancel`, { method: 'POST' }),
+  getUiState: () => req<UiState>('/api/ui-state'),
+  putUiState: (state: UiState) =>
+    req<{ ok: true }>('/api/ui-state', {
+      method: 'PUT',
+      body: JSON.stringify(state),
+    }),
 }

@@ -11,6 +11,7 @@ import { listWorktreeFiles } from './worktree.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
 import { parseStreamedText } from './chat.js'
+import { readUiState, writeUiState } from './uiState.js'
 import type {
   WsEvent,
   EffortLevel,
@@ -18,6 +19,7 @@ import type {
   WorktreeFileTree,
   AgentSummary,
   ChatMessage,
+  UiState,
 } from './types.js'
 
 function errMsg(e: unknown): string {
@@ -70,6 +72,32 @@ app.get('/api/agents', (): AgentSummary[] =>
 
 // Fresh probe every call — advisory only, never a gate on Start.
 app.get('/api/preflight', () => runPreflight())
+
+// Local-settings-file UI persistence (U5) — layout chrome + per-task open
+// files, kept out of zmrng.db entirely. Always 200: a missing/corrupt file
+// yields an empty default document, never a 500.
+app.get('/api/ui-state', (): UiState => {
+  try {
+    return readUiState()
+  } catch (err) {
+    app.log.error({ err }, 'failed to read ui state')
+    return { global: {}, perTask: {} }
+  }
+})
+
+app.put('/api/ui-state', (req, reply) => {
+  const body = req.body as UiState | undefined
+  if (!body || typeof body !== 'object') {
+    return reply.code(400).send({ error: 'ui state document is required' })
+  }
+  try {
+    writeUiState({ global: body.global ?? {}, perTask: body.perTask ?? {} })
+    return { ok: true }
+  } catch (err) {
+    app.log.error({ err }, 'failed to write ui state')
+    return reply.code(500).send({ error: errMsg(err) })
+  }
+})
 
 app.get('/api/tasks', () => db.listTasks())
 

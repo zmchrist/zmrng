@@ -19,6 +19,7 @@ import { TaskDetail } from './components/TaskDetail'
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
 import { STATUS_LABEL, statusColor } from './status'
+import { useUiState } from './uiState'
 
 const MODES: ReadonlyArray<{ id: WorkspaceMode; label: string }> = [
   { id: 'tasks', label: 'Tasks' },
@@ -33,8 +34,14 @@ export default function App() {
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
   const [repos, setRepos] = useState<RepoTarget[]>([])
-  const [railCollapsed, setRailCollapsed] = useState(false)
-  const [mode, setMode] = useState<WorkspaceMode>('tasks')
+  const ui = useUiState()
+  const railCollapsed = ui.state.global.railCollapsed ?? false
+  const mode = ui.state.global.mode ?? 'tasks'
+  const setRailCollapsed = useCallback(
+    (v: boolean) => ui.patchGlobal({ railCollapsed: v }),
+    [ui],
+  )
+  const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
   const selectedIdRef = useRef<string | null>(null)
 
   const onWs = useCallback((e: WsEvent) => {
@@ -229,7 +236,17 @@ export default function App() {
       )}
 
       {mode === 'workspace' && (
-        <WorkspaceView task={selected} events={events} live={live} />
+        <WorkspaceView
+          task={selected}
+          events={events}
+          live={live}
+          railCards={ui.state.global.railCards ?? {}}
+          onRailCardChange={(card, open) =>
+            ui.patchGlobal({ railCards: { ...ui.state.global.railCards, [card]: open } })
+          }
+          perTask={ui.state.perTask}
+          onPerTaskChange={ui.patchTask}
+        />
       )}
     </div>
   )
