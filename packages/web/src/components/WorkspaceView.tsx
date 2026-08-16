@@ -264,23 +264,23 @@ export function WorkspaceView({
         </div>
       </aside>
 
-      {workspaceOpen && (
-        <div className={styles.center}>
-          <WorkspaceTabs
-            taskId={taskId}
-            status={task?.status ?? null}
-            events={events}
-            live={live}
-            agents={agents}
-            layout={layout}
-            onLayoutChange={applyLayout}
-            onMessage={task ? onMessage : undefined}
-          />
-        </div>
-      )}
+      <div className={styles.center} style={{ display: workspaceOpen ? undefined : 'none' }}>
+        <WorkspaceTabs
+          taskId={taskId}
+          status={task?.status ?? null}
+          events={events}
+          live={live}
+          agents={agents}
+          layout={layout}
+          onLayoutChange={applyLayout}
+          onMessage={task ? onMessage : undefined}
+        />
+      </div>
 
-      {tasksOpen && (
-      <aside className={`${styles.rightbar} ${railCollapsed ? styles.rightbarMini : ''}`}>
+      <aside
+        className={`${styles.rightbar} ${railCollapsed ? styles.rightbarMini : ''}`}
+        style={{ display: tasksOpen ? undefined : 'none' }}
+      >
         {railCollapsed ? (
           <div className={styles.mini}>
             <button
@@ -346,7 +346,6 @@ export function WorkspaceView({
           </>
         )}
       </aside>
-      )}
       </div>
 
       <TerminalDock
