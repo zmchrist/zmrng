@@ -190,6 +190,7 @@ export const api = {
     req<{ ok: true }>(`/api/tasks/${id}/cancel`, { method: 'POST' }),
   archive: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/archive`, { method: 'POST' }),
+  restart: () => req<{ ok: true }>('/api/restart', { method: 'POST' }),
   getUiState: () => req<UiState>('/api/ui-state'),
   putUiState: (state: UiState) =>
     req<{ ok: true }>('/api/ui-state', {
