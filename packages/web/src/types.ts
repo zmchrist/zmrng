@@ -131,10 +131,53 @@ export interface GlobalUiState {
   splitSizes?: Record<string, number>
 }
 
-/** PER-TASK UI state: the Workspace file viewer's open paths + active path. */
+// ---- workspace tab-pane layout (Zed-style collapsible tabs) ----
+
+/** Kind of a workspace tab. `file` tabs carry a `path`; the rest are singletons. */
+export type WsTabKind = 'file' | 'log' | 'notes' | 'chat'
+
+/**
+ * One tab in a workspace pane. `id` is an opaque key: `file:<path>` for files,
+ * or the literal singleton kind (`log` / `notes` / `chat`) so a singleton can
+ * never be opened twice. `path` is set only when `kind === 'file'`.
+ */
+export interface WsTab {
+  id: string
+  kind: WsTabKind
+  path?: string
+}
+
+/** One pane: an ordered tab strip plus the id of its active tab. */
+export interface WsPane {
+  tabs: WsTab[]
+  activeId: string | null
+}
+
+/** Split axis of the tab area: `row` = side-by-side, `column` = stacked,
+ *  `null` = a single pane. */
+export type WsSplit = 'row' | 'column' | null
+
+/**
+ * The Workspace tab-pane layout for one task. Invariants (enforced by the pure
+ * reducer in `web/src/workspaceLayout.ts`): `panes.length ∈ {1,2}`,
+ * `split === null ⇔ panes.length === 1`, `activePane` indexes an existing pane,
+ * and each pane's `activeId` refers to a tab that pane owns.
+ */
+export interface WorkspaceLayout {
+  panes: WsPane[]
+  split: WsSplit
+  /** 0 | 1 — target pane for newly opened file tabs and re-opened panels. */
+  activePane: number
+  /** Only meaningful while a `log` tab exists — collapses its pane to a strip. */
+  logMinimized?: boolean
+}
+
+/** PER-TASK UI state: the Workspace file viewer's open paths + active path, and
+ *  the Zed-style tab-pane `layout` (optional, so older docs stay compatible). */
 export interface PerTaskUiState {
   openPaths?: string[]
   activePath?: string | null
+  layout?: WorkspaceLayout
 }
 
 /** Whole-document shape persisted to `~/.zmrng/ui-state.json` (never `zmrng.db`). */
