@@ -54,3 +54,28 @@ Frontend-only change (`App.tsx`, `App.module.css`). A collapse button in the bra
 
 ## Workspace mode — Zed-style collapsible tab panes (2026-08-16)
 The Workspace mode's center region is now a draggable Zed-style tab area (`WorkspaceTabs`), replacing the old fixed Viewer-over-WorkerLog stack plus a right rail of collapsible `RailCard`s (Chat + Notes) — the right rail is gone; the layout is a 2-column grid (Files sidebar | tab area). File Viewers (any number open at once), Worker Log, Notes, and Chat are now draggable tabs via native HTML5 drag-and-drop (no new dependency). Panes are capped at 2 on a single split axis — 1 pane, side-by-side, or stacked, never a 2×2 — enforced by a new pure reducer `packages/web/src/workspaceLayout.ts` (`emptyLayout`/`hydrateLayout`/`openFile`/`focusTab`/`closeTab`/`openPanel`/`moveTab`/`splitWith`/`setLogMinimized`/`pruneFileTabs`/`dropIntent`). The Worker Log tab can only be minimized (not closed) while its task is live; it becomes closeable at terminal statuses (`review`/`done`/`failed`/`archived`). New `WorkspaceLayout`/`WsTab`/`WsPane`/`WsSplit`/`WsTabKind` types added to `packages/server/src/types.ts` (source of truth, mirrored in `packages/web/src/types.ts`); `PerTaskUiState` gained an optional `layout` field that round-trips through the existing per-task ui-state persistence — no server logic change. `WorkspaceView.tsx` now owns the layout state (hydrated/pruned/persisted per task) and renders `<WorkspaceTabs>` for the center column instead of Viewer/WorkerLog/Notes/Chat directly; `App.tsx` no longer passes `railCards`/`onRailCardChange` into it.
+
+## Workspace bottom-dock PTY terminal (2026-08-16)
+A global Zed-style bottom-dock terminal in the Workspace page, independent of task
+selection. New server module `terminal.ts`: a `PtyFactory`/`PtySession`/`PtyCallbacks`/
+`PtySpawnOptions` test seam mirroring `runner.ts`, `defaultPtyFactory` wrapping the new
+`node-pty` dependency, a pure tolerant `parseClientMsg()`, and a `TerminalManager` class
+(`create(cb)` spawns a shell at `config.projectsDir` with `config.shell`, stripping
+`ANTHROPIC_API_KEY` under oauth mode; `killAll()` runs from `shutdown()`). New WebSocket
+route `GET /ws/terminal` — one PTY per socket, separate from the existing `/ws` fan-out
+hub. `Config` gained `projectsDir` (== `PROJECTS_DIR`) and `shell` (`SHELL` env, else
+`/bin/sh`). New mirrored types: `TermClientMsg` (`input`/`resize`), `TermServerMsg`
+(`data`/`exit`), and `GlobalUiState.terminalDock?: { open?; height? }` (only open/height
+persist — shells are ephemeral). Frontend: new pure modules `terminalProtocol.ts`
+(encode/parse the wire frames) and `terminalDock.ts` (ephemeral tab-list reducer,
+unpersisted by design); new components `Terminal` (xterm.js glue via `@xterm/xterm` +
+`@xterm/addon-fit`, one WebSocket per instance, theme-token colors) and `TerminalDock`
+(always-visible status-bar toggle, ctrl+` shortcut, tab strip, drag-resize, terminals
+mounted only while open, auto-seeds the first terminal only on the closed→open
+transition). `WorkspaceView` wraps its 3-column grid plus the dock in a vertical flex
+shell so the dock renders regardless of task selection; `App.tsx` derives
+`dockOpen`/`dockHeight` from `GlobalUiState.terminalDock` and threads setters through
+`patchGlobal`. Known gotcha: `node-pty`'s prebuilt `spawn-helper` binary can lose its
+executable bit during npm extraction (fix: `chmod +x` it) — see `.claude/errors.md`.
+Desktop-sidecar vendoring of `node-pty`'s native binding is an explicit out-of-scope
+follow-up (the public-readiness plan's web-only override applies).
