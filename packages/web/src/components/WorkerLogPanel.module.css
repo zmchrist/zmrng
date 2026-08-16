@@ -1,0 +1,8 @@
+/* Fills the tab pane body (a flex column): the WorkerLog transcript scrolls and
+   the steer composer, when present, pins to the bottom. */
+.panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

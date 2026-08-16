@@ -4,7 +4,7 @@
 - React 19, TypeScript, Vite
 - CSS Modules + design tokens (`theme.css`)
 - WebSocket for real-time updates (`useWs` hook)
-- **No router** — single-page layout (TaskList rail | TaskDetail pane)
+- **No router** — single-page layout; two top-level modes, Workspace (default) and Board
 - **No shared package** — `packages/web/src/types.ts` is a MANUAL mirror of the server types
 
 ## Design System
@@ -59,7 +59,7 @@ packages/web/src/
   theme.css      — frosted-glass design tokens
   types.ts       — manual mirror of server types
   workspaceLayout.ts — pure reducer for the Workspace mode's Zed-style tab-pane layout (max 2 panes, single split axis)
-  components/     — TaskList, NewTaskForm, TaskDetail, ClarifyChat (live composer, placeholder prop), WorkerLog (tool/subagent rows), WorkspaceView (Files sidebar + WorkspaceTabs center pane), WorkspaceTabs (draggable tabs — file Viewers/WorkerLog/Notes/Chat)
+  components/     — TaskList, NewTaskForm, ClarifyChat (live composer, placeholder prop), WorkerLog (read-only tool/subagent rows), WorkerLogPanel (WorkerLog + steer composer), TaskControls (compact selected-task card + dropdown), WorkspaceView (Files sidebar + WorkspaceTabs center + task rail right bar), WorkspaceTabs (draggable tabs — file Viewers/WorkerLogPanel/Notes/Chat)
 ```
 
 ## Anti-Patterns

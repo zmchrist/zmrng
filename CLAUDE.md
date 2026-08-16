@@ -67,14 +67,14 @@ zmrng/
 │   └── web/
 │       └── src/
 │           ├── main.tsx        — React root
-│           ├── App.tsx         — layout: slim drag strip (`.dragbar`, 28 px, `data-tauri-drag-region`) spanning full width above a 2-col grid (TaskList rail | TaskDetail pane); grid-template-rows: auto 1fr; left rail is collapsible (collapse button in brandbar → 56 px `.mini` bar of status dots; local `railCollapsed` state, not persisted)
+│           ├── App.tsx         — layout: topbar (drag region + mode tabs) over two top-level modes, **Workspace** (default home) and **Board**; the standalone Tasks pane is merged into Workspace (legacy `'tasks'` mode value still accepted from persisted UI state and migrated → `'workspace'`; selecting a task from the Board routes to Workspace). App owns tasks/selection/WS wiring and passes the task rail + selected-task lifecycle callbacks down to WorkspaceView
 │           ├── theme.css       — frosted-glass design tokens
 │           ├── api.ts          — REST client
 │           ├── useWs.ts        — auto-reconnect WebSocket hook
 │           ├── types.ts        — MANUAL MIRROR of server/src/types.ts
 │           ├── status.ts       — statusColor() + actorColor() helpers (backed by --status-* / --actor-* tokens)
 │           ├── workspaceLayout.ts — pure reducer for the Workspace mode's Zed-style tab-pane layout (emptyLayout/hydrateLayout/openFile/focusTab/closeTab/openPanel/moveTab/splitWith/setLogMinimized/pruneFileTabs/dropIntent); enforces panes.length ∈ {1,2} and a single split axis
-│           └── components/      — TaskList, NewTaskForm, TaskDetail, ClarifyChat (always-on live composer with `placeholder` prop), WorkerLog (tool/subagent/subagent_result rows color-coded by actor), WorkspaceView (Workspace mode: Files sidebar + WorkspaceTabs center pane, layout hydrated/persisted per task via `PerTaskUiState.layout`), WorkspaceTabs (draggable tabs for file Viewers/WorkerLog/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop)
+│           └── components/      — TaskList, NewTaskForm, ClarifyChat (live composer with `placeholder` prop), WorkerLog (read-only tool/subagent/subagent_result rows color-coded by actor), WorkerLogPanel (WorkerLog + the ClarifyChat steer composer, shown in live phases — the channel that replaced TaskDetail's inline composer), TaskControls (compact selected-task card in the Workspace right bar: title + status pill + lifecycle buttons always visible, repo/flow/model/effort/style/description/usage behind a dropdown), WorkspaceView (the merged home: Files sidebar + WorkspaceTabs center pane + a collapsible right bar = NewTaskForm + TaskControls + TaskList; layout hydrated/persisted per task via `PerTaskUiState.layout`), WorkspaceTabs (draggable tabs for file Viewers/WorkerLogPanel/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop)
 │   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
 │       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
 │       ├── splash/index.html   — galaxy-warp canvas loader (vanilla JS, no build); click/Enter → warp-dive → white-bloom → navigate to app; two-signal boot handshake: splash emits `splash-ready`, Rust emits `engine-ready {port}` once both sidecar + splash are ready; requires `withGlobalTauri: true` in tauri.conf.json

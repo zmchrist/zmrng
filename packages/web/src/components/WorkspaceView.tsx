@@ -2,7 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import styles from './WorkspaceView.module.css'
 import type {
   AgentSummary,
+  CaveStyle,
+  EffortLevel,
+  FlowMode,
+  ModelAlias,
   PerTaskUiState,
+  RepoTarget,
+  ServerConfig,
   Task,
   TaskEvent,
   WorkspaceLayout,
@@ -12,6 +18,10 @@ import type {
 import { api } from '../api'
 import { FileTree } from './FileTree'
 import { WorkspaceTabs } from './WorkspaceTabs'
+import { NewTaskForm } from './NewTaskForm'
+import { TaskList } from './TaskList'
+import { TaskControls } from './TaskControls'
+import { STATUS_LABEL, statusColor } from '../status'
 import { hydrateLayout, openFile, pruneFileTabs } from '../workspaceLayout'
 
 interface Props {
@@ -21,6 +31,32 @@ interface Props {
   /** Per-task UI state, keyed by task id (U5). */
   perTask: Record<string, PerTaskUiState>
   onPerTaskChange: (taskId: string, patch: Partial<PerTaskUiState>) => void
+  /** Right-bar task rail (the former Tasks-page left rail, merged in). */
+  tasks: Task[]
+  repos: RepoTarget[]
+  config: ServerConfig | null
+  selectedId: string | null
+  railCollapsed: boolean
+  onRailCollapsedChange: (v: boolean) => void
+  onSelect: (id: string) => void
+  onCreate: (
+    title: string,
+    body: string,
+    opts: {
+      model: ModelAlias
+      effort: EffortLevel
+      style: CaveStyle
+      flow: FlowMode
+      repoId: string
+    },
+  ) => Promise<void>
+  /** Selected-task lifecycle actions (moved from TaskDetail). */
+  onStart: () => Promise<unknown>
+  onMessage: (text: string) => Promise<unknown>
+  onResume: () => Promise<unknown>
+  onInterrupt: () => Promise<unknown>
+  onDone: () => Promise<unknown>
+  onCancel: () => Promise<unknown>
 }
 
 /** Collect every file node's path in the tree — the set a persisted tab path
@@ -48,7 +84,27 @@ interface Loaded {
   tree: WorktreeFileTree
 }
 
-export function WorkspaceView({ task, events, live, perTask, onPerTaskChange }: Props) {
+export function WorkspaceView({
+  task,
+  events,
+  live,
+  perTask,
+  onPerTaskChange,
+  tasks,
+  repos,
+  config,
+  selectedId,
+  railCollapsed,
+  onRailCollapsedChange,
+  onSelect,
+  onCreate,
+  onStart,
+  onMessage,
+  onResume,
+  onInterrupt,
+  onDone,
+  onCancel,
+}: Props) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [nonce, setNonce] = useState(0)
   const [layout, setLayout] = useState<WorkspaceLayout>(() => hydrateLayout())
@@ -137,7 +193,7 @@ export function WorkspaceView({ task, events, live, perTask, onPerTaskChange }: 
   const selectedPath = activeFilePath(layout)
 
   return (
-    <div className={styles.workspace}>
+    <div className={`${styles.workspace} ${railCollapsed ? styles.workspaceCollapsed : ''}`}>
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHead}>
           <span className={styles.sidebarTitle}>Files</span>
@@ -178,11 +234,79 @@ export function WorkspaceView({ task, events, live, perTask, onPerTaskChange }: 
             agents={agents}
             layout={layout}
             onLayoutChange={applyLayout}
+            onMessage={onMessage}
           />
         ) : (
           <div className={styles.empty}>Select a task to open its workspace.</div>
         )}
       </div>
+
+      <aside className={`${styles.rightbar} ${railCollapsed ? styles.rightbarMini : ''}`}>
+        {railCollapsed ? (
+          <div className={styles.mini}>
+            <button
+              type="button"
+              className={styles.collapseBtn}
+              aria-expanded={false}
+              aria-label="Expand task pane"
+              title="Expand task pane"
+              onClick={() => onRailCollapsedChange(false)}
+            >
+              ‹
+            </button>
+            <div className={styles.miniDots}>
+              {tasks.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`${styles.miniDot} ${t.id === selectedId ? styles.miniDotActive : ''}`}
+                  style={{ background: statusColor(t.status) }}
+                  aria-label={`${t.title} — ${STATUS_LABEL[t.status]}`}
+                  aria-current={t.id === selectedId ? 'true' : undefined}
+                  title={`${t.title} — ${STATUS_LABEL[t.status]}`}
+                  onClick={() => onSelect(t.id)}
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className={styles.brandbar}>
+              <span className={styles.railTitle}>Tasks</span>
+              <button
+                type="button"
+                className={styles.collapseBtn}
+                aria-expanded={true}
+                aria-label="Collapse task pane"
+                title="Collapse task pane"
+                onClick={() => onRailCollapsedChange(true)}
+              >
+                ›
+              </button>
+            </div>
+            <div className={styles.rbBody}>
+              <NewTaskForm
+                repos={repos}
+                defaultRepoId={config?.defaultRepoId ?? ''}
+                onCreate={onCreate}
+              />
+              {task && (
+                <TaskControls
+                  task={task}
+                  config={config}
+                  repos={repos}
+                  onStart={onStart}
+                  onResume={onResume}
+                  onInterrupt={onInterrupt}
+                  onDone={onDone}
+                  onCancel={onCancel}
+                />
+              )}
+              <TaskList tasks={tasks} repos={repos} selectedId={selectedId} onSelect={onSelect} />
+            </div>
+          </>
+        )}
+      </aside>
     </div>
   )
 }
