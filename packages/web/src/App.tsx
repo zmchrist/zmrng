@@ -17,6 +17,7 @@ import type {
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
 import { Board } from './components/Board'
+import { SettingsModal } from './components/SettingsModal'
 import { useUiState } from './uiState'
 
 // The former standalone Tasks pane is merged into Workspace; only Workspace and
@@ -55,6 +56,20 @@ export default function App() {
     (h: number) => ui.patchGlobal({ terminalDock: { ...ui.state.global.terminalDock, height: h } }),
     [ui],
   )
+  // Bottom-nav pane visibility: Tasks rail + Workspace center pane persist
+  // globally (both default closed → a fresh load shows only the Files tree).
+  const tasksOpen = ui.state.global.panes?.tasks ?? false
+  const workspaceOpen = ui.state.global.panes?.workspace ?? false
+  const setTasksOpen = useCallback(
+    (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, tasks: v } }),
+    [ui],
+  )
+  const setWorkspaceOpen = useCallback(
+    (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, workspace: v } }),
+    [ui],
+  )
+  // Settings is an ephemeral modal overlay — never persisted.
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const selectedIdRef = useRef<string | null>(null)
 
   const onWs = useCallback((e: WsEvent) => {
@@ -237,6 +252,12 @@ export default function App() {
           dockHeight={dockHeight}
           onDockOpenChange={setDockOpen}
           onDockHeightChange={setDockHeight}
+          tasksOpen={tasksOpen}
+          workspaceOpen={workspaceOpen}
+          onTasksOpenChange={setTasksOpen}
+          onWorkspaceOpenChange={setWorkspaceOpen}
+          settingsOpen={settingsOpen}
+          onSettingsToggle={() => setSettingsOpen((v) => !v)}
           onSelect={select}
           onCreate={onCreate}
           onStart={() => (selected ? api.start(selected.id) : Promise.resolve())}
@@ -247,6 +268,8 @@ export default function App() {
           onCancel={() => (selected ? api.cancel(selected.id) : Promise.resolve())}
         />
       )}
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }
