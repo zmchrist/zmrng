@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import {
+  config,
   resolveRegistry,
   resolveAuthMode,
   resolveAgents,
@@ -159,6 +160,14 @@ describe('resolveAuthMode', () => {
     expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'garbage' })).toBe('oauth')
     expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'oauth' })).toBe('oauth')
     expect(resolveAuthMode({ ZMRNG_AUTH_MODE: '' })).toBe('oauth')
+  })
+})
+
+describe('terminal config fields', () => {
+  it('populates an absolute projectsDir and a non-empty shell on the resolved config', () => {
+    expect(path.isAbsolute(config.projectsDir)).toBe(true)
+    expect(typeof config.shell).toBe('string')
+    expect(config.shell.length).toBeGreaterThan(0)
   })
 })
 

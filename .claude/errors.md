@@ -145,6 +145,22 @@ non-obvious root cause, or is likely to recur. Template in
 - **Files:** `packages/desktop/scripts/bundle-sidecar.mjs` (esbuild `banner`)
 - **Date Found:** 2026-06-18
 
+### Workspace terminal fails to spawn — `Error: posix_spawnp failed.` (node-pty)
+- **Error:** Opening the Workspace bottom-dock terminal fails at PTY spawn; the server
+  throws `Error: posix_spawnp failed.` from inside `node-pty`.
+- **Cause:** `node-pty`'s prebuilt native helper binary
+  (`node_modules/node-pty/prebuilds/<platform>/spawn-helper`) can lose its executable bit
+  during npm's extraction of the package tarball. The native `.node` binding itself loads
+  fine — it's purely the `spawn-helper` child binary that `posix_spawnp` can't exec.
+- **Solution:** `chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper`
+  (adjust the platform dir for your machine — npm workspaces hoist `node-pty` to the repo
+  root `node_modules`, not `packages/server/node_modules`). If it recurs after a clean
+  `npm install`, re-run the `chmod`; there is no code fix, it's a packaging quirk of the
+  native module.
+- **Files:** `node_modules/node-pty/prebuilds/*/spawn-helper` (not tracked in git — a
+  reinstall can reintroduce this)
+- **Date Found:** 2026-08-16
+
 ### Worktree creation fails for target repos under ~/Documents (bundled .app only)
 - **Error:** `worktree creation failed: Command failed: git -C ~/Documents/Projects/<repo> worktree add -b <branch> … HEAD` → `fatal: Unable to read current working directory: Operation not permitted`. Happens **only** in the bundled `.app`, never in `npm run dev`. No tccd/sandbox denial is logged.
 - **Cause:** macOS hard-protects `~/Documents` (also `~/Desktop`, `~/Downloads`) via TCC. The Finder-launched sidecar runs with cwd `/`; when `git -C <repo-under-Documents>` chdirs in and calls `getcwd()`, the path-walk reads back up through `~/Documents` and is denied → silent `EPERM`. It's silent (no tccd log) because the I/O is performed by `/usr/bin/git` (a shared Apple binary) under the hardened-runtime, different-team bundled `node` helper — that chain breaks TCC responsibility inheritance, so granting Full Disk Access to the `.app` **or** to the bundled `node` does **not** attach to the access. Confirmed by experiment: an identical task against a repo in the shared users folder (`~/../Shared`, non-protected) succeeds instantly with the same app/node/git.

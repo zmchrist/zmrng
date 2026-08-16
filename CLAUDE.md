@@ -45,6 +45,8 @@ website. Always finish by re-bundling the app so the `.app` ships the new code.
 - **Backend:** Fastify 5 + `@fastify/websocket` + `ws`, Pino logging
 - **Database:** SQLite (WAL mode) via better-sqlite3 — single `zmrng.db`
 - **Engine:** Node `child_process` spawning the headless `claude` binary (stream-json)
+- **Terminal:** `node-pty` PTY sessions over `GET /ws/terminal` + `@xterm/xterm` in the
+  Workspace bottom-dock terminal (Zed-style, ctrl+` toggle)
 - **Frontend:** React 19 + Vite, CSS Modules + design tokens (frosted-glass theme)
 - **Language:** TypeScript throughout (ESM, `NodeNext`/`bundler` resolution)
 - **No cloud.** Tests run on **Vitest** (both workspaces) — validate with
@@ -61,6 +63,7 @@ zmrng/
 │   │       ├── db.ts           — SQLite schema, prepared statements, idempotent migrations
 │   │       ├── types.ts        — Task/Phase/WsEvent/usage/WorkspaceLayout types (SOURCE OF TRUTH)
 │   │       ├── runner.ts       — spawn + parse the claude child (stream-json), strip API key
+│   │       ├── terminal.ts     — TerminalManager: spawns node-pty shells for the Workspace bottom-dock terminal (GET /ws/terminal), strips API key under oauth
 │   │       ├── phases.ts       — phase state machine + system/kickoff prompts + lane queue
 │   │       ├── worktree.ts     — git worktree create/remove per task
 │   │       └── ws.ts           — WebSocket broadcast hub
@@ -74,7 +77,9 @@ zmrng/
 │           ├── types.ts        — MANUAL MIRROR of server/src/types.ts
 │           ├── status.ts       — statusColor() + actorColor() helpers (backed by --status-* / --actor-* tokens)
 │           ├── workspaceLayout.ts — pure reducer for the Workspace mode's Zed-style tab-pane layout (emptyLayout/hydrateLayout/openFile/focusTab/closeTab/openPanel/moveTab/splitWith/setLogMinimized/pruneFileTabs/dropIntent); enforces panes.length ∈ {1,2} and a single split axis
-│           └── components/      — TaskList, NewTaskForm, ClarifyChat (live composer with `placeholder` prop), WorkerLog (read-only tool/subagent/subagent_result rows color-coded by actor), WorkerLogPanel (WorkerLog + the ClarifyChat steer composer, shown in live phases — the channel that replaced TaskDetail's inline composer), TaskControls (compact selected-task card in the Workspace right bar: title + status pill + lifecycle buttons always visible, repo/flow/model/effort/style/description/usage behind a dropdown), WorkspaceView (the merged home: Files sidebar + WorkspaceTabs center pane + a collapsible right bar = NewTaskForm + TaskControls + TaskList; layout hydrated/persisted per task via `PerTaskUiState.layout`), WorkspaceTabs (draggable tabs for file Viewers/WorkerLogPanel/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop)
+│           ├── terminalDock.ts — pure reducer for the bottom-dock terminal's ephemeral tab list (emptyDock/addTerminal/closeTerminal/setActive) — only open/height persist, tabs never do
+│           ├── terminalProtocol.ts — pure wire-protocol helpers for `/ws/terminal` (encodeInput/encodeResize/parseServerMsg)
+│           └── components/      — TaskList, NewTaskForm, ClarifyChat (live composer with `placeholder` prop), WorkerLog (read-only tool/subagent/subagent_result rows color-coded by actor), WorkerLogPanel (WorkerLog + the ClarifyChat steer composer, shown in live phases — the channel that replaced TaskDetail's inline composer), TaskControls (compact selected-task card in the Workspace right bar: title + status pill + lifecycle buttons always visible, repo/flow/model/effort/style/description/usage behind a dropdown), WorkspaceView (the merged home: Files sidebar + WorkspaceTabs center pane + a collapsible right bar = NewTaskForm + TaskControls + TaskList; layout hydrated/persisted per task via `PerTaskUiState.layout`; wraps the 3-column grid + `TerminalDock` in a vertical flex shell so the dock renders regardless of task selection), WorkspaceTabs (draggable tabs for file Viewers/WorkerLogPanel/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop), TerminalDock (Zed-style bottom dock: always-visible status-bar toggle, ctrl+` shortcut, tab strip + drag-resize, terminals mounted only while open), Terminal (xterm.js glue — one WebSocket per instance to `/ws/terminal`, theme-token colors, ResizeObserver fit)
 │   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
 │       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
 │       ├── splash/index.html   — galaxy-warp canvas loader (vanilla JS, no build); click/Enter → warp-dive → white-bloom → navigate to app; two-signal boot handshake: splash emits `splash-ready`, Rust emits `engine-ready {port}` once both sidecar + splash are ready; requires `withGlobalTauri: true` in tauri.conf.json
@@ -174,10 +179,19 @@ See `.claude/docs/services-reference.md` for full method signatures and behavior
 - **Worktree** (`packages/server/src/worktree.ts`) — `git worktree add` per task, base
   ref resolved `origin/<branch>` → local `<branch>` → `HEAD` for local-only repos.
 - **WsHub** (`packages/server/src/ws.ts`) — fan-out broadcast of task + claude events.
-- **Fastify server** (`packages/server/src/index.ts`) — REST surface
-  (`GET /api/config`, `GET /api/repos`, `GET /api/tasks`, `POST /api/tasks`,
-  `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`, `GET /api/tasks/:id/events`),
-  `GET /ws`, static serve of `web/dist`.
+- **TerminalManager** (`packages/server/src/terminal.ts`) — owns the Workspace bottom-dock
+  PTY sessions; `create(cb)` spawns a shell at `config.projectsDir` with `config.shell` via
+  a swappable `PtyFactory` (mirrors the runner-factory test seam), strips
+  `ANTHROPIC_API_KEY` under oauth mode, self-removes from the tracked `Set` on exit;
+  `killAll()` tears every session down on shutdown. Pure `parseClientMsg()` tolerantly
+  decodes client `input`/`resize` frames.
+- **Fastify server** (`packages/server/src/index.ts`) — REST surface includes
+  `GET /api/config`, `GET /api/repos`, `GET /api/tasks`, `POST /api/tasks`,
+  `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`, `GET /api/tasks/:id/events`
+  (see `.claude/docs/services-reference.md` for the full, current route list — it has grown
+  since this line was last trimmed). WS: `GET /ws` (task/claude event fan-out) and
+  `GET /ws/terminal` (one PTY per socket, via `TerminalManager`). Static serve of `web/dist`.
+  `shutdown()` calls both `manager.shutdown()` and `terminals.killAll()`.
 - **useWs** (`packages/web/src/useWs.ts`) — auto-reconnect WebSocket hook (1s→30s backoff).
 
 ## Commands
@@ -243,3 +257,7 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
 - Frosted-glass theme; Vitest across both workspaces (typecheck+lint+test+build is validation).
 - Worktrees live under the **target repo's own** `worktrees/` dir (e.g. `<repo.path>/worktrees/<shortId>`), not a global dir. That dir should be gitignored in each target repo.
 - Build-lane cap via `ZMRNG_MAX_LANES` (default 2); extra READY tasks queue.
+- Workspace bottom-dock terminal shells are ephemeral (never persisted) — only the dock's
+  `open`/`height` chrome round-trips through `GlobalUiState.terminalDock`. Desktop-sidecar
+  vendoring of `node-pty`'s native binding is an explicit out-of-scope follow-up (the
+  public-readiness plan's web-only override applies here too).

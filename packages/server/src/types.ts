@@ -143,6 +143,8 @@ export interface GlobalUiState {
   railCollapsed?: boolean
   railCards?: Record<string, boolean>
   splitSizes?: Record<string, number>
+  /** Bottom-dock terminal chrome. Only open/height persist — shells are ephemeral. */
+  terminalDock?: { open?: boolean; height?: number }
 }
 
 // ---- workspace tab-pane layout (Zed-style collapsible tabs) ----
@@ -281,6 +283,18 @@ export type WsEvent =
   | { type: 'event'; taskId: string; event: TaskEvent }
   /** transient token-delta stream, not persisted to the events table */
   | { type: 'partial'; taskId: string; text: string }
+
+// ---- terminal (bottom-dock PTY) --------------------------------------------
+
+/** client -> server terminal frames (over GET /ws/terminal). */
+export type TermClientMsg =
+  | { type: 'input'; data: string }
+  | { type: 'resize'; cols: number; rows: number }
+
+/** server -> client terminal frames. */
+export type TermServerMsg =
+  | { type: 'data'; data: string }
+  | { type: 'exit'; code: number | null }
 
 // ---- preflight (advisory auth presence probe) ----
 

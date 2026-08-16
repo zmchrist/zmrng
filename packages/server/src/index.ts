@@ -7,6 +7,7 @@ import { config } from './config.js'
 import { Db } from './db.js'
 import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
+import { TerminalManager, parseClientMsg } from './terminal.js'
 import { listWorktreeFiles } from './worktree.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
@@ -21,6 +22,7 @@ import type {
   AgentSummary,
   ChatMessage,
   UiState,
+  TermServerMsg,
 } from './types.js'
 
 function errMsg(e: unknown): string {
@@ -51,6 +53,7 @@ const app = Fastify({ logger: true })
 const db = new Db(config.dbPath)
 const hub = new WsHub()
 const manager = new TaskManager(db, (e: WsEvent) => hub.broadcast(e))
+const terminals = new TerminalManager()
 
 await app.register(websocket)
 
@@ -357,6 +360,46 @@ app.get('/ws', { websocket: true }, (socket: WebSocket) => {
   hub.send(socket, { type: 'snapshot', tasks: db.listTasks() })
 })
 
+// Bidirectional PTY channel for the Workspace bottom-dock terminal. One socket
+// owns exactly one shell: socket close ⇒ PTY killed (ephemeral by construction).
+app.get('/ws/terminal', { websocket: true }, (socket: WebSocket) => {
+  const send = (msg: TermServerMsg): void => {
+    try {
+      socket.send(JSON.stringify(msg))
+    } catch {
+      // socket closed mid-send
+    }
+  }
+  try {
+    const session = terminals.create({
+      onData: (data) => send({ type: 'data', data }),
+      onExit: (code) => {
+        send({ type: 'exit', code })
+        socket.close()
+      },
+    })
+    socket.on('message', (raw) => {
+      try {
+        const msg = parseClientMsg(String(raw))
+        if (msg?.type === 'input') session.write(msg.data)
+        else if (msg?.type === 'resize') session.resize(msg.cols, msg.rows)
+      } catch (err) {
+        app.log.error({ err }, 'terminal message handler failed')
+        socket.close()
+      }
+    })
+    socket.on('close', () => session.kill())
+    socket.on('error', () => session.kill())
+  } catch (err) {
+    app.log.error({ err }, 'terminal spawn failed')
+    try {
+      socket.close()
+    } catch {
+      // already closed
+    }
+  }
+})
+
 // ---- static (production) ----
 
 if (existsSync(config.webDist)) {
@@ -380,6 +423,7 @@ if (existsSync(config.webDist)) {
 function shutdown(signal: string): void {
   app.log.info({ signal }, 'shutting down — killing live claude workers')
   manager.shutdown()
+  terminals.killAll()
   app.close().finally(() => {
     // Checkpoint the WAL into the durable .db before exit so tasks survive the
     // restart — tsx-watch/SIGTERM otherwise kill us before any clean close.
