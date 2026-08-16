@@ -286,6 +286,8 @@ export interface ServerConfig {
   authMode: string
   /** Machine-readable form of the same setting. */
   authModeKind: AuthMode
+  /** True under `npm run dev` (tsx watch) — gates the dev-only restart button. */
+  dev: boolean
 }
 
 // ---- preflight (advisory auth presence probe) ----
