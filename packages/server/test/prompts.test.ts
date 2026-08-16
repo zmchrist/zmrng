@@ -59,6 +59,19 @@ describe('systemPrompt', () => {
   it('names the five-step lifecycle', () => {
     expect(prompt).toContain('Plan → Implement (TDD) → Code Review → Validate → Sync Docs')
   })
+
+  it('defines ZMRNG_BLOCKED as exactly three true-environment-gap reasons', () => {
+    expect(prompt).toMatch(/toolchain\/binary/)
+    expect(prompt).toMatch(/authentication is broken/)
+    expect(prompt).toMatch(/target repository itself declares/i)
+  })
+
+  it('states the seeded zmrng-* QA agents are guaranteed present', () => {
+    expect(prompt).toMatch(/zmrng-qa/)
+    expect(prompt).toMatch(/zmrng-code-reviewer/)
+    expect(prompt).toMatch(/zmrng-doc-updater/)
+    expect(prompt).toMatch(/guaranteed present/i)
+  })
 })
 
 describe('planKickoff', () => {
@@ -72,6 +85,11 @@ describe('planKickoff', () => {
   it('requires the plan to name a test strategy', () => {
     expect(prompt).toContain('"Test strategy"')
     expect(prompt).toMatch(/never omit the section/)
+  })
+
+  it('does not instruct blocking on a bare qa/code-reviewer/doc-updater name', () => {
+    expect(prompt).not.toMatch(/ZMRNG_BLOCKED: <agent name> not available/)
+    expect(prompt).toMatch(/zmrng-code-reviewer/)
   })
 })
 
@@ -112,6 +130,17 @@ describe('executeKickoff', () => {
 
   it('embeds the full PR body template', () => {
     expect(prompt).toContain(PR_BODY_TEMPLATE)
+  })
+
+  it('does not instruct blocking on a bare qa/code-reviewer/doc-updater name', () => {
+    expect(prompt).not.toMatch(/ZMRNG_BLOCKED: <agent name> not available/)
+  })
+
+  it('references the seeded zmrng-* QA agents as guaranteed present', () => {
+    expect(prompt).toMatch(/zmrng-qa/)
+    expect(prompt).toMatch(/zmrng-code-reviewer/)
+    expect(prompt).toMatch(/zmrng-doc-updater/)
+    expect(prompt).toMatch(/guaranteed present/i)
   })
 })
 

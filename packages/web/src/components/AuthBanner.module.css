@@ -1,0 +1,33 @@
+.banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  color: var(--text-dim);
+  font-size: 13px;
+  letter-spacing: var(--tracking-tight);
+}
+
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-blocked);
+  box-shadow: 0 0 0 3px rgba(255, 179, 94, 0.16);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.hint {
+  color: var(--text-faint);
+}

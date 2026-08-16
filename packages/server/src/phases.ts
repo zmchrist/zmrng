@@ -8,7 +8,8 @@ import {
   type RunnerFactory,
   type RunnerLike,
 } from './runner.js'
-import { createWorktree, removeWorktree, repoSlug, syncLocalAfterMerge } from './worktree.js'
+import { createWorktree, removeWorktree, repoSlug, seedHarness, syncLocalAfterMerge } from './worktree.js'
+import { pruneTask as pruneUiStateTask } from './uiState.js'
 import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
@@ -144,7 +145,11 @@ export function systemPrompt(
     '- ZMRNG_READY — clarify phase complete.',
     '- ZMRNG_PLAN_READY model=<opus|sonnet> effort=<low|medium|high|xhigh|max> plan=<relative path to the plan file> — plan phase complete.',
     '- ZMRNG_VALIDATING — execute phase has moved from implementation into the QA/review/docs chain.',
-    '- ZMRNG_BLOCKED: <reason> — you need a subagent that is missing from this repo; stop and wait for the operator to add it and resume you.',
+    '- ZMRNG_BLOCKED: <reason> — emit this ONLY for a true environment gap, one of exactly three reasons: (1) a required toolchain/binary is missing from the environment, (2) authentication is broken (e.g. the target repo\'s credentials are unavailable), or (3) a subagent that the TARGET REPOSITORY ITSELF declares (not one zmrng seeds) is missing. Stop and wait for the operator to fix it and resume you.',
+    '',
+    'zmrng SEEDS its own QA subagents (`zmrng-qa`, `zmrng-code-reviewer`, `zmrng-doc-updater`) into this worktree before you start — they are GUARANTEED PRESENT. Their absence is never a reason to emit ZMRNG_BLOCKED.',
+    '',
+    'ORCHESTRATOR-OWNED FILES (never stage or commit): everything under `.claude/rules/zmrng-*`, `.claude/skills/zmrng-*`, `.claude/agents/zmrng-*`, `.claude/zmrng-hooks/`, and `.claude/settings.local.json` was seeded by zmrng itself, not the target repo. It is already excluded from `git add -A` via this worktree\'s `info/exclude`; never `git add --force` it or reference it in a PR.',
     styleDirective(style),
   ].join('\n')
 }
@@ -170,11 +175,10 @@ export function planKickoff(task: Task, transcript: string): string {
     'Steps:',
     '1. GRILL THE APPROACH FIRST — no code before the plan is sharp. Read the actual files you intend to change; do not plan against assumptions. Then interrogate your own approach in writing: what is the simplest thing that works, what does this break, what did you assume that the code does not support, what is out of scope. Name at least one alternative you rejected and why. Nothing is written to the plan until it survives this.',
     '2. Run the `/core_piv_loop:plan-feature` workflow for this task and write the resulting plan to `.agents/plans/<kebab-case-name>.md` within THIS repository. The plan MUST contain an explicit "Test strategy" section naming: the test runner/command this repo uses, exactly which tests you will add or update (file paths), and what each one proves. If this repo has NO test runner, the section must say so plainly and state how the change will be verified instead — never omit the section.',
-    '3. Have a subagent QA the plan: invoke the `code-reviewer` agent (fall back to `qa`) to review the plan for soundness against the task and the repo conventions. If it finds the plan unsound, revise the plan and re-QA. Do AT MOST 2 revise+re-QA rounds, then proceed regardless.',
+    '3. Have a subagent QA the plan: invoke the `zmrng-code-reviewer` agent (fall back to `zmrng-qa`) — both are seeded into this worktree and guaranteed present — to review the plan for soundness against the task and the repo conventions. If it finds the plan unsound, revise the plan and re-QA. Do AT MOST 2 revise+re-QA rounds, then proceed regardless.',
     '4. Assess complexity and choose the execute-phase model and effort: use `opus` for non-trivial/architectural/multi-file work and `sonnet` only for simple, mechanical changes; effort defaults to `high`, raise to `xhigh`/`max` for genuinely complex work and drop to `medium` only for trivial work.',
     'When the plan is written and QA is complete, output on its own line exactly:',
     'ZMRNG_PLAN_READY model=<opus|sonnet> effort=<low|medium|high|xhigh|max> plan=<relative path to the plan file>',
-    'If a required QA subagent is missing from this repo, output `ZMRNG_BLOCKED: <agent name> not available` on its own line and stop.',
   ].join('\n')
 }
 
@@ -234,11 +238,11 @@ export function executeKickoff(
     '  Tests land in the SAME commit as the source they cover — never a follow-up commit.',
     'TOLERANCE (do not silently skip): if this repo genuinely has no test runner, or the change is untestable by its nature (pure docs/config), you may skip RED/GREEN — but you MUST then state that explicitly in the PR body under "Testing", naming the reason. An unexplained absence of tests is a failed execute phase.',
     '',
-    'After implementation, BEFORE committing, print ZMRNG_VALIDATING on its own line, then run this chain in order (best-effort — skip a step only if its agent is genuinely unavailable):',
-    '  1. `qa` agent — run validation (typecheck/lint/build) and report PASS/FAIL; fix every failure (route fixes to the right specialist).',
-    '  2. `code-reviewer` agent — review the changes against the plan; address its findings.',
-    '  3. `doc-updater` agent (or the `sync-docs` skill) — sync the docs to the changes.',
-    'If any required agent above is missing from this repo, output `ZMRNG_BLOCKED: <agent name> not available` on its own line and STOP — wait for the operator to add it and resume you; then continue the chain.',
+    'After implementation, BEFORE committing, print ZMRNG_VALIDATING on its own line, then run this chain in order. The `zmrng-qa`, `zmrng-code-reviewer`, and `zmrng-doc-updater` agents are seeded into this worktree and GUARANTEED PRESENT — never block because one of them is "missing":',
+    '  1. `zmrng-qa` agent — run validation (typecheck/lint/build) and report PASS/FAIL; fix every failure (route fixes to the right specialist).',
+    '  2. `zmrng-code-reviewer` agent — review the changes against the plan; address its findings.',
+    '  3. `zmrng-doc-updater` agent (or the `sync-docs` skill) — sync the docs to the changes.',
+    'Emit ZMRNG_BLOCKED at this step ONLY for a true environment gap: a required toolchain/binary is missing, authentication is broken, or a subagent the TARGET REPOSITORY ITSELF declares is missing — then STOP and wait for the operator to fix it and resume you; continue the chain afterward.',
     'Finally:',
     "- Run this repo's full validation and ensure every check passes — fix every failure. For a Node repo that is `npm run typecheck && npm run lint && npm test && npm run build` (skip a script this repo does not define).",
     '- MANDATORY before committing: run the `sync-docs` skill (the Skill tool with skill "sync-docs", equivalent to the operator running `/sync-docs`) to bring this repo\'s documentation in sync with your changes, and stage any docs it updates. Do this even if the doc step in the QA chain above already ran. Skip only if the skill is genuinely unavailable in this repo.',
@@ -643,6 +647,21 @@ export class TaskManager {
       this.fail(taskId, `worktree creation failed: ${errMsg(err)}`)
       return
     }
+    // Best-effort: copy zmrng's own harness (rules/skills/agents/hooks) into the
+    // worktree so the worker gets it too. Never fails the task — a seeding
+    // problem is logged to the operator and the worker proceeds regardless.
+    try {
+      const notes = await seedHarness(wt.worktreePath, repo.path, path.join(config.repoRoot, 'harness'))
+      for (const note of notes) {
+        this.emitEvent(taskId, 'status', { sub: 'status', note: `harness seed — ${note}` })
+      }
+    } catch (err) {
+      this.emitEvent(taskId, 'status', {
+        sub: 'status',
+        note: `harness seed — failed: ${errMsg(err)} (continuing without it)`,
+      })
+    }
+
     // Resolved once here (not per worker line) so PR detection can be scoped to
     // this task's own repo. `null` = local-only target; detection degrades to
     // first-URL-wins.
@@ -707,7 +726,7 @@ export class TaskManager {
     })
   }
 
-  /** Resume a `blocked` task after the operator has added the missing subagent. */
+  /** Resume a `blocked` task after the operator has resolved the blocking condition. */
   resume(taskId: string): void {
     const task = this.db.getTask(taskId)
     if (!task) throw new Error('task not found')
@@ -721,10 +740,10 @@ export class TaskManager {
     this.transition(taskId, restore, 'resumed by operator')
     this.emitEvent(taskId, 'operator', {
       sub: 'operator',
-      text: 'The required agent has been added to this repo. Continue the phase from where you stopped.',
+      text: 'The blocking condition has been resolved. Continue the phase from where you stopped.',
     })
     runner.send(
-      'The required agent has now been added to this repository. Continue the phase from where you stopped — do not restart.',
+      'The blocking condition has now been resolved. Continue the phase from where you stopped — do not restart.',
     )
   }
 
@@ -744,6 +763,7 @@ export class TaskManager {
     if (task.worktree) {
       await removeWorktree(repoPath, task.worktree)
       this.patch(taskId, { worktree: null })
+      pruneUiStateTask(taskId)
     }
     // Done means "I merged the PR on GitHub" — bring the local checkout in sync:
     // fast-forward the default branch and delete the merged feature branch (safe).
@@ -775,8 +795,19 @@ export class TaskManager {
       const repoPath = repoById(task.repoId)?.path ?? config.targetRepo
       await removeWorktree(repoPath, task.worktree)
       this.patch(taskId, { worktree: null })
+      pruneUiStateTask(taskId)
     }
     this.transition(taskId, 'failed', 'cancelled by operator')
+  }
+
+  /** Manual board action — shelve a finished task out of the active columns. */
+  archive(taskId: string): void {
+    const task = this.db.getTask(taskId)
+    if (!task) throw new Error('task not found')
+    if (task.status !== 'done' && task.status !== 'failed') {
+      throw new Error('only a done or failed task can be archived')
+    }
+    this.transition(taskId, 'archived')
   }
 
   /** Kill all live processes (graceful shutdown). */

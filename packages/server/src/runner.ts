@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { config } from './config.js'
 import type { EffortLevel, TaskUsage } from './types.js'
 
 /** Per-result usage delta parsed from a `result` line. Shape mirrors `TaskUsage`. */
@@ -149,9 +150,10 @@ export class Runner {
 
   constructor(opts: SpawnOptions, private cb: RunnerCallbacks) {
     // Strip ANTHROPIC_API_KEY so claude authenticates with the operator's Max
-    // OAuth login rather than silently billing the metered API.
+    // OAuth login rather than silently billing the metered API — unless the
+    // operator opted into ZMRNG_AUTH_MODE=apikey (keys-only stranger, no Max login).
     const env = { ...process.env }
-    delete env.ANTHROPIC_API_KEY
+    if (config.authMode === 'oauth') delete env.ANTHROPIC_API_KEY
 
     const args = [
       ...CLAUDE_ARGS_BASE,

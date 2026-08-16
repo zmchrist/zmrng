@@ -127,6 +127,66 @@ read-only bundle (so `config/repos.json` lives at
 `~/Library/Application Support/zmrng/config/repos.json`). `npm run dev` is unchanged:
 with no env set everything still resolves under the repo root.
 
+## Self-host
+
+Run zmrng as a plain long-lived Node process on a machine you control — no
+container, no built-in auth (bind it to `localhost` or a trusted LAN, or put a
+reverse proxy with your own auth in front). Steps:
+
+```bash
+npm install
+npm run build                 # tsc (server) + vite build (web) → packages/*/dist
+npm start                     # node packages/server/dist/index.js, serves API + UI
+```
+
+If you skip the build step, `npm start` fails loud in the logs — it will not
+silently serve an API with no UI. Check `GET /api/preflight` after boot: its
+`path` section reports whether `git`/`gh`/`claude` are present on the server's
+`PATH` (advisory — a missing binary degrades the relevant feature, it isn't a
+hard gate).
+
+### Keep it running
+
+Pick whichever fits your OS — both just keep `npm start` alive across
+reboots/crashes and are not part of this repo.
+
+**macOS — `launchd`:**
+
+```xml
+<!-- ~/Library/LaunchAgents/com.zmrng.server.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.zmrng.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/npm</string>
+    <string>start</string>
+  </array>
+  <key>WorkingDirectory</key><string>/path/to/zmrng</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/zmrng.log</string>
+  <key>StandardErrorPath</key><string>/tmp/zmrng.err.log</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.zmrng.server.plist
+```
+
+**Linux/macOS — `pm2`:**
+
+```bash
+npm install -g pm2
+pm2 start npm --name zmrng -- start
+pm2 save
+pm2 startup                   # follow the printed command to survive reboots
+```
+
 ## Config (`.env`)
 
 | Var | Default | Meaning |
