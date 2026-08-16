@@ -14,6 +14,10 @@ interface Props {
   path: string | null
 }
 
+/** Markdown files render either the editor or the rendered preview, one at a
+ *  time — never side by side. Defaults to the editor. */
+type MarkdownView = 'edit' | 'preview'
+
 function mimeForImage(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase() ?? ''
   switch (ext) {
@@ -37,18 +41,21 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-/** Format-dispatched body: markdown gets a live split preview, code/text an
- *  editor only, image/pdf a read-only render. */
+/** Format-dispatched body: markdown shows the editor or the rendered preview
+ *  (one at a time, toggled from the bar), code/text an editor only, image/pdf a
+ *  read-only render. */
 function ViewerBody({
   file,
   path,
   draft,
   onDraftChange,
+  mdView,
 }: {
   file: WorktreeFileContent
   path: string
   draft: string
   onDraftChange: (v: string) => void
+  mdView: MarkdownView
 }) {
   if (file.format === 'image') {
     return (
@@ -64,16 +71,9 @@ function ViewerBody({
       </Suspense>
     )
   }
-  if (file.format === 'markdown') {
-    return (
-      <div className={styles.split}>
-        <Suspense fallback={<div className={styles.loading}>Loading editor…</div>}>
-          <CodeEditor key={path} path={path} initialValue={draft} onChange={onDraftChange} />
-        </Suspense>
-        {/* Escaped in renderMarkdown before any tag is introduced — safe to inject. */}
-        <div className={styles.preview} dangerouslySetInnerHTML={{ __html: renderMarkdown(draft) }} />
-      </div>
-    )
+  if (file.format === 'markdown' && mdView === 'preview') {
+    // Escaped in renderMarkdown before any tag is introduced — safe to inject.
+    return <div className={styles.preview} dangerouslySetInnerHTML={{ __html: renderMarkdown(draft) }} />
   }
   return (
     <Suspense fallback={<div className={styles.loading}>Loading editor…</div>}>
@@ -100,6 +100,7 @@ export function Viewer({ taskId, path }: Props) {
   const [fetched, setFetched] = useState<Fetched | null>(null)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
+  const [mdView, setMdView] = useState<MarkdownView>('edit')
 
   useEffect(() => {
     if (!taskId || !path) return
@@ -110,6 +111,7 @@ export function Viewer({ taskId, path }: Props) {
         if (cancelled) return
         setFetched({ taskId, path, file: f, error: null })
         setDraft(f.encoding === 'utf8' ? f.content : '')
+        setMdView('edit')
       })
       .catch((err) => {
         if (!cancelled) setFetched({ taskId, path, file: null, error: errMsg(err) })
@@ -169,6 +171,16 @@ export function Viewer({ taskId, path }: Props) {
           {path}
         </span>
         {file && !editable && <span className={styles.badge}>read-only</span>}
+        {file?.format === 'markdown' && (
+          <button
+            type="button"
+            className={styles.toggleBtn}
+            onClick={() => setMdView((v) => (v === 'edit' ? 'preview' : 'edit'))}
+            title={mdView === 'edit' ? 'Show rendered preview' : 'Show editor'}
+          >
+            {mdView === 'edit' ? 'Preview' : 'Edit'}
+          </button>
+        )}
         {editable && (
           <button
             type="button"
@@ -185,7 +197,7 @@ export function Viewer({ taskId, path }: Props) {
         {loading && <div className={styles.loading}>Loading…</div>}
         {!loading && error && <div className={styles.error}>{error}</div>}
         {!loading && !error && file && (
-          <ViewerBody file={file} path={path} draft={draft} onDraftChange={setDraft} />
+          <ViewerBody file={file} path={path} draft={draft} onDraftChange={setDraft} mdView={mdView} />
         )}
       </div>
     </div>
