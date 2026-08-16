@@ -40,6 +40,8 @@ const ADDED = [
 
 const ADDED_BOARD = ['blocked_kind', 'blocked_reason']
 
+const ADDED_FLOW = ['flow']
+
 describe('ensureColumns migration', () => {
   it('backfills columns missing from a pre-existing (old-schema) tasks table', () => {
     // Simulate a DB created before the added columns existed.
@@ -70,6 +72,20 @@ describe('ensureColumns migration', () => {
     for (const c of ADDED_BOARD) expect(columns(dbPath).has(c)).toBe(true)
   })
 
+  it('backfills the flow column on an old-schema table', () => {
+    const raw = new Database(dbPath)
+    raw.exec(`CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL,
+      session_id TEXT, branch TEXT, worktree TEXT, pr_url TEXT, model TEXT,
+      queued INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );`)
+    raw.close()
+    for (const c of ADDED_FLOW) expect(columns(dbPath).has(c)).toBe(false)
+
+    new Db(dbPath)
+    for (const c of ADDED_FLOW) expect(columns(dbPath).has(c)).toBe(true)
+  })
+
   it('is idempotent across two runs (second open adds nothing and does not throw)', () => {
     new Db(dbPath)
     const after1 = columns(dbPath)
@@ -87,6 +103,7 @@ describe('ensureColumns migration', () => {
       model: 'opus',
       effort: 'high',
       style: 'normal',
+      flow: 'plan',
       repoId: 'zmrng',
       now: '2026-07-27T00:00:00.000Z',
     })
@@ -125,6 +142,7 @@ describe('task_comments', () => {
       model: 'opus',
       effort: 'high',
       style: 'normal',
+      flow: 'plan',
       repoId: 'zmrng',
       now: '2026-07-27T00:00:00.000Z',
     })
@@ -185,6 +203,7 @@ describe('blockedKind / blockedReason', () => {
       model: 'opus',
       effort: 'high',
       style: 'normal',
+      flow: 'plan',
       repoId: 'zmrng',
       now: '2026-07-27T00:00:00.000Z',
     })
@@ -212,6 +231,7 @@ describe('addUsage', () => {
       model: 'opus',
       effort: 'high',
       style: 'normal',
+      flow: 'plan',
       repoId: 'zmrng',
       now: '2026-07-27T00:00:00.000Z',
     })
