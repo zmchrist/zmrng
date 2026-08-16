@@ -9,6 +9,7 @@ import {
   type RunnerLike,
 } from './runner.js'
 import { createWorktree, removeWorktree, repoSlug, seedHarness, syncLocalAfterMerge } from './worktree.js'
+import { pruneTask as pruneUiStateTask } from './uiState.js'
 import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
@@ -762,6 +763,7 @@ export class TaskManager {
     if (task.worktree) {
       await removeWorktree(repoPath, task.worktree)
       this.patch(taskId, { worktree: null })
+      pruneUiStateTask(taskId)
     }
     // Done means "I merged the PR on GitHub" — bring the local checkout in sync:
     // fast-forward the default branch and delete the merged feature branch (safe).
@@ -793,6 +795,7 @@ export class TaskManager {
       const repoPath = repoById(task.repoId)?.path ?? config.targetRepo
       await removeWorktree(repoPath, task.worktree)
       this.patch(taskId, { worktree: null })
+      pruneUiStateTask(taskId)
     }
     this.transition(taskId, 'failed', 'cancelled by operator')
   }

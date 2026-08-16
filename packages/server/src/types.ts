@@ -114,6 +114,34 @@ export interface TaskComment {
 /** Top-level workspace shell mode (UI-only; mirrored for type-parity). */
 export type WorkspaceMode = 'tasks' | 'board' | 'workspace'
 
+// ---- workspace persistence (U5) ----
+
+/**
+ * GLOBAL (not task-scoped) UI chrome: active mode, left-rail collapsed flag,
+ * right-rail dock-card open states (keyed by card title), and pane split
+ * sizes (keyed by pane id, reserved for future resizable panes). Kept
+ * permissive/forward-compatible — the server never validates individual
+ * fields, it just round-trips whatever the client sends.
+ */
+export interface GlobalUiState {
+  mode?: WorkspaceMode
+  railCollapsed?: boolean
+  railCards?: Record<string, boolean>
+  splitSizes?: Record<string, number>
+}
+
+/** PER-TASK UI state: the Workspace file viewer's open paths + active path. */
+export interface PerTaskUiState {
+  openPaths?: string[]
+  activePath?: string | null
+}
+
+/** Whole-document shape persisted to `~/.zmrng/ui-state.json` (never `zmrng.db`). */
+export interface UiState {
+  global: GlobalUiState
+  perTask: Record<string, PerTaskUiState>
+}
+
 // ---- worktree file tree (Workspace file sidebar) ----
 
 export type WorktreeNodeType = 'file' | 'dir'
