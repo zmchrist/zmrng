@@ -144,6 +144,37 @@ describe('task_comments', () => {
   })
 })
 
+describe('chat messages (U4)', () => {
+  it('addChatMessage + listChatMessages round-trip, keyed by task + agent', () => {
+    const db = new Db(dbPath)
+    const u = db.addChatMessage('t1', 'a1', 'user', 'hi', '2026-08-15T00:00:01.000Z')
+    const r = db.addChatMessage('t1', 'a1', 'assistant', 'hello', '2026-08-15T00:00:02.000Z')
+    // A different agent's history must not leak into a1's conversation.
+    db.addChatMessage('t1', 'a2', 'user', 'other agent', '2026-08-15T00:00:03.000Z')
+    // A different task's history must not leak either.
+    db.addChatMessage('t2', 'a1', 'user', 'other task', '2026-08-15T00:00:04.000Z')
+
+    const listed = db.listChatMessages('t1', 'a1')
+    expect(listed).toHaveLength(2)
+    expect(listed[0]).toEqual(u)
+    expect(listed[1]).toEqual(r)
+    expect(listed.map((m) => m.content)).toEqual(['hi', 'hello'])
+  })
+
+  it('persists across reopen (survives reload)', () => {
+    const db1 = new Db(dbPath)
+    db1.addChatMessage('t1', 'a1', 'user', 'persisted', '2026-08-15T00:00:01.000Z')
+    const db2 = new Db(dbPath)
+    expect(db2.listChatMessages('t1', 'a1')).toHaveLength(1)
+    expect(db2.listChatMessages('t1', 'a1')[0]?.content).toBe('persisted')
+  })
+
+  it('returns an empty list for an unknown task/agent', () => {
+    const db = new Db(dbPath)
+    expect(db.listChatMessages('nope', 'a1')).toEqual([])
+  })
+})
+
 describe('blockedKind / blockedReason', () => {
   it('updateTask can set and read back blockedKind/blockedReason', () => {
     const db = new Db(dbPath)

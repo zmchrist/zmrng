@@ -49,6 +49,32 @@ export interface RepoTarget {
   defaultBranch: string
 }
 
+// ---- optional agent-chat adapter (U4) ----
+
+/** A configured external chat agent (optional adapter). */
+export interface AgentTarget {
+  id: string
+  label: string
+  url: string
+  headers?: Record<string, string>
+}
+
+/** Client-facing agent view — never leaks `url`/`headers` (which may hold secrets). */
+export interface AgentSummary {
+  id: string
+  label: string
+}
+
+/** One persisted chat message for a task/agent conversation. */
+export interface ChatMessage {
+  id: number
+  taskId: string
+  agentId: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+}
+
 export interface Task {
   id: string
   title: string
