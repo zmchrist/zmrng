@@ -26,6 +26,9 @@ export type CaveStyle =
   | 'caveman-ultra'
   | 'wenyan-full'
 
+/** Post-clarify autonomy: `direct` skips the plan phase, `plan` runs the full pipeline. */
+export type FlowMode = 'direct' | 'plan'
+
 export interface TaskUsage {
   tokensIn: number
   tokensOut: number
@@ -37,6 +40,8 @@ export interface TaskUsage {
 export const DEFAULT_MODEL: ModelAlias = 'opus'
 export const DEFAULT_EFFORT: EffortLevel = 'high'
 export const DEFAULT_STYLE: CaveStyle = 'caveman-full'
+/** New tasks jump straight to work; opt into `plan` for the heavy pipeline. */
+export const DEFAULT_FLOW: FlowMode = 'direct'
 
 // ---- multi-target repo registry ----
 
@@ -87,6 +92,7 @@ export interface Task {
   model: string | null
   effort: EffortLevel | null
   style: CaveStyle | null
+  flow: FlowMode
   repoId: string
   usage: TaskUsage
   queued: boolean

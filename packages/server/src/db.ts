@@ -8,6 +8,7 @@ import type {
   EventPayload,
   EffortLevel,
   CaveStyle,
+  FlowMode,
   TaskUsage,
   TaskComment,
   ChatMessage,
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   model TEXT,
   effort TEXT,
   style TEXT,
+  flow TEXT,
   repo_id TEXT,
   tokens_in INTEGER NOT NULL DEFAULT 0,
   tokens_out INTEGER NOT NULL DEFAULT 0,
@@ -79,6 +81,7 @@ interface TaskRow {
   model: string | null
   effort: string | null
   style: string | null
+  flow: string | null
   repo_id: string | null
   tokens_in: number
   tokens_out: number
@@ -131,6 +134,9 @@ function rowToTask(r: TaskRow): Task {
     model: r.model,
     effort: (r.effort as EffortLevel | null) ?? null,
     style: (r.style as CaveStyle | null) ?? null,
+    // Legacy rows predate the flow column; they ran the full pipeline, so
+    // default a null read to `plan` (new rows always write an explicit value).
+    flow: (r.flow as FlowMode | null) ?? 'plan',
     repoId: r.repo_id ?? config.defaultRepoId,
     usage: {
       tokensIn: r.tokens_in,
@@ -236,6 +242,7 @@ export class Db {
     const add: [string, string][] = [
       ['effort', 'TEXT'],
       ['style', 'TEXT'],
+      ['flow', 'TEXT'],
       ['repo_id', 'TEXT'],
       ['plan_path', 'TEXT'],
       ['tokens_in', 'INTEGER NOT NULL DEFAULT 0'],
@@ -258,13 +265,14 @@ export class Db {
     model: string
     effort: EffortLevel
     style: CaveStyle
+    flow: FlowMode
     repoId: string
     now: string
   }): Task {
     this.db
       .prepare(
-        `INSERT INTO tasks (id, title, body, status, model, effort, style, repo_id, queued, created_at, updated_at)
-         VALUES (@id, @title, @body, 'backlog', @model, @effort, @style, @repoId, 0, @now, @now)`,
+        `INSERT INTO tasks (id, title, body, status, model, effort, style, flow, repo_id, queued, created_at, updated_at)
+         VALUES (@id, @title, @body, 'backlog', @model, @effort, @style, @flow, @repoId, 0, @now, @now)`,
       )
       .run(input)
     return this.getTask(input.id)!
