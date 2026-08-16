@@ -58,7 +58,8 @@ packages/web/src/
   status.ts      — statusColor() + actorColor() helpers (--status-* / --actor-* tokens)
   theme.css      — frosted-glass design tokens
   types.ts       — manual mirror of server types
-  components/     — TaskList, NewTaskForm, TaskDetail, ClarifyChat (live composer, placeholder prop), WorkerLog (tool/subagent rows)
+  workspaceLayout.ts — pure reducer for the Workspace mode's Zed-style tab-pane layout (max 2 panes, single split axis)
+  components/     — TaskList, NewTaskForm, TaskDetail, ClarifyChat (live composer, placeholder prop), WorkerLog (tool/subagent rows), WorkspaceView (Files sidebar + WorkspaceTabs center pane), WorkspaceTabs (draggable tabs — file Viewers/WorkerLog/Notes/Chat)
 ```
 
 ## Anti-Patterns

@@ -59,7 +59,7 @@ zmrng/
 │   │       ├── index.ts        — Fastify bootstrap: REST routes + WS + static serve
 │   │       ├── config.ts       — env parsing, repo registry (config/repos.json → env → legacy)
 │   │       ├── db.ts           — SQLite schema, prepared statements, idempotent migrations
-│   │       ├── types.ts        — Task/Phase/WsEvent/usage types (SOURCE OF TRUTH)
+│   │       ├── types.ts        — Task/Phase/WsEvent/usage/WorkspaceLayout types (SOURCE OF TRUTH)
 │   │       ├── runner.ts       — spawn + parse the claude child (stream-json), strip API key
 │   │       ├── phases.ts       — phase state machine + system/kickoff prompts + lane queue
 │   │       ├── worktree.ts     — git worktree create/remove per task
@@ -73,7 +73,8 @@ zmrng/
 │           ├── useWs.ts        — auto-reconnect WebSocket hook
 │           ├── types.ts        — MANUAL MIRROR of server/src/types.ts
 │           ├── status.ts       — statusColor() + actorColor() helpers (backed by --status-* / --actor-* tokens)
-│           └── components/      — TaskList, NewTaskForm, TaskDetail, ClarifyChat (always-on live composer with `placeholder` prop), WorkerLog (tool/subagent/subagent_result rows color-coded by actor)
+│           ├── workspaceLayout.ts — pure reducer for the Workspace mode's Zed-style tab-pane layout (emptyLayout/hydrateLayout/openFile/focusTab/closeTab/openPanel/moveTab/splitWith/setLogMinimized/pruneFileTabs/dropIntent); enforces panes.length ∈ {1,2} and a single split axis
+│           └── components/      — TaskList, NewTaskForm, TaskDetail, ClarifyChat (always-on live composer with `placeholder` prop), WorkerLog (tool/subagent/subagent_result rows color-coded by actor), WorkspaceView (Workspace mode: Files sidebar + WorkspaceTabs center pane, layout hydrated/persisted per task via `PerTaskUiState.layout`), WorkspaceTabs (draggable tabs for file Viewers/WorkerLog/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop)
 │   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
 │       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
 │       ├── splash/index.html   — galaxy-warp canvas loader (vanilla JS, no build); click/Enter → warp-dive → white-bloom → navigate to app; two-signal boot handshake: splash emits `splash-ready`, Rust emits `engine-ready {port}` once both sidecar + splash are ready; requires `withGlobalTauri: true` in tauri.conf.json
