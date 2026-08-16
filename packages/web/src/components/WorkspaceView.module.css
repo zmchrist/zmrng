@@ -1,15 +1,20 @@
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 240px 1fr 348px;
   gap: 12px;
   min-height: 0;
   animation: ws-in var(--spring) both;
+  transition: grid-template-columns var(--spring);
+}
+.workspaceCollapsed {
+  grid-template-columns: 240px 1fr 56px;
 }
 
-/* Shared glass slab for the two regions (Files sidebar | tab area). */
+/* Shared glass slab for the three regions (Files sidebar | tab area | task rail). */
 .sidebar,
-.center {
+.center,
+.rightbar {
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--border);
@@ -88,6 +93,99 @@
   color: var(--text-faint);
   font-size: 13px;
   line-height: 1.5;
+}
+
+/* ---- right: task rail (merged-in Tasks pane) --------------------------- */
+.rightbar {
+  display: flex;
+  flex-direction: column;
+}
+
+.brandbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.railTitle {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.rbBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ---- collapse / expand control ----------------------------------------- */
+.collapseBtn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  line-height: 1;
+  font-size: 16px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.collapseBtn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* ---- collapsed rail: mini status dots ---------------------------------- */
+.mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0 14px;
+  min-height: 0;
+  flex: 1;
+}
+
+.miniDots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+  width: 100%;
+}
+
+.miniDot {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+.miniDot:hover {
+  transform: scale(1.18);
+}
+.miniDotActive {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  border-color: var(--border-strong);
 }
 
 @keyframes ws-in {

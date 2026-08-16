@@ -13,7 +13,7 @@ import {
   type DropIntent,
 } from '../workspaceLayout'
 import { Viewer } from './Viewer'
-import { WorkerLog } from './WorkerLog'
+import { WorkerLogPanel } from './WorkerLogPanel'
 import { Notes } from './Notes'
 import { Chat } from './Chat'
 
@@ -32,6 +32,9 @@ interface Props {
   agents: AgentSummary[]
   layout: WorkspaceLayout
   onLayoutChange: (next: WorkspaceLayout) => void
+  /** Steer the running worker from the Worker-Log composer (POST …/message).
+   *  Absent ⇒ the composer is not shown (e.g. the unit harness). */
+  onMessage?: (text: string) => Promise<unknown>
 }
 
 /** Human label for a tab. Files show their basename; singletons a fixed label. */
@@ -78,7 +81,7 @@ function applyDrop(
   return splitWith(layout, id, intent)
 }
 
-export function WorkspaceTabs({ taskId, status, events, live, agents, layout, onLayoutChange }: Props) {
+export function WorkspaceTabs({ taskId, status, events, live, agents, layout, onLayoutChange, onMessage }: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
 
   const logCloseable = status != null && LOG_CLOSEABLE.has(status)
@@ -92,7 +95,7 @@ export function WorkspaceTabs({ taskId, status, events, live, agents, layout, on
       case 'file':
         return <Viewer taskId={taskId} path={tab.path ?? null} />
       case 'log':
-        return <WorkerLog events={events} live={live} />
+        return <WorkerLogPanel events={events} live={live} status={status} onMessage={onMessage} />
       case 'notes':
         return <Notes taskId={taskId} selectedPath={selectedPath} onOpen={onOpenFile} />
       case 'chat':
