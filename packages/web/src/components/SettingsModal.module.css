@@ -171,6 +171,49 @@
   font-size: 12px;
 }
 
+.rebootHint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.reboot {
+  align-self: flex-start;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-dim);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition),
+    box-shadow var(--transition);
+}
+.reboot:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-strong);
+  box-shadow: var(--hairline-soft);
+}
+.reboot:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.rebootError {
+  margin: 0;
+  color: var(--status-failed);
+  font-size: 12px;
+}
+
+.rebootNote {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 @keyframes settings-fade-in {
   from {
     opacity: 0;
