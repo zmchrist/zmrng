@@ -5,6 +5,7 @@ import {
   addTerminal,
   closeTerminal,
   emptyDock,
+  focusKind,
   setActive,
   type DockState,
 } from '../src/terminalDock'
@@ -126,5 +127,50 @@ describe('setActive', () => {
     let d = addTerminal(emptyDock(), 'term-1')
     d = addTerminal(d, 'term-2')
     expect(setActive(d, 'term-9')).toEqual(d)
+  })
+})
+
+describe('focusKind (nav-button reuse behavior)', () => {
+  it('spawns a fresh tab of the kind when none exists', () => {
+    const d = focusKind(emptyDock(), 'chat', 'chat-1')
+    expect(ids(d)).toEqual(['chat-1'])
+    expect(d.activeId).toBe('chat-1')
+    expect(d.tabs[0].kind).toBe('chat')
+  })
+
+  it('reuses the last-active tab of that kind instead of spawning', () => {
+    let d = addChat(emptyDock(), 'chat-1')
+    d = addChat(d, 'chat-2') // active: chat-2 (last-active chat)
+    d = addTerminal(d, 'term-1') // active: term-1, different kind
+    d = focusKind(d, 'chat', 'chat-3')
+    expect(ids(d)).toEqual(['chat-1', 'chat-2', 'term-1']) // no new tab spawned
+    expect(d.activeId).toBe('chat-2') // reopened on the last-active chat
+  })
+
+  it('falls back to the first tab of the kind if the last-active one was closed', () => {
+    let d = addChat(emptyDock(), 'chat-1')
+    d = addChat(d, 'chat-2') // active + last-active chat: chat-2
+    d = closeTerminal(d, 'chat-2') // last-active chat cleared, focus falls to chat-1
+    d = addTerminal(d, 'term-1') // active: term-1, different kind
+    d = focusKind(d, 'chat', 'chat-3')
+    expect(ids(d)).toEqual(['chat-1', 'term-1'])
+    expect(d.activeId).toBe('chat-1')
+  })
+
+  it('is a same-state focus when the dock is already on that kind (idempotent)', () => {
+    let d = addTerminal(emptyDock(), 'term-1')
+    d = focusKind(d, 'terminal', 'term-2')
+    expect(ids(d)).toEqual(['term-1']) // no duplicate spawned
+    expect(d.activeId).toBe('term-1')
+  })
+
+  it('tracks last-active per kind independently across interleaved focus switches', () => {
+    let d = addTerminal(emptyDock(), 'term-1')
+    d = addChat(d, 'chat-1')
+    d = addTerminal(d, 'term-2') // last-active terminal: term-2
+    d = setActive(d, 'chat-1') // last-active chat: chat-1, active now chat-1
+    d = focusKind(d, 'terminal', 'term-3')
+    expect(d.activeId).toBe('term-2') // reused, not term-3
+    expect(ids(d)).toEqual(['term-1', 'chat-1', 'term-2'])
   })
 })
