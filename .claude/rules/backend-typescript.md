@@ -6,6 +6,8 @@
 - better-sqlite3 for persistence (WAL mode)
 - Node `child_process` (`spawn`) for the headless `claude` runner
 - `node-pty` for the Workspace bottom-dock terminal's PTY sessions (`GET /ws/terminal`)
+- The same headless `claude` runner (`GET /ws/chat`) powers a standalone agent-chat
+  session, independent of the task lifecycle
 - Pino for structured logging
 - **No shared package** — `packages/server/src/types.ts` is the source of truth,
   manually mirrored into `packages/web/src/types.ts`
@@ -19,6 +21,7 @@ packages/server/src/
   types.ts     — Task/WsEvent/usage/RepoTarget types (SOURCE OF TRUTH)
   runner.ts    — spawn + parse the claude child (stream-json); strip API key
   terminal.ts  — TerminalManager: node-pty shells for the Workspace bottom-dock terminal
+  chatAgent.ts — ChatManager: standalone chat `claude` Runners (GET /ws/chat), same RunnerFactory seam as TaskManager
   phases.ts    — phase state machine + system/kickoff prompts + lane queue
   worktree.ts  — git worktree create/remove per task
   ws.ts        — WebSocket broadcast hub
@@ -42,7 +45,10 @@ spawn('claude', args, { cwd, env })
 ```
 `terminal.ts`'s `TerminalManager.create()` mirrors this same strip (gated on
 `config.authMode === 'oauth'`) before handing the child env to its `PtyFactory`, so a
-`claude` launched inside the Workspace terminal is Max-OAuth-only too.
+`claude` launched inside the Workspace terminal is Max-OAuth-only too. `chatAgent.ts`'s
+`ChatManager` does **not** repeat the strip — it spawns through the same `RunnerFactory`
+seam as `TaskManager` (`Runner`'s own constructor already strips the key), so it is
+Max-OAuth-only by construction.
 
 ### Repo registry (config)
 Targets load with a fallback chain — `config/repos.json` → `ZMRNG_REPOS` env →
