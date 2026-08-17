@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import styles from './WorkspaceView.module.css'
 import type {
   AgentSummary,
@@ -22,9 +22,14 @@ import { NewTaskForm } from './NewTaskForm'
 import { TaskList } from './TaskList'
 import { TaskControls } from './TaskControls'
 import { TerminalDock } from './TerminalDock'
+import { NotesPanel } from './NotesPanel'
 import { STATUS_LABEL, statusColor } from '../status'
 import { hydrateLayout, openFile, pruneFileTabs } from '../workspaceLayout'
 import { usePanelMount } from '../usePanelMount'
+
+/** Clamp bounds for the Files/Notes split ratio (Files' share of the column). */
+const MIN_SPLIT = 0.15
+const MAX_SPLIT = 0.85
 
 interface Props {
   task: Task | undefined
@@ -49,9 +54,18 @@ interface Props {
   tasksOpen: boolean
   workspaceOpen: boolean
   filesOpen: boolean
+  notesOpen: boolean
   onTasksOpenChange: (v: boolean) => void
   onWorkspaceOpenChange: (v: boolean) => void
   onFilesOpenChange: (v: boolean) => void
+  onNotesOpenChange: (v: boolean) => void
+  /** The Notes panel's own worktree/task choice (persisted global UI state). */
+  notesTaskId: string | null
+  onNotesTaskIdChange: (id: string) => void
+  /** Files' share (0..1) of the left column's height when Files + Notes are
+   *  both open (persisted global UI state). */
+  filesNotesSplit: number
+  onFilesNotesSplitChange: (ratio: number) => void
   settingsOpen: boolean
   onSettingsToggle: () => void
   onSelect: (id: string) => void
@@ -124,9 +138,15 @@ export function WorkspaceView({
   tasksOpen,
   workspaceOpen,
   filesOpen,
+  notesOpen,
   onTasksOpenChange,
   onWorkspaceOpenChange,
   onFilesOpenChange,
+  onNotesOpenChange,
+  notesTaskId,
+  onNotesTaskIdChange,
+  filesNotesSplit,
+  onFilesNotesSplitChange,
   settingsOpen,
   onSettingsToggle,
   onSelect,
@@ -232,26 +252,74 @@ export function WorkspaceView({
 
   const selectedPath = activeFilePath(layout)
 
-  // The Files sidebar, the Workspace centre pane, and the Tasks rail each toggle
-  // from the bottom nav bar. Each stays mounted a beat past its toggle-off so its
-  // closing (minimize) animation can play — `usePanelMount` — while `columns`
-  // reserves grid space for the whole mounted lifetime so the exit animation has
-  // room to play before its column collapses.
+  // The Notes panel auto-follows the app's selected task (if it has a
+  // worktree) whenever the selection changes; the operator's own dropdown
+  // pick otherwise stands. Derived during render — the "adjust state on a
+  // prop change" pattern used elsewhere in this file — rather than an effect.
+  const [notesSyncedFor, setNotesSyncedFor] = useState<string | null>(null)
+  if (selectedId !== notesSyncedFor) {
+    setNotesSyncedFor(selectedId)
+    if (selectedId && selectedId !== notesTaskId && tasks.some((t) => t.id === selectedId && t.worktree)) {
+      onNotesTaskIdChange(selectedId)
+    }
+  }
+
+  // The Files sidebar, the Notes panel, the Workspace centre pane, and the
+  // Tasks rail each toggle from the bottom nav bar. Each stays mounted a beat
+  // past its toggle-off so its closing (minimize) animation can play —
+  // `usePanelMount` — while `columns` reserves grid space for the whole
+  // mounted lifetime so the exit animation has room to play before its
+  // column collapses. Files and Notes share the left column: both mounted ⇒
+  // a 50/50-by-default vertical split (draggable); only one mounted ⇒ it
+  // fills the column.
   const sidebarMounted = usePanelMount(filesOpen)
+  const notesMounted = usePanelMount(notesOpen)
   const centerMounted = usePanelMount(workspaceOpen)
   const rightMounted = usePanelMount(tasksOpen)
+  const leftMounted = sidebarMounted || notesMounted
+  const leftSplit = sidebarMounted && notesMounted
 
   const columns: string[] = []
-  if (sidebarMounted) columns.push('240px')
+  if (leftMounted) columns.push('240px')
   if (centerMounted) columns.push('minmax(0, 1fr)')
   if (rightMounted) columns.push(railCollapsed ? '56px' : '348px')
   const gridTemplateColumns = columns.join(' ') || '0px'
 
+  const leftColumnRef = useRef<HTMLDivElement | null>(null)
+  const dragRef = useRef<{ startY: number; startSplit: number } | null>(null)
+  const onSplitDragStart = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      const columnHeight = leftColumnRef.current?.clientHeight || 1
+      dragRef.current = { startY: e.clientY, startSplit: filesNotesSplit }
+      const onMove = (ev: PointerEvent) => {
+        const drag = dragRef.current
+        if (!drag) return
+        const delta = (ev.clientY - drag.startY) / columnHeight
+        const next = Math.max(MIN_SPLIT, Math.min(MAX_SPLIT, drag.startSplit + delta))
+        onFilesNotesSplitChange(next)
+      }
+      const onUp = () => {
+        dragRef.current = null
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [filesNotesSplit, onFilesNotesSplitChange],
+  )
+
   return (
     <div className={styles.shell}>
       <div className={styles.workspace} style={{ gridTemplateColumns }}>
+        {leftMounted && (
+        <div ref={leftColumnRef} className={styles.leftColumn}>
         {sidebarMounted && (
-        <aside className={`${styles.sidebar} ${filesOpen ? styles.paneEnter : styles.paneExit}`}>
+        <aside
+          className={`${styles.sidebar} ${filesOpen ? styles.paneEnter : styles.paneExit}`}
+          style={leftSplit ? { flex: `${filesNotesSplit} 1 0` } : undefined}
+        >
         <div className={styles.sidebarHead}>
           <span className={styles.sidebarTitle}>{task ? 'Files' : 'Projects'}</span>
           <button
@@ -278,6 +346,33 @@ export function WorkspaceView({
           )}
         </div>
       </aside>
+      )}
+
+      {leftSplit && (
+        <div
+          className={styles.leftDivider}
+          onPointerDown={onSplitDragStart}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize Files/Notes split"
+        />
+      )}
+
+      {notesMounted && (
+        <aside
+          className={`${styles.notesAside} ${notesOpen ? styles.paneEnter : styles.paneExit}`}
+          style={leftSplit ? { flex: `${1 - filesNotesSplit} 1 0` } : undefined}
+        >
+          <NotesPanel
+            tasks={tasks}
+            notesTaskId={notesTaskId}
+            onNotesTaskIdChange={onNotesTaskIdChange}
+            selectedPath={selectedPath}
+            onOpen={openInLayout}
+          />
+        </aside>
+      )}
+      </div>
       )}
 
       {centerMounted && (
@@ -376,10 +471,12 @@ export function WorkspaceView({
         tasksOpen={tasksOpen}
         workspaceOpen={workspaceOpen}
         filesOpen={filesOpen}
+        notesOpen={notesOpen}
         settingsOpen={settingsOpen}
         onTasksToggle={() => onTasksOpenChange(!tasksOpen)}
         onWorkspaceToggle={() => onWorkspaceOpenChange(!workspaceOpen)}
         onFilesToggle={() => onFilesOpenChange(!filesOpen)}
+        onNotesToggle={() => onNotesOpenChange(!notesOpen)}
         onSettingsToggle={onSettingsToggle}
       />
     </div>

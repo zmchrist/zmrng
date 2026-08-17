@@ -142,6 +142,9 @@ export interface GlobalUiState {
   mode?: WorkspaceMode
   railCollapsed?: boolean
   railCards?: Record<string, boolean>
+  /** Pane split ratios (keyed by pane-pair id). `filesNotesSplit` is the Files
+   *  pane's share (0..1) of the left column's height when Files + Notes are
+   *  both open; the rest is reserved for future resizable panes. */
   splitSizes?: Record<string, number>
   /** Bottom-dock terminal chrome. Only open/height persist — shells are ephemeral. */
   terminalDock?: { open?: boolean; height?: number }
@@ -150,20 +153,30 @@ export interface GlobalUiState {
    * pane each toggle from the bottom nav bar; both default closed so a fresh
    * load shows only the Files tree. The Files sidebar also toggles from the
    * bottom nav bar and defaults OPEN (preserves the prior locked-left
-   * behavior). The Terminal pane's visibility lives in `terminalDock.open`;
-   * the Settings modal is an ephemeral overlay that is never persisted.
+   * behavior). The Notes panel also toggles from the bottom nav bar and
+   * defaults CLOSED; when both Files and Notes are open they share the left
+   * column, split vertically (Files on top). The Terminal pane's visibility
+   * lives in `terminalDock.open`; the Settings modal is an ephemeral overlay
+   * that is never persisted.
    */
-  panes?: { tasks?: boolean; workspace?: boolean; files?: boolean }
+  panes?: { tasks?: boolean; workspace?: boolean; files?: boolean; notes?: boolean }
+  /**
+   * The task/worktree the Notes panel is currently showing. Independent of
+   * the app's selected task — the panel auto-syncs to the selected task (if
+   * it has a worktree) but a manual pick in the panel's own dropdown wins
+   * until the selected task changes again.
+   */
+  notesTaskId?: string | null
 }
 
 // ---- workspace tab-pane layout (Zed-style collapsible tabs) ----
 
-/** Kind of a workspace tab. `file` tabs carry a `path`; the rest are singletons. */
-export type WsTabKind = 'file' | 'log' | 'notes' | 'chat'
+/** Kind of a workspace tab. `file` tabs carry a `path`; `log`/`chat` are singletons. */
+export type WsTabKind = 'file' | 'log' | 'chat'
 
 /**
  * One tab in a workspace pane. `id` is an opaque key: `file:<path>` for files,
- * or the literal singleton kind (`log` / `notes` / `chat`) so a singleton can
+ * or the literal singleton kind (`log` / `chat`) so a singleton can
  * never be opened twice. `path` is set only when `kind === 'file'`.
  */
 export interface WsTab {

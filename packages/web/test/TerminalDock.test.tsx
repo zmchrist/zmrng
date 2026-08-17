@@ -15,10 +15,12 @@ function renderDock(overrides: Partial<React.ComponentProps<typeof TerminalDock>
     tasksOpen: false,
     workspaceOpen: false,
     filesOpen: true,
+    notesOpen: false,
     settingsOpen: false,
     onTasksToggle: vi.fn(),
     onWorkspaceToggle: vi.fn(),
     onFilesToggle: vi.fn(),
+    onNotesToggle: vi.fn(),
     onSettingsToggle: vi.fn(),
     ...overrides,
   }
@@ -49,6 +51,25 @@ describe('<TerminalDock> nav bar', () => {
   it('shows "Show files" when filesOpen is false', () => {
     renderDock({ filesOpen: false })
     expect(screen.getByRole('button', { name: /show files/i })).toBeInTheDocument()
+  })
+
+  it('renders a Notes toggle positioned after Files and before Settings', () => {
+    renderDock()
+    const buttons = screen.getAllByRole('button')
+    const labels = buttons.map((b) => b.textContent)
+    const filesIdx = labels.findIndex((l) => l?.includes('Files'))
+    const notesIdx = labels.findIndex((l) => l?.includes('Notes'))
+    const settingsIdx = labels.findIndex((l) => l?.includes('Settings'))
+    expect(notesIdx).toBeGreaterThan(filesIdx)
+    expect(settingsIdx).toBeGreaterThan(notesIdx)
+  })
+
+  it('reflects notesOpen in aria-pressed and calls onNotesToggle when clicked', () => {
+    const { props } = renderDock({ notesOpen: true })
+    const notesBtn = screen.getByRole('button', { name: /hide notes/i })
+    expect(notesBtn).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(notesBtn)
+    expect(props.onNotesToggle).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -81,10 +102,12 @@ function Harness() {
       tasksOpen={false}
       workspaceOpen={false}
       filesOpen={true}
+      notesOpen={false}
       settingsOpen={false}
       onTasksToggle={() => {}}
       onWorkspaceToggle={() => {}}
       onFilesToggle={() => {}}
+      onNotesToggle={() => {}}
       onSettingsToggle={() => {}}
     />
   )

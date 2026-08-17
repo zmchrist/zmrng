@@ -28,10 +28,12 @@ interface Props {
   tasksOpen: boolean
   workspaceOpen: boolean
   filesOpen: boolean
+  notesOpen: boolean
   settingsOpen: boolean
   onTasksToggle: () => void
   onWorkspaceToggle: () => void
   onFilesToggle: () => void
+  onNotesToggle: () => void
   onSettingsToggle: () => void
 }
 
@@ -51,10 +53,12 @@ export function TerminalDock({
   tasksOpen,
   workspaceOpen,
   filesOpen,
+  notesOpen,
   settingsOpen,
   onTasksToggle,
   onWorkspaceToggle,
   onFilesToggle,
+  onNotesToggle,
   onSettingsToggle,
 }: Props) {
   const [dock, setDock] = useState(emptyDock)
@@ -265,6 +269,18 @@ export function TerminalDock({
             ⌂
           </span>
           <span className={styles.navLabel}>Files</span>
+        </button>
+        <button
+          type="button"
+          className={`${styles.navBtn} ${notesOpen ? styles.navBtnActive : ''}`}
+          aria-pressed={notesOpen}
+          aria-label={notesOpen ? 'Hide notes' : 'Show notes'}
+          onClick={onNotesToggle}
+        >
+          <span className={styles.glyph} aria-hidden="true">
+            ▤
+          </span>
+          <span className={styles.navLabel}>Notes</span>
         </button>
         <button
           type="button"
