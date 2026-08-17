@@ -21,8 +21,9 @@
   grid-template-columns: 240px 1fr 56px;
 }
 
-/* Shared glass slab for the three regions (Files sidebar | tab area | task rail). */
+/* Shared glass slab for the regions (Files sidebar | Notes panel | tab area | task rail). */
 .sidebar,
+.notesAside,
 .center,
 .rightbar {
   min-width: 0;
@@ -36,10 +37,39 @@
   overflow: hidden;
 }
 
+/* ---- left column: Files sidebar + Notes panel share the same grid column,
+   stacked and split vertically when both are open (Files on top). ---- */
+.leftColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.leftDivider {
+  flex: 0 0 auto;
+  height: 6px;
+  border-radius: var(--radius-sm);
+  cursor: row-resize;
+  touch-action: none;
+}
+.leftDivider:hover {
+  background: var(--surface-hover);
+}
+
 /* ---- left: file-tree sidebar ------------------------------------------- */
 .sidebar {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+/* ---- left: Notes panel --------------------------------------------------- */
+.notesAside {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .sidebarHead {
