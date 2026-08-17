@@ -100,6 +100,19 @@ export default function App() {
         if (e.taskId !== selectedIdRef.current) return
         setLive((prev) => prev + e.text)
         break
+      case 'task-removed':
+        setTasks((prev) => {
+          const next = { ...prev }
+          delete next[e.taskId]
+          return next
+        })
+        if (e.taskId === selectedIdRef.current) {
+          selectedIdRef.current = null
+          setSelectedId(null)
+          setLive('')
+          setEvents([])
+        }
+        break
     }
   }, [])
 
@@ -235,16 +248,16 @@ export default function App() {
       </div>
       <AuthBanner />
 
-      {mode === 'board' && (
+      <div style={{ display: mode === 'board' ? 'contents' : 'none' }}>
         <Board
           tasks={sorted}
           repos={repos}
           onSelectTask={onBoardSelectTask}
           onArchive={onBoardArchive}
         />
-      )}
+      </div>
 
-      {mode === 'workspace' && (
+      <div style={{ display: mode === 'workspace' ? 'contents' : 'none' }}>
         <WorkspaceView
           task={selected}
           events={events}
@@ -277,8 +290,9 @@ export default function App() {
           onInterrupt={() => (selected ? api.interrupt(selected.id) : Promise.resolve())}
           onDone={() => (selected ? api.done(selected.id) : Promise.resolve())}
           onCancel={() => (selected ? api.cancel(selected.id) : Promise.resolve())}
+          onDelete={() => (selected ? api.deleteTask(selected.id) : Promise.resolve())}
         />
-      )}
+      </div>
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
