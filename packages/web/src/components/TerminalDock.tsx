@@ -4,6 +4,7 @@ import { Terminal } from './Terminal'
 import { ChatPane } from './ChatPane'
 import { addChat, addTerminal, closeTerminal, emptyDock, setActive } from '../terminalDock'
 import type { DockTab } from '../terminalDock'
+import { usePanelMount } from '../usePanelMount'
 
 /** Clamp bounds for the dock height (px). */
 const MIN_H = 120
@@ -26,9 +27,11 @@ interface Props {
   /** Bottom-nav pane visibility + toggles (the other panes this bar controls). */
   tasksOpen: boolean
   workspaceOpen: boolean
+  filesOpen: boolean
   settingsOpen: boolean
   onTasksToggle: () => void
   onWorkspaceToggle: () => void
+  onFilesToggle: () => void
   onSettingsToggle: () => void
 }
 
@@ -47,9 +50,11 @@ export function TerminalDock({
   onHeightChange,
   tasksOpen,
   workspaceOpen,
+  filesOpen,
   settingsOpen,
   onTasksToggle,
   onWorkspaceToggle,
+  onFilesToggle,
   onSettingsToggle,
 }: Props) {
   const [dock, setDock] = useState(emptyDock)
@@ -125,13 +130,14 @@ export function TerminalDock({
   )
 
   const clampedHeight = Math.max(MIN_H, Math.min(MAX_H, height))
+  const bodyMounted = usePanelMount(open)
 
   return (
     <div className={styles.dock}>
-      {dock.tabs.length > 0 && (
+      {bodyMounted && dock.tabs.length > 0 && (
         <div
-          className={styles.body}
-          style={{ height: clampedHeight, display: open ? 'flex' : 'none' }}
+          className={`${styles.body} ${open ? styles.paneEnter : styles.paneExit}`}
+          style={{ height: clampedHeight }}
         >
           <div
             className={styles.resizeHandle}
@@ -247,6 +253,18 @@ export function TerminalDock({
             ▦
           </span>
           <span className={styles.navLabel}>Workspace</span>
+        </button>
+        <button
+          type="button"
+          className={`${styles.navBtn} ${filesOpen ? styles.navBtnActive : ''}`}
+          aria-pressed={filesOpen}
+          aria-label={filesOpen ? 'Hide files' : 'Show files'}
+          onClick={onFilesToggle}
+        >
+          <span className={styles.glyph} aria-hidden="true">
+            ⌂
+          </span>
+          <span className={styles.navLabel}>Files</span>
         </button>
         <button
           type="button"
