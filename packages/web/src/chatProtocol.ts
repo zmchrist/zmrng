@@ -3,16 +3,18 @@
 // produce exactly the frames the server's `parseChatClientMsg` accepts;
 // `parseChatServerMsg` is a tolerant guard over the server -> client frames.
 
-import type { CaveStyle, ChatServerMsg, EffortLevel } from './types'
+import type { Attachment, CaveStyle, ChatServerMsg, EffortLevel } from './types'
 
 /** Encode a client `start` frame — (re)spawn a session with the chosen controls. */
 export function encodeStart(model: string, effort: EffortLevel, style: CaveStyle): string {
   return JSON.stringify({ type: 'start', model, effort, style })
 }
 
-/** Encode a client `input` frame (one operator turn -> server). */
-export function encodeInput(text: string): string {
-  return JSON.stringify({ type: 'input', text })
+/** Encode a client `input` frame (one operator turn -> server), optionally with attachments. */
+export function encodeInput(text: string, attachments?: Attachment[]): string {
+  return attachments && attachments.length > 0
+    ? JSON.stringify({ type: 'input', text, attachments })
+    : JSON.stringify({ type: 'input', text })
 }
 
 /** Encode a client `interrupt` frame (stop the in-flight turn). */

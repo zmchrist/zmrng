@@ -20,6 +20,21 @@ describe('client encoders', () => {
     expect(JSON.parse(encodeInput('hello agent'))).toEqual({ type: 'input', text: 'hello agent' })
   })
 
+  it('encodeInput without attachments is byte-identical to the pre-feature frame', () => {
+    // No `attachments` key at all — the existing chat path must not regress.
+    expect(encodeInput('hi')).toBe(JSON.stringify({ type: 'input', text: 'hi' }))
+    expect(encodeInput('hi', [])).toBe(JSON.stringify({ type: 'input', text: 'hi' }))
+  })
+
+  it('encodeInput round-trips the attachments field when present', () => {
+    const att = { kind: 'image' as const, mediaType: 'image/png', dataBase64: 'YQ==' }
+    expect(JSON.parse(encodeInput('see this', [att]))).toEqual({
+      type: 'input',
+      text: 'see this',
+      attachments: [att],
+    })
+  })
+
   it('encodeInterrupt produces a bare interrupt frame', () => {
     expect(JSON.parse(encodeInterrupt())).toEqual({ type: 'interrupt' })
   })

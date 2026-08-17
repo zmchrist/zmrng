@@ -13,6 +13,7 @@ import type {
   AgentSummary,
   ChatMessage,
   UiState,
+  Attachment,
 } from './types'
 
 /** Pull a text delta out of one parsed SSE `data:` payload (OpenAI-compatible + plain shapes). */
@@ -173,17 +174,18 @@ export const api = {
       flow?: FlowMode
       repoId?: string
     },
+    attachments?: Attachment[],
   ) =>
     req<Task>('/api/tasks', {
       method: 'POST',
-      body: JSON.stringify({ title, body, ...opts }),
+      body: JSON.stringify({ title, body, ...opts, attachments }),
     }),
   start: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/start`, { method: 'POST' }),
-  message: (id: string, text: string) =>
+  message: (id: string, text: string, attachments?: Attachment[]) =>
     req<{ ok: true }>(`/api/tasks/${id}/message`, {
       method: 'POST',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, attachments }),
     }),
   resume: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/resume`, { method: 'POST' }),

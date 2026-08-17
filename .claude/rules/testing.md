@@ -36,7 +36,10 @@ Run: `npm test` (both), `npm run test:watch` (both), or `-w @zmrng/server` /
   near-miss cases that must NOT match (tokens quoted in prose, non-PR GitHub URLs).
 - **`runner.ts`** — `summarizeTool()`, `summarizeResult()`, `parseUsage()`,
   `assistantText()`, `partialDelta()`, fed real-shaped stream-json lines checked
-  in under `test/fixtures/stream-json.jsonl`.
+  in under `test/fixtures/stream-json.jsonl`; `buildUserMessage()` (text-only shape,
+  image/document content-block ordering, mixed attachments) and `sanitizeAttachments()`
+  (accepts a valid image/PDF, rejects a bad media type, rejects an oversized decoded
+  payload, caps the array at `MAX_ATTACHMENTS`, and tolerates non-array/malformed input).
 - **`db.ts`** — temp-file SQLite; `ensureColumns()` migration + idempotency and
   atomic `addUsage()` accumulation.
 - **`config.ts`** — `resolveRegistry()` precedence (`repos.json` → env → legacy),

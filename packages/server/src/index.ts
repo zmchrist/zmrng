@@ -12,6 +12,7 @@ import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { TerminalManager, parseClientMsg } from './terminal.js'
 import { ChatManager, parseChatClientMsg } from './chatAgent.js'
+import { sanitizeAttachments } from './runner.js'
 import { listWorktreeFiles, selfUpdate } from './worktree.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
@@ -63,7 +64,10 @@ function asFlow(v: unknown): FlowMode | undefined {
 // the git-pull + build steps still run either way.
 const IS_DEV = import.meta.url.endsWith('.ts')
 
-const app = Fastify({ logger: true })
+// Raise the default 1 MB body limit: base64 image/PDF attachments on the
+// task-create and steer routes easily exceed it (a small image is already ~1 MB
+// encoded). 32 MB comfortably covers the 8 MB-per-file × 10 attachment cap.
+const app = Fastify({ logger: true, bodyLimit: 32 * 1024 * 1024 })
 const db = new Db(config.dbPath)
 const hub = new WsHub()
 const manager = new TaskManager(db, (e: WsEvent) => hub.broadcast(e))
@@ -211,21 +215,25 @@ app.post('/api/tasks', (req, reply) => {
         style?: string
         flow?: string
         repoId?: string
+        attachments?: unknown
       }
     | undefined
   const title = body?.title?.trim()
   const taskBody = body?.body?.trim()
-  if (!title || !taskBody) {
-    return reply.code(400).send({ error: 'title and body are required' })
+  const attachments = sanitizeAttachments(body?.attachments)
+  // A title is always required, but an image-only description (no body text) is valid.
+  if (!title || !(taskBody || attachments.length > 0)) {
+    return reply.code(400).send({ error: 'title and a body or attachment are required' })
   }
   return manager.createTask(
     title,
-    taskBody,
+    taskBody ?? '',
     body?.model,
     asEffort(body?.effort),
     asStyle(body?.style),
     body?.repoId,
     asFlow(body?.flow),
+    attachments,
   )
 })
 
@@ -384,11 +392,14 @@ app.post('/api/tasks/:id/start', async (req, reply) => {
 
 app.post('/api/tasks/:id/message', (req, reply) => {
   const { id } = req.params as { id: string }
-  const body = req.body as { text?: string } | undefined
-  const text = body?.text?.trim()
-  if (!text) return reply.code(400).send({ error: 'text is required' })
+  const body = req.body as { text?: string; attachments?: unknown } | undefined
+  const text = body?.text?.trim() ?? ''
+  const attachments = sanitizeAttachments(body?.attachments)
+  if (!text && attachments.length === 0) {
+    return reply.code(400).send({ error: 'text or an attachment is required' })
+  }
   try {
-    manager.message(id, text)
+    manager.message(id, text, attachments.length > 0 ? attachments : undefined)
     return { ok: true }
   } catch (err) {
     return reply.code(400).send({ error: errMsg(err) })
@@ -568,7 +579,7 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
       const msg = parseChatClientMsg(String(raw))
       if (!msg) return
       if (msg.type === 'start') startSession(msg.model, msg.effort, msg.style)
-      else if (msg.type === 'input') session?.send(msg.text)
+      else if (msg.type === 'input') session?.send(msg.text, msg.attachments)
       else if (msg.type === 'interrupt') session?.interrupt()
     } catch (err) {
       app.log.error({ err }, 'chat message handler failed')
