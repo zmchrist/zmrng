@@ -1,8 +1,9 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
-import { listWorktreeFiles } from '../src/worktree.js'
+import { listWorktreeFiles, selfUpdate } from '../src/worktree.js'
 import type { WorktreeFileNode } from '../src/types.js'
 
 let dir: string
@@ -103,5 +104,101 @@ describe('listWorktreeFiles', () => {
     expect(scanned).toContain('keep.txt')
     expect(scanned).not.toContain('.gitignore')
     expect(scanned).not.toContain('.github')
+  })
+})
+
+/** Runs a git command for real against a temp repo — no network, no mocking. */
+function git(dir: string, args: string[]): void {
+  execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
+}
+
+// Uses a non-`main`/`master` branch name for these temp repos: the operator's
+// global pre-commit hook blocks direct commits on `main`/`master` on ANY repo
+// on this machine (a real safety net, not something to bypass), and every
+// test here commits directly. `selfUpdate`'s `defaultBranch` param is exactly
+// what makes that side-steppable without touching the hook.
+const DEFAULT_BRANCH = 'trunk'
+
+function initRepo(): string {
+  const repo = realpathSync(mkdtempSync(path.join(tmpdir(), 'zmrng-selfupdate-')))
+  git(repo, ['init', '-q', '-b', DEFAULT_BRANCH])
+  git(repo, ['config', 'user.email', 'test@example.com'])
+  git(repo, ['config', 'user.name', 'zmrng test'])
+  git(repo, ['config', 'commit.gpgsign', 'false'])
+  writeFileSync(path.join(repo, 'README.md'), '# temp repo\n')
+  git(repo, ['add', '-A'])
+  git(repo, ['commit', '-q', '-m', 'init'])
+  return repo
+}
+
+/** Clones `origin` into a fresh temp dir with a tracked `origin` remote. */
+function cloneRepo(origin: string): string {
+  const repo = realpathSync(mkdtempSync(path.join(tmpdir(), 'zmrng-selfupdate-clone-')))
+  git(repo, ['clone', '-q', origin, repo])
+  git(repo, ['config', 'user.email', 'test@example.com'])
+  git(repo, ['config', 'user.name', 'zmrng test'])
+  git(repo, ['config', 'commit.gpgsign', 'false'])
+  return repo
+}
+
+describe('selfUpdate', () => {
+  let origin: string
+  let local: string
+
+  beforeEach(() => {
+    origin = initRepo()
+    local = cloneRepo(origin)
+  })
+  afterEach(() => {
+    rmSync(origin, { recursive: true, force: true })
+    rmSync(local, { recursive: true, force: true })
+  })
+
+  it('fast-forwards local main to a new commit on origin/main', async () => {
+    writeFileSync(path.join(origin, 'NEW.md'), 'fresh content\n')
+    git(origin, ['add', '-A'])
+    git(origin, ['commit', '-q', '-m', 'new commit on origin'])
+
+    await selfUpdate(local, DEFAULT_BRANCH)
+
+    const head = execFileSync('git', ['-C', local, 'rev-parse', 'HEAD']).toString().trim()
+    const originHead = execFileSync('git', ['-C', origin, 'rev-parse', 'HEAD']).toString().trim()
+    expect(head).toBe(originHead)
+  })
+
+  it('is a no-op when already up to date with origin/main', async () => {
+    const before = execFileSync('git', ['-C', local, 'rev-parse', 'HEAD']).toString().trim()
+    await selfUpdate(local, DEFAULT_BRANCH)
+    const after = execFileSync('git', ['-C', local, 'rev-parse', 'HEAD']).toString().trim()
+    expect(after).toBe(before)
+  })
+
+  it('aborts with an error on a dirty working tree, never touching the change', async () => {
+    writeFileSync(path.join(origin, 'NEW.md'), 'fresh content\n')
+    git(origin, ['add', '-A'])
+    git(origin, ['commit', '-q', '-m', 'new commit on origin'])
+    writeFileSync(path.join(local, 'README.md'), 'local edit, uncommitted\n')
+
+    await expect(selfUpdate(local, DEFAULT_BRANCH)).rejects.toThrow(/uncommitted changes/)
+
+    const local_readme = execFileSync('git', ['-C', local, 'status', '--porcelain']).toString()
+    expect(local_readme).toContain('README.md')
+  })
+
+  it('aborts with an error when local history has diverged (not fast-forwardable)', async () => {
+    writeFileSync(path.join(origin, 'NEW.md'), 'fresh content\n')
+    git(origin, ['add', '-A'])
+    git(origin, ['commit', '-q', '-m', 'new commit on origin'])
+
+    writeFileSync(path.join(local, 'LOCAL.md'), 'local-only commit\n')
+    git(local, ['add', '-A'])
+    git(local, ['commit', '-q', '-m', 'local-only commit'])
+
+    await expect(selfUpdate(local, DEFAULT_BRANCH)).rejects.toThrow(/diverged/)
+  })
+
+  it('aborts with an error when not on the default branch', async () => {
+    git(local, ['checkout', '-q', '-b', 'other-branch'])
+    await expect(selfUpdate(local, DEFAULT_BRANCH)).rejects.toThrow(/checked out on other-branch/)
   })
 })
