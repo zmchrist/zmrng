@@ -167,7 +167,9 @@ describe('<TerminalDock> chat persistence', () => {
     render(<Harness />)
     expect(onChatMount).toHaveBeenCalledWith('chat-9')
     expect(screen.getByTestId('chat-chat-9')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Hide terminal' })).toBeInTheDocument()
+    // The dock is open and focused on the restored chat tab, not a terminal.
+    expect(screen.getByRole('button', { name: 'Hide chat' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show terminal' })).toBeInTheDocument()
   })
 
   it('does not restore terminal tabs — only chat', () => {
@@ -188,9 +190,51 @@ describe('<TerminalDock> chat persistence', () => {
 
   it('persists a newly spawned chat tab so it round-trips through loadChatOrder', () => {
     render(<Harness />)
-    fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show chat' }))
     const { order } = loadChatOrder()
     expect(order).toHaveLength(1)
     expect(screen.getByTestId(`chat-${order[0]}`)).toBeInTheDocument()
+  })
+})
+
+describe('<TerminalDock> nav bar Chat/Terminal reuse behavior', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    onMount.mockClear()
+    onChatMount.mockClear()
+  })
+
+  it('reopening Chat via the nav button reuses the existing chat, never spawns a second one', () => {
+    render(<Harness />)
+    // First click: dock closed, no chat yet — spawns one chat and opens.
+    fireEvent.click(screen.getByRole('button', { name: 'Show chat' }))
+    expect(onChatMount).toHaveBeenCalledTimes(1)
+    const chatId = onChatMount.mock.calls[0][0] as string
+
+    // Second click: dock open, chat already focused — minimizes, no spawn.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide chat' }))
+    expect(onChatMount).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId(`chat-${chatId}`)).toBeInTheDocument() // still mounted, hidden
+
+    // Third click: reopens the SAME chat tab — still no second spawn.
+    fireEvent.click(screen.getByRole('button', { name: 'Show chat' }))
+    expect(onChatMount).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId(`chat-${chatId}`)).toBeInTheDocument()
+  })
+
+  it('clicking Chat while Terminal is focused switches focus without closing the dock', () => {
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show terminal' })) // opens, auto-seeds a terminal
+    expect(onMount).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show chat' }))
+    expect(onChatMount).toHaveBeenCalledTimes(1) // spawned since no chat existed yet
+    expect(screen.getByRole('button', { name: 'Hide chat' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show terminal' })).toBeInTheDocument() // still open, just unfocused
+
+    // Clicking Terminal now just refocuses it — dock stays open, no re-seed.
+    fireEvent.click(screen.getByRole('button', { name: 'Show terminal' }))
+    expect(onMount).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Hide terminal' })).toBeInTheDocument()
   })
 })
