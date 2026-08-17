@@ -1,13 +1,18 @@
-// Pure, React-free reducer for the bottom-dock terminal tab state. Mirrors the
-// style of `workspaceLayout.ts`: every function takes a state and returns a NEW
-// state. This state is EPHEMERAL — it is not persisted (PTYs are recreated fresh
-// each load), so only the open tabs and which one is focused live here. Ids are
-// passed in by the caller (never Math.random/Date.now) so the module stays pure
-// and its tests are deterministic.
+// Pure, React-free reducer for the bottom-dock tab state (terminal AND chat
+// tabs, which coexist in one ordered list). Mirrors the style of
+// `workspaceLayout.ts`: every function takes a state and returns a NEW state.
+// This state is EPHEMERAL — it is not persisted (PTYs and chat sessions are
+// recreated fresh each load), so only the open tabs and which one is focused
+// live here. Ids are passed in by the caller (never Math.random/Date.now) so the
+// module stays pure and its tests are deterministic.
 
-/** One terminal tab. `id` is an opaque, caller-supplied stable key. */
+/** Which kind of bottom-dock tab: a PTY terminal or a standalone agent chat. */
+export type DockTabKind = 'terminal' | 'chat'
+
+/** One dock tab. `id` is an opaque, caller-supplied stable key. */
 export interface DockTab {
   id: string
+  kind: DockTabKind
 }
 
 /** The dock's ephemeral tab state: an ordered tab list plus the focused id. */
@@ -16,14 +21,24 @@ export interface DockState {
   activeId: string | null
 }
 
-/** The default dock state: no terminals, nothing focused. */
+/** The default dock state: no tabs, nothing focused. */
 export function emptyDock(): DockState {
   return { tabs: [], activeId: null }
 }
 
-/** Append a terminal with the given id and focus it. */
+/** Append a tab of the given kind and focus it. */
+export function addTab(state: DockState, id: string, kind: DockTabKind): DockState {
+  return { tabs: [...state.tabs, { id, kind }], activeId: id }
+}
+
+/** Append a terminal tab and focus it (back-compat shorthand for `addTab`). */
 export function addTerminal(state: DockState, id: string): DockState {
-  return { tabs: [...state.tabs, { id }], activeId: id }
+  return addTab(state, id, 'terminal')
+}
+
+/** Append a chat tab and focus it. */
+export function addChat(state: DockState, id: string): DockState {
+  return addTab(state, id, 'chat')
 }
 
 /**

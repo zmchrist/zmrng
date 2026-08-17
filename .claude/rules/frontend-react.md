@@ -6,6 +6,8 @@
 - WebSocket for real-time updates (`useWs` hook)
 - `@xterm/xterm` + `@xterm/addon-fit` for the Workspace bottom-dock terminal (own
   WebSocket to `/ws/terminal` per instance, not the `useWs` hub connection)
+- Standalone agent chat (`ChatPane`) — own WebSocket to `/ws/chat` per instance, same
+  own-socket pattern as the terminal, not the `useWs` hub connection
 - **No router** — single-page layout; two top-level modes, Workspace (default) and Board
 - **No shared package** — `packages/web/src/types.ts` is a MANUAL mirror of the server types
 
@@ -54,6 +56,13 @@ terminal owns a dedicated PTY rather than sharing task/claude event broadcast st
 Frames are encoded/decoded with the pure helpers in `terminalProtocol.ts`
 (`encodeInput`/`encodeResize`/`parseServerMsg`), never hand-rolled JSON inline.
 
+### Chat WebSocket (same own-socket pattern as Terminal)
+`ChatPane.tsx` opens its own `WebSocket` directly to `/ws/chat` per mounted instance,
+mirroring `Terminal.tsx` — not the `useWs` hub, since each chat tab owns a dedicated
+`claude` session. Frames are encoded/decoded with the pure helpers in
+`chatProtocol.ts` (`encodeStart`/`encodeInput`/`encodeInterrupt`/`parseChatServerMsg`),
+never hand-rolled JSON inline.
+
 ### Type mirror
 `packages/web/src/types.ts` mirrors `packages/server/src/types.ts`. When a server
 type changes, update this file in the same change — there is no shared package.
@@ -68,10 +77,12 @@ packages/web/src/
   theme.css      — frosted-glass design tokens
   types.ts       — manual mirror of server types
   workspaceLayout.ts — pure reducer for the Workspace mode's Zed-style tab-pane layout (max 2 panes, single split axis)
-  terminalDock.ts — pure reducer for the bottom-dock terminal's ephemeral tab list (emptyDock/addTerminal/closeTerminal/setActive)
+  terminalDock.ts — pure reducer for the bottom-dock's ephemeral tab list, terminal AND chat tabs coexisting in one ordered list (emptyDock/addTab/addTerminal/addChat/closeTerminal/setActive)
   terminalProtocol.ts — pure wire helpers for /ws/terminal (encodeInput/encodeResize/parseServerMsg)
+  chatProtocol.ts — pure wire helpers for /ws/chat (encodeStart/encodeInput/encodeInterrupt/parseChatServerMsg)
+  chatThread.ts   — React-free bubble-thread reducer for the standalone chat pane (emptyThread/pushUser/appendPartial/finalizeAssistant/pushToolNote/endTurn/resetThread)
   themes.ts       — theme catalog (11 themes: one per color + black/white/grey) + pure helpers (buildThemeVars/applyTheme/loadStoredTheme/saveStoredTheme), persisted to localStorage only
-  components/     — TaskList, NewTaskForm, ClarifyChat (live composer, placeholder prop), WorkerLog (read-only tool/subagent rows), WorkerLogPanel (WorkerLog + steer composer), TaskControls (compact selected-task card + dropdown), WorkspaceView (locked-left Files sidebar + toggleable WorkspaceTabs center + toggleable task rail right bar + global TerminalDock; Files tree shows the Projects dir when no task is selected), WorkspaceTabs (draggable tabs — file Viewers/WorkerLogPanel/Notes/Chat), TerminalDock (Zed-style bottom dock + bottom nav bar of Terminal/Tasks/Workspace/Settings pane toggles, ctrl+` toggle, drag-resize), SettingsModal (ephemeral focused overlay; theme swatch grid + dark/light toggle, backed by `themes.ts`), Terminal (xterm.js glue, one WebSocket per instance)
+  components/     — TaskList, NewTaskForm, ClarifyChat (live composer, placeholder prop), WorkerLog (read-only tool/subagent rows), WorkerLogPanel (WorkerLog + steer composer), TaskControls (compact selected-task card + dropdown), WorkspaceView (locked-left Files sidebar + toggleable WorkspaceTabs center + toggleable task rail right bar + global TerminalDock; Files tree shows the Projects dir when no task is selected), WorkspaceTabs (draggable tabs — file Viewers/WorkerLogPanel/Notes/Chat), TerminalDock (Zed-style bottom dock + bottom nav bar of Terminal/Chat/Tasks/Workspace/Settings pane toggles, `+💬` new-chat tab-strip affordance, ctrl+` toggle, drag-resize), ChatPane (standalone agent-chat bubble thread, one WebSocket per instance to /ws/chat, per-tab model/effort/style selects, Stop button while busy), SettingsModal (ephemeral focused overlay; theme swatch grid + dark/light toggle, backed by `themes.ts`), Terminal (xterm.js glue, one WebSocket per instance)
 ```
 
 ## Anti-Patterns
