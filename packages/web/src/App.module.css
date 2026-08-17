@@ -11,10 +11,11 @@
   grid-template-columns: 56px 1fr;
 }
 
-/* Full-width strip below the macOS traffic lights: holds the mode tabs and is
-   the window drag handle in the native Tauri window via data-tauri-drag-region
+/* Full-width strip: holds the connection dot, brand, and mode tabs, and is the
+   window drag handle in the native Tauri window via data-tauri-drag-region
    (inert in the browser dev view). Interactive children (tabs) sit above the
-   drag region and stay clickable.
+   drag region and stay clickable. Left-justified snug against the pane edge
+   (browser dev view only — no native traffic-light reserve here).
    NOTE: -webkit-app-region is Electron-only; WKWebView (Tauri v2) ignores it.
    Drag is driven solely by the data-tauri-drag-region attribute. */
 .topbar {
@@ -23,7 +24,7 @@
   justify-content: flex-start;
   gap: 12px;
   height: 44px;
-  padding: 0 6px 0 84px; /* left pad clears the macOS traffic lights */
+  padding: 0 6px 0 0;
   flex-shrink: 0;
 }
 
@@ -64,11 +65,10 @@
   box-shadow: var(--glow-accent);
 }
 
-.topbarRight {
+.topbarLeft {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-left: auto;
+  gap: 12px;
 }
 
 .brand {
