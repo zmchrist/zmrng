@@ -110,6 +110,24 @@ describe('resolveRegistry auto-scan of ZMRNG_PROJECTS_DIR', () => {
     })
     expect(repos.map((r) => r.id)).toContain('proj-a')
   })
+
+  it('a stale repos.json entry does not shadow a same-id repo auto-scanned from the projects dir', () => {
+    // Regression: mergeRepos deduped by id BEFORE validity was checked, so a
+    // curated but broken repos.json entry claimed the id first, got filtered
+    // out as invalid, and the real auto-scanned repo of the same id never
+    // took its place — the id vanished from the registry entirely.
+    const projectsDir = path.join(root, 'projects')
+    execFileSync('git', ['init', '-q'], { cwd: mkdirp(path.join(projectsDir, 'pheme')) })
+    const configDir = configDirWith([{ id: 'pheme', path: '/fake/stale-path-does-not-exist' }])
+    const { repos } = resolveRegistry({
+      configDir,
+      projectsDir,
+      fallbackRoot: root,
+      env: {},
+    })
+    const pheme = repos.find((r) => r.id === 'pheme')
+    expect(pheme?.path).toBe(path.join(projectsDir, 'pheme'))
+  })
 })
 
 describe('resolveRegistry empty-registry guard (issue #16)', () => {
