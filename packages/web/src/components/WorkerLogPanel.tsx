@@ -3,15 +3,7 @@ import styles from './WorkerLogPanel.module.css'
 import type { TaskEvent, TaskStatus } from '../types'
 import { WorkerLog } from './WorkerLog'
 import { ClarifyChat } from './ClarifyChat'
-
-/** Live phases where the operator can type to steer the worker — a mirror of the
- *  gating the Tasks-page composer used before the Workspace merge. */
-const LIVE: ReadonlySet<string> = new Set([
-  'clarify',
-  'planning',
-  'executing',
-  'validating',
-])
+import { LIVE_STATUSES } from '../status'
 
 interface Props {
   events: TaskEvent[]
@@ -38,7 +30,7 @@ export function WorkerLogPanel({ events, live, status, onMessage }: Props) {
     }
   }
 
-  const canSteer = !!onMessage && status != null && LIVE.has(status)
+  const canSteer = !!onMessage && status != null && LIVE_STATUSES.has(status)
 
   return (
     <div className={styles.panel}>

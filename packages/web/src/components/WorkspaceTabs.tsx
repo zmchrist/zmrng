@@ -24,6 +24,9 @@ const DND_MIME = 'application/x-zmrng-tab'
 
 interface Props {
   taskId: string | null
+  /** Title of the task whose Worker Log this pane shows — the log tab is
+   *  labeled with it (falls back to "Worker Log" when absent). */
+  taskTitle?: string | null
   status: TaskStatus | null
   events: TaskEvent[]
   live: string
@@ -33,15 +36,43 @@ interface Props {
   /** Steer the running worker from the Worker-Log composer (POST …/message).
    *  Absent ⇒ the composer is not shown (e.g. the unit harness). */
   onMessage?: (text: string) => Promise<unknown>
+  /** Other tasks currently in a live phase (excluding this pane's own task) —
+   *  rendered as extra tabs right next to the Worker Log tab, so a second (or
+   *  third) concurrently running task's log is one click away without going
+   *  back to the task rail. */
+  liveTasks?: { id: string; title: string }[]
+  /** Switch the selected task — called when a live-task tab is clicked. */
+  onSelectTask?: (id: string) => void
 }
 
-/** Human label for a tab. Files show their basename; singletons a fixed label. */
-function tabLabel(tab: WsTab): string {
+const MAX_LABEL_LEN = 24
+
+/** Truncate a title to a tab-friendly length. */
+function truncateTitle(title: string): string {
+  return title.length > MAX_LABEL_LEN ? `${title.slice(0, MAX_LABEL_LEN - 1)}…` : title
+}
+
+/** Truncated labels for a set of task tabs, disambiguated with a short id
+ *  suffix only when two entries' truncated titles collide. */
+function dedupeTaskLabels(entries: { id: string; title: string }[]): Map<string, string> {
+  const truncated = entries.map((e) => ({ id: e.id, label: truncateTitle(e.title) }))
+  const counts = new Map<string, number>()
+  for (const e of truncated) counts.set(e.label, (counts.get(e.label) ?? 0) + 1)
+  const labels = new Map<string, string>()
+  for (const e of truncated) {
+    labels.set(e.id, (counts.get(e.label) ?? 0) > 1 ? `${e.label} #${e.id.slice(0, 4)}` : e.label)
+  }
+  return labels
+}
+
+/** Human label for a tab. Files show their basename; the log tab shows its
+ *  task's (deduped, truncated) title; chat is a fixed label. */
+function tabLabel(tab: WsTab, logLabel: string): string {
   switch (tab.kind) {
     case 'file':
       return tab.path ? (tab.path.split('/').pop() ?? tab.path) : 'File'
     case 'log':
-      return 'Worker Log'
+      return logLabel
     case 'chat':
       return 'Chat'
   }
@@ -70,11 +101,27 @@ function applyDrop(
   return splitWith(layout, id, intent)
 }
 
-export function WorkspaceTabs({ taskId, status, events, live, agents, layout, onLayoutChange, onMessage }: Props) {
+export function WorkspaceTabs({
+  taskId,
+  taskTitle = null,
+  status,
+  events,
+  live,
+  agents,
+  layout,
+  onLayoutChange,
+  onMessage,
+  liveTasks = [],
+  onSelectTask,
+}: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
 
   const logCloseable = status != null && LOG_CLOSEABLE.has(status)
   const openKinds = new Set(layout.panes.flatMap((p) => p.tabs.map((t) => t.kind)))
+
+  const logEntryId = taskId ?? '__no-task__'
+  const labels = dedupeTaskLabels([{ id: logEntryId, title: taskTitle ?? 'Worker Log' }, ...liveTasks])
+  const logLabel = labels.get(logEntryId) ?? 'Worker Log'
 
   function content(tab: WsTab): ReactNode {
     switch (tab.kind) {
@@ -124,7 +171,7 @@ export function WorkspaceTabs({ taskId, status, events, live, agents, layout, on
       >
         <div className={styles.tabStrip} role="tablist" aria-label="Open tabs">
           {pane.tabs.map((tab) => {
-            const label = tabLabel(tab)
+            const label = tabLabel(tab, logLabel)
             const selected = tab.id === pane.activeId
             const isLog = tab.kind === 'log'
             const showClose = !isLog || logCloseable
@@ -171,6 +218,20 @@ export function WorkspaceTabs({ taskId, status, events, live, agents, layout, on
               </div>
             )
           })}
+          {pane.tabs.some((t) => t.kind === 'log') &&
+            liveTasks.map((t) => (
+              <div className={styles.tab} role="presentation" key={`live:${t.id}`}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={false}
+                  className={styles.tabLabel}
+                  onClick={() => onSelectTask?.(t.id)}
+                >
+                  {labels.get(t.id) ?? t.title}
+                </button>
+              </div>
+            ))}
         </div>
         <div className={styles.paneBody} role="tabpanel">
           {active ? (
