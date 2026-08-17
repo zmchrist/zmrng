@@ -3,6 +3,8 @@ import websocket from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { existsSync, utimesSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import type { WebSocket } from 'ws'
 import { config } from './config.js'
 import { Db } from './db.js'
@@ -10,7 +12,7 @@ import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { TerminalManager, parseClientMsg } from './terminal.js'
 import { ChatManager, parseChatClientMsg } from './chatAgent.js'
-import { listWorktreeFiles } from './worktree.js'
+import { listWorktreeFiles, selfUpdate } from './worktree.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
 import { parseStreamedText } from './chat.js'
@@ -31,6 +33,8 @@ import type {
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
+
+const execFileAsync = promisify(execFile)
 
 const EFFORTS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const STYLES: readonly CaveStyle[] = [
@@ -53,9 +57,10 @@ function asFlow(v: unknown): FlowMode | undefined {
 }
 
 // True only under `npm run dev` (tsx runs the .ts source directly). In a built
-// deploy the entry is dist/index.js. The restart button touches the entry file
-// to trigger a tsx-watch respawn, which is meaningless (and would hang dead)
-// without tsx supervising — so the endpoint is gated on this.
+// deploy the entry is dist/index.js. The Settings reboot's restart step touches
+// the entry file to trigger a tsx-watch respawn, which is meaningless (and
+// would hang dead) without tsx supervising — so that step is gated on this;
+// the git-pull + build steps still run either way.
 const IS_DEV = import.meta.url.endsWith('.ts')
 
 const app = Fastify({ logger: true })
@@ -85,21 +90,43 @@ app.get('/api/config', () => ({
 
 app.get('/api/repos', () => config.repos)
 
-// Dev-only: restart the server so a fresh boot re-reads config/repos.json,
-// .env, and starts with clean worker state. Touching the entry file's mtime
-// makes tsx-watch send SIGTERM (→ our shutdown() handler kills live workers +
-// checkpoints the WAL) then respawn a fresh process. Guarded to dev because a
-// built deploy (node dist/index.js) has no supervisor — it would exit and stay
-// dead. Reply first, then touch, so the client gets its 200 before we go down.
-app.post('/api/restart', (_req, reply) => {
-  if (!IS_DEV) {
-    return reply
-      .code(409)
-      .send({ error: 'restart is only available under `npm run dev` (tsx watch)' })
+// Self-update reboot (Settings panel): fast-forward zmrng's own checkout to
+// origin/main, rebuild, then restart so the fresh code takes effect. Runs in
+// three steps, any of which can fail and abort the rest:
+//   1. selfUpdate() — ff-only git pull; throws (409) on a dirty tree or a
+//      diverged/unmerged history, never touching uncommitted work.
+//   2. `npm run build` — rebuilds server + web from the freshly pulled code.
+//   3. touch the entry file to trigger a tsx-watch respawn (dev only — a
+//      built deploy has no supervisor, so step 3 is skipped there and the
+//      response reports `restarted: false`; steps 1-2 still ran).
+// Reply before touching the entry so the client gets its response before the
+// process goes down.
+app.post('/api/restart', async (_req, reply) => {
+  try {
+    await selfUpdate(config.repoRoot)
+  } catch (err) {
+    app.log.error({ err }, 'self-update git pull failed')
+    return reply.code(409).send({ error: errMsg(err) })
   }
+
+  try {
+    await execFileAsync('npm', ['run', 'build'], {
+      cwd: config.repoRoot,
+      maxBuffer: 1024 * 1024 * 32,
+    })
+  } catch (err) {
+    app.log.error({ err }, 'self-update build failed')
+    return reply.code(500).send({ error: `build failed: ${errMsg(err)}` })
+  }
+
+  if (!IS_DEV) {
+    app.log.info('self-update pulled + rebuilt zmrng; no supervisor to restart (not tsx watch)')
+    return reply.send({ ok: true, restarted: false })
+  }
+
   const entry = fileURLToPath(import.meta.url)
-  app.log.info({ entry }, 'restart requested — touching entry to trigger tsx watch respawn')
-  reply.send({ ok: true })
+  app.log.info({ entry }, 'self-update pulled + rebuilt — touching entry to trigger tsx watch respawn')
+  reply.send({ ok: true, restarted: true })
   setTimeout(() => {
     try {
       const now = new Date()

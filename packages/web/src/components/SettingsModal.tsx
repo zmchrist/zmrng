@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import styles from './SettingsModal.module.css'
 import { usePanelMount } from '../usePanelMount'
+import { api } from '../api'
 import {
   THEMES,
   buildThemeVars,
@@ -14,17 +15,21 @@ import {
 interface Props {
   open: boolean
   onClose: () => void
+  /** WS connection state — used to detect the down→up transition after a
+   *  reboot so the page can be reloaded once the server is actually back. */
+  connected: boolean
 }
 
 /**
  * Focused settings overlay: a blurred backdrop that dims everything behind it
- * and a small centered panel. First real content: a theme swatch grid plus a
- * sun/moon toggle for dark/light mode, persisted to localStorage. Closes on
- * the × button, a backdrop click, or Escape. Stays mounted a beat past `open`
- * going false so the closing (minimize) animation can play before it
- * actually unmounts.
+ * and a small centered panel. Content: a theme swatch grid plus a sun/moon
+ * toggle for dark/light mode (persisted to localStorage), and a reboot
+ * control that pulls zmrng's own repo to origin/main, rebuilds, and restarts
+ * the dev server so fresh code takes effect. Closes on the × button, a
+ * backdrop click, or Escape. Stays mounted a beat past `open` going false so
+ * the closing (minimize) animation can play before it actually unmounts.
  */
-export function SettingsModal({ open, onClose }: Props) {
+export function SettingsModal({ open, onClose, connected }: Props) {
   const mounted = usePanelMount(open)
   const [themeId, setThemeId] = useState(() => loadStoredTheme().themeId)
   const [mode, setMode] = useState<ThemeMode>(() => loadStoredTheme().mode)
@@ -37,6 +42,42 @@ export function SettingsModal({ open, onClose }: Props) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
+
+  // Reboot: git pull (ff-only) → npm run build → dev-server restart. The
+  // socket drops mid-response when the server actually restarts; useWs
+  // auto-reconnects and flips `connected` back, at which point we reload so
+  // the page picks up the freshly built assets. Outside `npm run dev` the
+  // server has no supervisor to restart, so the pull+build still runs but the
+  // socket never drops — that path just clears `rebooting` with a note.
+  const [rebooting, setRebooting] = useState(false)
+  const [rebootError, setRebootError] = useState<string | null>(null)
+  const [rebootNote, setRebootNote] = useState<string | null>(null)
+  const sawDropRef = useRef(false)
+  const onReboot = async () => {
+    sawDropRef.current = false
+    setRebootError(null)
+    setRebootNote(null)
+    setRebooting(true)
+    try {
+      const res = await api.restart()
+      if (!res.restarted) {
+        setRebooting(false)
+        setRebootNote('pulled + rebuilt — restart not supported outside `npm run dev`; reload manually')
+        return
+      }
+    } catch (err) {
+      setRebooting(false)
+      setRebootError(err instanceof Error ? err.message : String(err))
+      return
+    }
+    // Fallback clear — the reconnect effect below also clears on socket return.
+    setTimeout(() => setRebooting(false), 8000)
+  }
+  useEffect(() => {
+    if (!rebooting) return
+    if (!connected) sawDropRef.current = true
+    else if (sawDropRef.current) window.location.reload()
+  }, [rebooting, connected])
 
   const selectTheme = (id: string) => {
     setThemeId(id)
@@ -121,6 +162,27 @@ export function SettingsModal({ open, onClose }: Props) {
               })}
             </div>
             <p className={styles.swatchLabel}>{getTheme(themeId).label}</p>
+          </div>
+
+          <div className={styles.section}>
+            <div className={styles.sectionHead}>
+              <span className={styles.sectionTitle}>Reboot</span>
+            </div>
+            <p className={styles.rebootHint}>
+              Pull zmrng&apos;s own repo to <code>origin/main</code> (fast-forward only), rebuild,
+              and restart so fresh code takes effect.
+            </p>
+            <button
+              type="button"
+              className={styles.reboot}
+              onClick={() => void onReboot()}
+              disabled={rebooting}
+              title="git pull (ff-only) + npm run build + restart"
+            >
+              {rebooting ? 'rebooting…' : 'reboot'}
+            </button>
+            {rebootError && <p className={styles.rebootError}>{rebootError}</p>}
+            {rebootNote && <p className={styles.rebootNote}>{rebootNote}</p>}
           </div>
         </div>
       </div>
