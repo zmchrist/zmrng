@@ -23,7 +23,7 @@ import { TaskList } from './TaskList'
 import { TaskControls } from './TaskControls'
 import { TerminalDock } from './TerminalDock'
 import { NotesPanel } from './NotesPanel'
-import { STATUS_LABEL, statusColor } from '../status'
+import { LIVE_STATUSES, STATUS_LABEL, statusColor } from '../status'
 import { hydrateLayout, openFile, pruneFileTabs } from '../workspaceLayout'
 import { usePanelMount } from '../usePanelMount'
 
@@ -187,6 +187,12 @@ export function WorkspaceView({
   }, [])
 
   const taskId = task?.id ?? null
+  // Other currently-live tasks (excluding this one) — rendered as extra tabs
+  // right next to the Worker Log tab so a second concurrently running task's
+  // log is one click away, without going back to the task rail.
+  const liveTasks = tasks
+    .filter((t) => t.id !== taskId && LIVE_STATUSES.has(t.status))
+    .map((t) => ({ id: t.id, title: t.title }))
   // Re-fetch when the worktree appears/changes (it is null until the branch is cut).
   const worktree = task?.worktree ?? null
   // With a task selected, show its worktree; with none, the Projects-dir tree.
@@ -379,6 +385,7 @@ export function WorkspaceView({
         <div className={`${styles.center} ${workspaceOpen ? styles.paneEnter : styles.paneExit}`}>
           <WorkspaceTabs
             taskId={taskId}
+            taskTitle={task?.title ?? null}
             status={task?.status ?? null}
             events={events}
             live={live}
@@ -386,6 +393,8 @@ export function WorkspaceView({
             layout={layout}
             onLayoutChange={applyLayout}
             onMessage={task ? onMessage : undefined}
+            liveTasks={liveTasks}
+            onSelectTask={onSelect}
           />
         </div>
       )}

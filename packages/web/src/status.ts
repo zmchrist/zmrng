@@ -26,6 +26,15 @@ export function actorColor(actor: string): string {
   return KNOWN_ACTORS.has(slug) ? `var(--actor-${slug})` : 'var(--actor-default)'
 }
 
+/** Phases where a task is actively worked by the agent — used to gate the
+ *  steering composer and to decide which tasks get a Worker-Log tab. */
+export const LIVE_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  'clarify',
+  'planning',
+  'executing',
+  'validating',
+])
+
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   backlog: 'Backlog',
   clarify: 'Clarifying',
