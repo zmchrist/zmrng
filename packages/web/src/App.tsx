@@ -203,25 +203,25 @@ export default function App() {
   return (
     <div className={styles.app}>
       <div className={styles.topbar} data-tauri-drag-region>
-        <span className={styles.brand}>zmrng</span>
-        <nav className={styles.modeTabs} aria-label="Workspace mode">
-          {MODES.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              className={`${styles.modeTab} ${mode === m.id ? styles.modeTabActive : ''}`}
-              aria-pressed={mode === m.id}
-              onClick={() => setMode(m.id)}
-            >
-              {m.label}
-            </button>
-          ))}
-        </nav>
-        <span className={styles.topbarRight}>
+        <span className={styles.topbarLeft}>
           <span
             className={`${styles.dot} ${connected ? styles.dotOn : ''}`}
             title={connected ? 'connected' : 'disconnected'}
           />
+          <span className={styles.brand}>zmrng</span>
+          <nav className={styles.modeTabs} aria-label="Workspace mode">
+            {MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={`${styles.modeTab} ${mode === m.id ? styles.modeTabActive : ''}`}
+                aria-pressed={mode === m.id}
+                onClick={() => setMode(m.id)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </nav>
         </span>
       </div>
       <AuthBanner />
