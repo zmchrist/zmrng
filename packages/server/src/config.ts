@@ -346,18 +346,31 @@ function scanProjectsDir(projectsDir: string): RepoTarget[] {
   return out
 }
 
-/** Merge repo lists in priority order, deduping by id and by resolved path (first wins). */
+/**
+ * Merge repo lists in priority order, deduping by id and by resolved path
+ * (first wins) — EXCEPT when the first-seen entry for an id is not a real git
+ * repo and a later entry for the same id is: the later, valid entry wins. This
+ * stops a stale curated `repos.json` entry (bad path) from shadowing a same-id
+ * repo the projects-dir auto-scan would otherwise have supplied, only to then
+ * get dropped itself as invalid — which previously made the id vanish
+ * entirely instead of falling through to the valid repo.
+ */
 function mergeRepos(lists: RepoTarget[][]): RepoTarget[] {
-  const byId = new Set<string>()
+  const byId = new Map<string, RepoTarget>()
   const byPath = new Set<string>()
-  const out: RepoTarget[] = []
   for (const r of lists.flat()) {
-    if (byId.has(r.id) || byPath.has(r.path)) continue
-    byId.add(r.id)
+    const existing = byId.get(r.id)
+    if (existing) {
+      if (isGitRepo(existing.path) || !isGitRepo(r.path)) continue
+      byId.set(r.id, r)
+      byPath.add(r.path)
+      continue
+    }
+    if (byPath.has(r.path)) continue
+    byId.set(r.id, r)
     byPath.add(r.path)
-    out.push(r)
   }
-  return out
+  return [...byId.values()]
 }
 
 /**
@@ -509,4 +522,20 @@ export const config: Config = buildConfig()
 /** Resolve a repo target by id from the registry. */
 export function repoById(id: string): RepoTarget | undefined {
   return config.repos.find((r) => r.id === id)
+}
+
+/**
+ * Re-run the repo registry resolution against the live filesystem. `config.repos`
+ * is a boot-time singleton (frozen once at server start), so a repo directory
+ * created or renamed under PROJECTS_DIR after boot never appears until this is
+ * called — used by `GET /api/repos` so the task-creation dropdown reflects
+ * newly added repos on a plain page refresh, no server restart required.
+ */
+export function liveRepos(): RepoTarget[] {
+  return resolveRegistry({
+    configDir: CONFIG_DIR,
+    projectsDir: PROJECTS_DIR,
+    selfRepo: resolveSelfRepo(),
+    fallbackRoot: REPO_ROOT,
+  }).repos
 }
