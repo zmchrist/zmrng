@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useState } from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { TerminalDock } from '../src/components/TerminalDock'
+import { loadChatOrder, loadChatThread, saveChatOrder, saveChatThread } from '../src/chatPersistence'
 
 /** Dock rendered closed (no terminal mounted, so no `/ws/terminal` socket is
  *  opened) — enough to exercise the nav bar's pane toggles, including the
@@ -68,6 +69,20 @@ vi.mock('../src/components/Terminal', () => ({
   },
 }))
 
+// ChatPane owns a real WebSocket to /ws/chat — stub it the same way as
+// Terminal so these tests stay hermetic and only exercise the dock's own
+// hydrate/persist wiring around chat tabs.
+const onChatMount = vi.fn()
+vi.mock('../src/components/ChatPane', () => ({
+  ChatPane: ({ id }: { id: string }) => {
+    useState(() => {
+      onChatMount(id)
+      return null
+    })
+    return <div data-testid={`chat-${id}`}>{id}</div>
+  },
+}))
+
 /** Stateful harness mirroring how WorkspaceView/App own the dock's persisted chrome. */
 function Harness() {
   const [open, setOpen] = useState(false)
@@ -113,5 +128,46 @@ describe('<TerminalDock>', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show terminal' }))
     expect(onMount).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId(`term-${mountedId}`)).toBeInTheDocument()
+  })
+})
+
+describe('<TerminalDock> chat persistence', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    onMount.mockClear()
+    onChatMount.mockClear()
+  })
+
+  it('auto-reopens a persisted chat tab (and the dock body) on load', () => {
+    saveChatOrder(['chat-9'], 'chat-9')
+    saveChatThread('chat-9', [{ kind: 'user', text: 'hi' }])
+    render(<Harness />)
+    expect(onChatMount).toHaveBeenCalledWith('chat-9')
+    expect(screen.getByTestId('chat-chat-9')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide terminal' })).toBeInTheDocument()
+  })
+
+  it('does not restore terminal tabs — only chat', () => {
+    saveChatOrder(['chat-9'], 'chat-9')
+    render(<Harness />)
+    expect(onMount).not.toHaveBeenCalled()
+    expect(onChatMount).toHaveBeenCalledWith('chat-9')
+  })
+
+  it('closing a chat tab clears its persisted transcript and order entry', () => {
+    saveChatOrder(['chat-9'], 'chat-9')
+    saveChatThread('chat-9', [{ kind: 'user', text: 'hi' }])
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('button', { name: /close chat 1/i }))
+    expect(loadChatThread('chat-9')).toEqual([])
+    expect(loadChatOrder().order).toEqual([])
+  })
+
+  it('persists a newly spawned chat tab so it round-trips through loadChatOrder', () => {
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
+    const { order } = loadChatOrder()
+    expect(order).toHaveLength(1)
+    expect(screen.getByTestId(`chat-${order[0]}`)).toBeInTheDocument()
   })
 })
