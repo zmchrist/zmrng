@@ -58,14 +58,20 @@ export default function App() {
   )
   // Bottom-nav pane visibility: Tasks rail + Workspace center pane persist
   // globally (both default closed → a fresh load shows only the Files tree).
+  // The Files sidebar defaults OPEN, preserving its prior locked-left behavior.
   const tasksOpen = ui.state.global.panes?.tasks ?? false
   const workspaceOpen = ui.state.global.panes?.workspace ?? false
+  const filesOpen = ui.state.global.panes?.files ?? true
   const setTasksOpen = useCallback(
     (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, tasks: v } }),
     [ui],
   )
   const setWorkspaceOpen = useCallback(
     (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, workspace: v } }),
+    [ui],
+  )
+  const setFilesOpen = useCallback(
+    (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, files: v } }),
     [ui],
   )
   // Settings is an ephemeral modal overlay — never persisted.
@@ -270,8 +276,10 @@ export default function App() {
           onDockHeightChange={setDockHeight}
           tasksOpen={tasksOpen}
           workspaceOpen={workspaceOpen}
+          filesOpen={filesOpen}
           onTasksOpenChange={setTasksOpen}
           onWorkspaceOpenChange={setWorkspaceOpen}
+          onFilesOpenChange={setFilesOpen}
           settingsOpen={settingsOpen}
           onSettingsToggle={() => setSettingsOpen((v) => !v)}
           onSelect={select}
