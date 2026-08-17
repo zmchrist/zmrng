@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, vi } from 'vitest'
 import {
   assistantText,
   summarizeTool,
@@ -8,8 +8,21 @@ import {
   parseUsage,
   buildUserMessage,
   sanitizeAttachments,
+  Runner,
+  type RunnerCallbacks,
 } from '../src/runner.js'
 import type { Attachment } from '../src/types.js'
+
+// Redirect the `claude` binary to a trivial real Node process for the Runner
+// exit/send test below — never spawns the actual claude CLI (hermetic).
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return {
+    ...actual,
+    spawn: (_cmd: string, _args: readonly string[], opts: unknown) =>
+      actual.spawn(process.execPath, ['-e', 'process.exit(0)'], opts as never),
+  }
+})
 
 // Fed from REAL-shaped captured stream-json lines checked in under fixtures/.
 // Each line is one `claude --output-format stream-json` event; we parse the
@@ -227,5 +240,53 @@ describe('sanitizeAttachments', () => {
     expect(sanitizeAttachments([{ mediaType: 'image/gif', dataBase64: 'YQ==', name: 'cat.gif' }])).toEqual([
       { kind: 'image', mediaType: 'image/gif', dataBase64: 'YQ==', name: 'cat.gif' },
     ])
+  })
+})
+
+describe('Runner.send after the child has exited', () => {
+  // Regression test: sending a turn (or an interrupt) after the underlying
+  // `claude` child has already exited must never crash the host process.
+  // Writing to a dead child's stdin surfaces as an async EPIPE 'error' event
+  // on the stream; with no listener on that stream, Node treats it as an
+  // unhandled error and kills the whole server.
+  function callbacks(onExit: () => void): RunnerCallbacks {
+    return {
+      onSession: () => {},
+      onAssistantText: () => {},
+      onPartial: () => {},
+      onResult: () => {},
+      onToolUse: () => {},
+      onSubagentResult: () => {},
+      onExit,
+      onSpawnError: () => {},
+    }
+  }
+
+  it('send() does not throw or crash the process once the child has exited', async () => {
+    const uncaught: unknown[] = []
+    const onUncaught = (err: unknown): void => {
+      uncaught.push(err)
+    }
+    process.on('uncaughtException', onUncaught)
+
+    try {
+      const exited = new Promise<void>((resolve) => {
+        const runner = new Runner(
+          { cwd: process.cwd(), model: 'sonnet', effort: 'medium', systemPrompt: 'x' },
+          callbacks(() => {
+            expect(() => runner.send('hello')).not.toThrow()
+            expect(() => runner.interrupt()).not.toThrow()
+            resolve()
+          }),
+        )
+      })
+      await exited
+      // The EPIPE from writing to a dead child's stdin surfaces asynchronously;
+      // give it a couple of ticks to (not) blow up as an unhandled exception.
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(uncaught).toEqual([])
+    } finally {
+      process.off('uncaughtException', onUncaught)
+    }
   })
 })
