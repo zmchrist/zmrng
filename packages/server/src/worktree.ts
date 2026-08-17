@@ -373,6 +373,46 @@ export async function syncLocalAfterMerge(
 }
 
 /**
+ * Fast-forward `repoRoot`'s checked-out `defaultBranch` to `origin/<defaultBranch>`.
+ * Used by the Settings "reboot" self-update flow to bring zmrng's own checkout
+ * up to date before rebuilding + restarting. Throws with a human-readable
+ * message (surfaced to the operator) rather than silently degrading, unlike
+ * {@link syncLocalAfterMerge} — a reboot the operator explicitly triggered
+ * should fail loudly if it can't actually update:
+ *   - dirty working tree → abort (never touches uncommitted work)
+ *   - not on `defaultBranch` (or detached HEAD) → abort
+ *   - diverged from origin (not fast-forwardable) → abort
+ */
+export async function selfUpdate(repoRoot: string, defaultBranch = 'main'): Promise<void> {
+  try {
+    await git(repoRoot, ['fetch', 'origin', '--quiet'])
+  } catch (err) {
+    throw new Error(`git fetch origin failed: ${errMsg(err)}`, { cause: err })
+  }
+
+  const dirty = (await git(repoRoot, ['status', '--porcelain'])).length > 0
+  if (dirty) {
+    throw new Error('working tree has uncommitted changes — aborted self-update')
+  }
+
+  let current: string
+  try {
+    current = await git(repoRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+  } catch {
+    throw new Error('repo is in detached HEAD — aborted self-update')
+  }
+  if (current !== defaultBranch) {
+    throw new Error(`checked out on ${current}, not ${defaultBranch} — aborted self-update`)
+  }
+
+  try {
+    await git(repoRoot, ['merge', '--ff-only', `origin/${defaultBranch}`])
+  } catch {
+    throw new Error(`local ${defaultBranch} has diverged from origin/${defaultBranch} — not fast-forwardable`)
+  }
+}
+
+/**
  * Directory names that are pruned from the worktree file listing: version
  * control, dependency, and build-output dirs that are heavy and rarely useful
  * for the operator to browse.
