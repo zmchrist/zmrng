@@ -239,6 +239,12 @@ export class Runner {
     })
 
     this.child.on('error', (err) => this.cb.onSpawnError(err))
+    // Without a listener, an async write failure (e.g. EPIPE from writing to
+    // stdin after the child has already exited) is an unhandled stream
+    // 'error' event, which crashes the whole process.
+    this.child.stdin.on('error', () => {
+      // dead child; send()/interrupt() below already guard the write itself
+    })
     this.child.stdout.setEncoding('utf8')
     this.child.stdout.on('data', (chunk: string) => this.onStdout(chunk))
     this.child.stderr.setEncoding('utf8')
@@ -350,8 +356,12 @@ export class Runner {
 
   /** Send an operator turn (optionally with multimodal attachments) into the live session. */
   send(text: string, attachments?: Attachment[]): void {
-    const payload = JSON.stringify(buildUserMessage(text, attachments)) + '\n'
-    this.child.stdin.write(payload)
+    try {
+      const payload = JSON.stringify(buildUserMessage(text, attachments)) + '\n'
+      this.child.stdin.write(payload)
+    } catch {
+      // child already exited; stdin closed
+    }
   }
 
   /**
