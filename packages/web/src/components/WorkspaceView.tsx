@@ -383,23 +383,30 @@ export function WorkspaceView({
       </div>
       )}
 
-      {centerMounted && (
-        <div className={`${styles.center} ${workspaceOpen ? styles.paneEnter : styles.paneExit}`}>
-          <WorkspaceTabs
-            taskId={taskId}
-            taskTitle={task?.title ?? null}
-            status={task?.status ?? null}
-            events={events}
-            live={live}
-            agents={agents}
-            layout={layout}
-            onLayoutChange={applyLayout}
-            onMessage={task ? onMessage : undefined}
-            liveTasks={liveTasks}
-            onSelectTask={onSelect}
-          />
-        </div>
-      )}
+      {/* Center pane is kept mounted at all times (only `display` toggles when
+          collapsed) so a `<ChatPane>` opened in a Workspace tab keeps its
+          `/ws/chat` WebSocket — and therefore its live `claude` session — alive
+          across a minimize. Unmounting it (the old `{centerMounted && …}` gate)
+          closed the socket, so re-opening spawned a brand-new agent. `display:
+          none` also removes it from the grid, matching the collapsed `columns`. */}
+      <div
+        className={`${styles.center} ${workspaceOpen ? styles.paneEnter : styles.paneExit}`}
+        style={centerMounted ? undefined : { display: 'none' }}
+      >
+        <WorkspaceTabs
+          taskId={taskId}
+          taskTitle={task?.title ?? null}
+          status={task?.status ?? null}
+          events={events}
+          live={live}
+          agents={agents}
+          layout={layout}
+          onLayoutChange={applyLayout}
+          onMessage={task ? onMessage : undefined}
+          liveTasks={liveTasks}
+          onSelectTask={onSelect}
+        />
+      </div>
 
       {rightMounted && (
       <aside
