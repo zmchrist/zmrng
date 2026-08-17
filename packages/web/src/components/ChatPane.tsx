@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import styles from './ChatPane.module.css'
 import { actorColor } from '../status'
 import { encodeInput, encodeInterrupt, encodeStart, parseChatServerMsg } from '../chatProtocol'
+import { loadChatThread, saveChatThread, serializeTranscript } from '../chatPersistence'
 import {
   appendPartial,
   emptyThread,
@@ -9,6 +10,7 @@ import {
   finalizeAssistant,
   pushToolNote,
   pushUser,
+  type ThreadState,
 } from '../chatThread'
 import type { CaveStyle, EffortLevel, ModelAlias } from '../types'
 
@@ -40,7 +42,18 @@ export function ChatPane({ id }: Props) {
   const [model, setModel] = useState<ModelAlias>('sonnet')
   const [effort, setEffort] = useState<EffortLevel>('medium')
   const [style, setStyle] = useState<CaveStyle>('caveman-full')
-  const [thread, setThread] = useState(emptyThread)
+  // Hydrate from the saved transcript (if any) so history survives a refresh/
+  // rebuild/tab-reopen — the underlying `claude` session is gone regardless,
+  // so it always starts idle (`busy: false`). Plain state (not a ref) so its
+  // initial value is safe to read during render.
+  const [saved, setSaved] = useState(() => loadChatThread(id))
+  const [thread, setThread] = useState<ThreadState>(() =>
+    saved.length > 0 ? { items: saved, busy: false } : emptyThread(),
+  )
+  // True until the first message is sent after mount — primes that one
+  // outgoing turn with the saved transcript so the fresh session picks the
+  // conversation back up, without showing the prefix in the displayed bubble.
+  const primedRef = useRef(saved.length > 0)
   const [draft, setDraft] = useState('')
   const wsRef = useRef<WebSocket | null>(null)
   const threadRef = useRef<HTMLDivElement | null>(null)
@@ -89,19 +102,38 @@ export function ChatPane({ id }: Props) {
     if (el) el.scrollTop = el.scrollHeight
   }, [thread])
 
+  // Persist the transcript as it grows, skipping mid-stream token deltas (only
+  // once a bubble is closed) so a fast stream doesn't hammer localStorage.
+  useEffect(() => {
+    const last = thread.items.at(-1)
+    if (last && last.kind === 'agent' && last.streaming) return
+    saveChatThread(id, thread.items)
+  }, [id, thread.items])
+
   const send = useCallback(() => {
     const text = draft.trim()
     const ws = wsRef.current
     if (!text || thread.busy || !ws || ws.readyState !== WebSocket.OPEN) return
     setThread((s) => pushUser(s, text))
-    ws.send(encodeInput(text))
+    const wireText = primedRef.current ? `${serializeTranscript(saved)}\n\n${text}` : text
+    ws.send(encodeInput(wireText))
+    primedRef.current = false
     setDraft('')
-  }, [draft, thread.busy])
+  }, [draft, thread.busy, saved])
 
   const stop = useCallback(() => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(encodeInterrupt())
   }, [])
+
+  // A config change respawns the session with a clean slate — clear the
+  // primer and the persisted transcript along with the in-memory thread.
+  const resetForConfigChange = useCallback(() => {
+    primedRef.current = false
+    setSaved([])
+    setThread(emptyThread())
+    saveChatThread(id, [])
+  }, [id])
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -120,7 +152,7 @@ export function ChatPane({ id }: Props) {
           disabled={thread.busy}
           onChange={(e) => {
             setModel(e.target.value as ModelAlias)
-            setThread(emptyThread())
+            resetForConfigChange()
           }}
         >
           {MODEL_OPTIONS.map((m) => (
@@ -136,7 +168,7 @@ export function ChatPane({ id }: Props) {
           disabled={thread.busy}
           onChange={(e) => {
             setEffort(e.target.value as EffortLevel)
-            setThread(emptyThread())
+            resetForConfigChange()
           }}
         >
           {EFFORT_OPTIONS.map((eff) => (
@@ -152,7 +184,7 @@ export function ChatPane({ id }: Props) {
           disabled={thread.busy}
           onChange={(e) => {
             setStyle(e.target.value as CaveStyle)
-            setThread(emptyThread())
+            resetForConfigChange()
           }}
         >
           {STYLE_OPTIONS.map((st) => (
