@@ -61,11 +61,11 @@ zmrng/
 │   │       ├── index.ts        — Fastify bootstrap: REST routes + WS + static serve
 │   │       ├── config.ts       — env parsing, repo registry (config/repos.json → env → legacy)
 │   │       ├── db.ts           — SQLite schema, prepared statements, idempotent migrations
-│   │       ├── types.ts        — Task/Phase/WsEvent/usage/WorkspaceLayout types (SOURCE OF TRUTH)
-│   │       ├── runner.ts       — spawn + parse the claude child (stream-json), strip API key
+│   │       ├── types.ts        — Task/Phase/WsEvent/usage/WorkspaceLayout/Attachment types (SOURCE OF TRUTH); also `ALLOWED_MEDIA_TYPES`/`MAX_ATTACHMENTS`/`MAX_ATTACHMENT_BYTES` consts for the image/PDF drop-paste feature
+│   │       ├── runner.ts       — spawn + parse the claude child (stream-json), strip API key; `buildUserMessage(text, attachments?)` builds the multimodal stream-json user turn (image/document blocks before the text block), `sanitizeAttachments(raw)` is the tolerant allow-list/size/count guard shared by the REST routes and `/ws/chat`
 │   │       ├── terminal.ts     — TerminalManager: spawns node-pty shells for the Workspace bottom-dock terminal (GET /ws/terminal), strips API key under oauth
-│   │       ├── chatAgent.ts    — ChatManager: owns live standalone-chat `claude` Runners (GET /ws/chat) via the same RunnerFactory seam as TaskManager; chatSystemPrompt() (conversational, non-worker prompt) + parseChatClientMsg()
-│   │       ├── phases.ts       — phase state machine + system/kickoff prompts + lane queue
+│   │       ├── chatAgent.ts    — ChatManager: owns live standalone-chat `claude` Runners (GET /ws/chat) via the same RunnerFactory seam as TaskManager; chatSystemPrompt() (conversational, non-worker prompt) + parseChatClientMsg() (tolerantly accepts an `attachments` field on `input` frames, via `sanitizeAttachments`)
+│   │       ├── phases.ts       — phase state machine + system/kickoff prompts + lane queue; holds new-task-box attachments in a `pendingAttachments` Map, consumed once at the first clarify send in `start()`
 │   │       ├── worktree.ts     — git worktree create/remove per task
 │   │       └── ws.ts           — WebSocket broadcast hub
 │   └── web/
@@ -82,9 +82,11 @@ zmrng/
 │           ├── terminalProtocol.ts — pure wire-protocol helpers for `/ws/terminal` (encodeInput/encodeResize/parseServerMsg)
 │           ├── chatProtocol.ts — pure wire-protocol helpers for `/ws/chat` (encodeStart/encodeInput/encodeInterrupt/parseChatServerMsg)
 │           ├── chatThread.ts   — React-free bubble-thread reducer for the standalone chat pane (emptyThread/pushUser/appendPartial/finalizeAssistant/pushToolNote/endTurn/resetThread)
+│           ├── attachments.ts  — pure DOM-free-ish helpers for image/PDF drop-paste: mimeToKind/validateFile (mirrors server ALLOWED_MEDIA_TYPES/MAX_ATTACHMENT_BYTES)/fileToAttachment (FileReader → base64, no data-URL prefix)/filesFromPaste/filesFromDrop
+│           ├── useAttachments.ts — shared attachment state + paste/drop handlers for the three composers (NewTaskForm, ClarifyChat, ChatPane): addFiles (validate + read, capped at MAX_ATTACHMENTS)/remove/clear/error/onPaste/onDrop
 │           ├── usePanelMount.ts — hook that keeps a conditionally-rendered panel mounted for `--panel-duration` past a toggle-to-closed, so its CSS closing (minimize) animation can play before unmount; used by every toggleable "window" (Files sidebar, Workspace center pane, task rail, terminal dock body, Settings modal)
 │           ├── themes.ts       — theme catalog (11 themes: one per color + black/white/grey) + pure helpers (`buildThemeVars`/`applyTheme`/`loadStoredTheme`/`saveStoredTheme`); each theme has a dark + light accent pair, swapped via CSS custom properties set on the document root; persisted to localStorage only (`zmrng-theme` key), no server involvement
-│           └── components/      — TaskList, NewTaskForm, ClarifyChat (live composer with `placeholder` prop), WorkerLog (read-only tool/subagent/subagent_result rows color-coded by actor), WorkerLogPanel (WorkerLog + the ClarifyChat steer composer, shown in live phases — the channel that replaced TaskDetail's inline composer), TaskControls (compact selected-task card in the Workspace right bar: title + status pill + lifecycle buttons always visible, repo/flow/model/effort/style/description/usage behind a dropdown), WorkspaceView (the merged home: Files sidebar + WorkspaceTabs center pane + a collapsible right bar = NewTaskForm + TaskControls + TaskList; the Files sidebar, center pane, and right rail each toggle from the bottom nav bar via `GlobalUiState.panes` — Files defaults open (preserves the old locked-left look), center pane + right rail default closed so a fresh load shows only the Files tree; the Files tree shows the task worktree when a task is selected, else the Projects dir (`/api/projects/files`), and opening any file auto-opens the Workspace pane; layout hydrated/persisted per task via `PerTaskUiState.layout`; wraps the region grid + `TerminalDock` in a vertical flex shell so the dock renders regardless of task selection; all three toggleable regions animate open/close via `usePanelMount` + CSS Module `paneEnter`/`paneExit` keyframes), WorkspaceTabs (draggable tabs for file Viewers/WorkerLogPanel/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop), TerminalDock (Zed-style bottom dock **and** the bottom nav bar: six content-sized pane toggles — Terminal/Chat/Tasks/Workspace/Files/Settings, each highlighted while its pane is open, plus a `+💬` tab-strip affordance for a new chat tab — Terminal and Chat tabs coexist in one ordered list via the generalized `terminalDock.ts` reducer, ctrl+` shortcut, tab strip + drag-resize, tabs mounted only while the dock is open; the dock body animates open/close via `usePanelMount`), ChatPane (standalone agent-chat bubble thread — one WebSocket per instance to `/ws/chat`, mirrors Terminal.tsx not the useWs hub; per-tab model/effort/style selects default sonnet/medium/caveman-full, a config change respawns the session + resets the thread; Stop button while a turn is in flight; ephemeral, no DB persistence), SettingsModal (ephemeral focused overlay with a dimmed backdrop, animates open/close via `usePanelMount`; a theme swatch grid + sun/moon dark/light toggle backed by `themes.ts` and persisted to localStorage, plus a Reboot control — `POST /api/restart` ff-only `git pull`s zmrng's own repo to `origin/main`, runs `npm run build`, then (dev only) touches the server entry to trigger a tsx-watch respawn; always visible, no `cfg?.dev` gate), Terminal (xterm.js glue — one WebSocket per instance to `/ws/terminal`, theme-token colors, ResizeObserver fit)
+│           └── components/      — TaskList, NewTaskForm (title/body + drop/paste image-PDF attachments via `useAttachments` + `AttachmentTray`; an image-only task is valid — title still required), ClarifyChat (live composer with `placeholder` prop; same drop/paste attachment wiring as NewTaskForm), AttachmentTray (thumbnail strip for pending attachments — inline image previews, a generic PDF chip, per-item remove + a validation-error line; purely presentational, state lives in `useAttachments`), WorkerLog (read-only tool/subagent/subagent_result rows color-coded by actor), WorkerLogPanel (WorkerLog + the ClarifyChat steer composer, shown in live phases — the channel that replaced TaskDetail's inline composer; forwards `attachments` through its `onMessage` to `message()`), TaskControls (compact selected-task card in the Workspace right bar: title + status pill + lifecycle buttons always visible, repo/flow/model/effort/style/description/usage behind a dropdown), WorkspaceView (the merged home: Files sidebar + WorkspaceTabs center pane + a collapsible right bar = NewTaskForm + TaskControls + TaskList; the Files sidebar, center pane, and right rail each toggle from the bottom nav bar via `GlobalUiState.panes` — Files defaults open (preserves the old locked-left look), center pane + right rail default closed so a fresh load shows only the Files tree; the Files tree shows the task worktree when a task is selected, else the Projects dir (`/api/projects/files`), and opening any file auto-opens the Workspace pane; layout hydrated/persisted per task via `PerTaskUiState.layout`; wraps the region grid + `TerminalDock` in a vertical flex shell so the dock renders regardless of task selection; all three toggleable regions animate open/close via `usePanelMount` + CSS Module `paneEnter`/`paneExit` keyframes; the center pane is additionally kept mounted and hidden via `display: none` while collapsed — never unmounted — so a `ChatPane` opened in a Workspace tab keeps its `/ws/chat` session alive across a minimize), WorkspaceTabs (draggable tabs for file Viewers/WorkerLogPanel/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop), TerminalDock (Zed-style bottom dock **and** the bottom nav bar: six content-sized pane toggles — Terminal/Chat/Tasks/Workspace/Files/Settings, each highlighted while its pane is open, plus a `+💬` tab-strip affordance for a new chat tab — Terminal and Chat tabs coexist in one ordered list via the generalized `terminalDock.ts` reducer, ctrl+` shortcut, tab strip + drag-resize; once a tab exists the dock body stays mounted and is hidden via `display: none` while minimized — never unmounted — so a live Terminal PTY / ChatPane `/ws/chat` session survives a minimize; the dock body animates open/close via `usePanelMount`), ChatPane (standalone agent-chat bubble thread — one WebSocket per instance to `/ws/chat`, mirrors Terminal.tsx not the useWs hub; per-tab model/effort/style selects default sonnet/medium/caveman-full, a config change respawns the session + resets the thread; Stop button while a turn is in flight; ephemeral, no DB persistence; same drop/paste attachment wiring as NewTaskForm/ClarifyChat, sent via `encodeInput(text, attachments)`), SettingsModal (ephemeral focused overlay with a dimmed backdrop, animates open/close via `usePanelMount`; a theme swatch grid + sun/moon dark/light toggle backed by `themes.ts` and persisted to localStorage, plus a Reboot control — `POST /api/restart` ff-only `git pull`s zmrng's own repo to `origin/main`, runs `npm run build`, then (dev only) touches the server entry to trigger a tsx-watch respawn; always visible, no `cfg?.dev` gate), Terminal (xterm.js glue — one WebSocket per instance to `/ws/terminal`, theme-token colors, ResizeObserver fit)
 │   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
 │       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
 │       ├── splash/index.html   — galaxy-warp canvas loader (vanilla JS, no build); click/Enter → warp-dive → white-bloom → navigate to app; two-signal boot handshake: splash emits `splash-ready`, Rust emits `engine-ready {port}` once both sidecar + splash are ready; requires `withGlobalTauri: true` in tauri.conf.json
@@ -162,11 +164,18 @@ See `.claude/docs/services-reference.md` for full method signatures and behavior
 
 - **Runner** (`packages/server/src/runner.ts`) — wraps one `claude` child per task;
   spawns with stream-json in/out, parses session/assistant/partial/result/tool_use/tool_result
-  lines, exposes `send()`/`interrupt()`/`kill()`; strips `ANTHROPIC_API_KEY`. Two new
-  callbacks: `onToolUse(name, summary, isSubagent, subagentType?)` (main-worker tool calls
-  and Task spawns) and `onSubagentResult(subagentType, summary, isError)` (Task results via
-  a bounded `pendingTasks` map). `interrupt()` writes a `control_request`/`interrupt`
-  stream-json envelope to stdin without killing the child.
+  lines, exposes `send(text, attachments?)`/`interrupt()`/`kill()`; strips
+  `ANTHROPIC_API_KEY`. Two new callbacks: `onToolUse(name, summary, isSubagent,
+  subagentType?)` (main-worker tool calls and Task spawns) and `onSubagentResult(subagentType,
+  summary, isError)` (Task results via a bounded `pendingTasks` map). `interrupt()` writes a
+  `control_request`/`interrupt` stream-json envelope to stdin without killing the child.
+  Exported `buildUserMessage(text, attachments?)` builds the outbound stream-json `user`
+  message — image/document content blocks (from operator drop/paste attachments) ahead of
+  the text block — and exported `sanitizeAttachments(raw)` is the tolerant allow-list
+  (`ALLOWED_MEDIA_TYPES`) + per-file size (`MAX_ATTACHMENT_BYTES`, 8MB) + count
+  (`MAX_ATTACHMENTS`, 10) guard shared by the REST create/message routes and the
+  `/ws/chat` input frame; a bad entry is dropped, never a 500. Attachments are transient —
+  never written to disk or the DB.
 - **TaskManager / phases** (`packages/server/src/phases.ts`) — phase state machine
   (backlog→clarify→planning→executing→validating→review→done/failed, plus `blocked`),
   per-phase fresh sessions + kickoff prompts, control-token detection (`ZMRNG_READY`,
@@ -174,7 +183,12 @@ See `.claude/docs/services-reference.md` for full method signatures and behavior
   `message()` gate lifted to all live phases (`clarify|planning|executing|validating`).
   New public `interrupt(taskId)` hard-stops the current turn (ESC-style); a private
   `interrupting` Set suppresses the interrupted turn's `result` from triggering a task
-  failure. `interrupting` is cleaned up in `fail/done/cancel/onPr`.
+  failure. `interrupting` is cleaned up in `fail/done/cancel/onPr`. `createTask(...)` takes
+  an optional trailing `attachments?: Attachment[]` (a new-task-box image/PDF drop/paste),
+  held in a `pendingAttachments` Map and consumed once — at the first clarify send inside
+  `start()` — so a re-start after a fail never double-injects them. `message(taskId, text,
+  attachments?)` also takes an optional `attachments?: Attachment[]`, forwarded to
+  `runner.send()` and logged with a `[n attachment(s)]` suffix.
 - **Db** (`packages/server/src/db.ts`) — SQLite (WAL), `tasks` + `events` schema,
   prepared statements, idempotent `ensureColumns()` migration, atomic `addUsage()`.
 - **Config** (`packages/server/src/config.ts`) — env + repo registry: explicit
@@ -199,14 +213,20 @@ See `.claude/docs/services-reference.md` for full method signatures and behavior
   branch, PR, or control-token protocol, just a helpful assistant with read/explore
   filesystem access, reusing the exported `styleDirective` from `phases.ts` for the
   caveman register. `parseChatClientMsg()` tolerantly decodes client `start`/`input`/
-  `interrupt` frames (mirrors `terminal.ts`'s `parseClientMsg`). Distinct from the
+  `interrupt` frames (mirrors `terminal.ts`'s `parseClientMsg`); an `input` frame's
+  `attachments` field is run through `sanitizeAttachments()` too, so a malformed/oversized
+  entry is silently dropped rather than reaching the runner. Distinct from the
   existing per-task `/api/tasks/:id/chat` REST chat (`chat.ts`) — this one is
   task-independent and never touches the DB.
 - **Fastify server** (`packages/server/src/index.ts`) — REST surface includes
   `GET /api/config`, `GET /api/repos`, `GET /api/tasks`, `POST /api/tasks`,
   `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`, `GET /api/tasks/:id/events`
   (see `.claude/docs/services-reference.md` for the full, current route list — it has grown
-  since this line was last trimmed). WS: `GET /ws` (task/claude event fan-out),
+  since this line was last trimmed). `bodyLimit` is raised to 32MB (from Fastify's 1MB
+  default) so base64 image/PDF attachments fit in a POST body; `POST /api/tasks` and
+  `POST /api/tasks/:id/message` both run `body.attachments` through `sanitizeAttachments()`
+  — a title-only or image-only task/message is valid (no text required once an attachment
+  is present). WS: `GET /ws` (task/claude event fan-out),
   `GET /ws/terminal` (one PTY per socket, via `TerminalManager`), and `GET /ws/chat` (one
   standalone chat `claude` session per socket, via `ChatManager`). Static serve of
   `web/dist`. `shutdown()` calls `manager.shutdown()`, `terminals.killAll()`, and
@@ -294,3 +314,12 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
   DB persistence, no task lifecycle — and independent of the pre-existing per-task
   `/api/tasks/:id/chat` REST chat (`chat.ts`); the two are separate features that happen
   to share the word "chat".
+- Image/PDF drop-paste attachments (`Attachment`/`AttachmentKind` in `types.ts`) are
+  equally ephemeral — never written to disk or the DB, held only long enough to build one
+  outbound stream-json `user` message (`buildUserMessage`), then discarded. The
+  allow-list/size/count limits (`ALLOWED_MEDIA_TYPES`/`MAX_ATTACHMENT_BYTES`/
+  `MAX_ATTACHMENTS`) live once in `packages/server/src/types.ts` and are mirrored into
+  `packages/web/src/types.ts` like every other shared type; `sanitizeAttachments()` is the
+  single server-side enforcement point (REST + `/ws/chat`), `validateFile()` in
+  `packages/web/src/attachments.ts` is the client-side mirror for fast feedback before a
+  file is even uploaded.

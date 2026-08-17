@@ -23,6 +23,7 @@ import {
   type EffortLevel,
   type CaveStyle,
   type FlowMode,
+  type Attachment,
 } from './types.js'
 
 // ---- detection ----
@@ -319,6 +320,12 @@ export class TaskManager {
   private blockedFrom = new Map<string, TaskStatus>()
   /** Tasks whose current turn was hard-interrupted; suppress the result's fail logic. */
   private interrupting = new Set<string>()
+  /**
+   * Attachments dropped on the new-task box, held between `createTask` and the
+   * first clarify send (no live session exists at create time). Consumed once in
+   * `start()`; transient by design — a server restart before Start loses them.
+   */
+  private pendingAttachments = new Map<string, Attachment[]>()
   /**
    * `owner/name` of each task's target repo, resolved once at start from its
    * `origin` remote. A `null` entry means the target is local-only (no GitHub
@@ -689,6 +696,7 @@ export class TaskManager {
     style?: CaveStyle,
     repoId?: string,
     flow?: FlowMode,
+    attachments?: Attachment[],
   ): Task {
     const id = randomUUID()
     const resolvedRepoId = repoId && repoById(repoId) ? repoId : config.defaultRepoId
@@ -703,6 +711,8 @@ export class TaskManager {
       repoId: resolvedRepoId,
       now: now(),
     })
+    // Hold any drop/paste attachments until the first clarify send (start()).
+    if (attachments && attachments.length > 0) this.pendingAttachments.set(id, attachments)
     this.broadcast({ type: 'task', task })
     return task
   }
@@ -778,10 +788,14 @@ export class TaskManager {
       note: `worktree ${wt.worktreePath} on ${wt.branch}`,
     })
     this.emitEvent(taskId, 'status', { sub: 'status', note: settingsNote(model, effort, style) })
-    this.runners.get(taskId)?.send(clarifyKickoff(task))
+    // Consume any held new-task-box attachments — single-use, so a re-start
+    // after a fail never double-injects them.
+    const pending = this.pendingAttachments.get(taskId)
+    this.pendingAttachments.delete(taskId)
+    this.runners.get(taskId)?.send(clarifyKickoff(task), pending)
   }
 
-  message(taskId: string, text: string): void {
+  message(taskId: string, text: string, attachments?: Attachment[]): void {
     const task = this.db.getTask(taskId)
     if (!task) throw new Error('task not found')
     const live =
@@ -793,8 +807,11 @@ export class TaskManager {
     if (!live || !runner) {
       throw new Error('operator messages are only accepted while the worker is live')
     }
-    this.emitEvent(taskId, 'operator', { sub: 'operator', text })
-    runner.send(text)
+    // Note in the log that files rode along (the blocks themselves aren't persisted).
+    const count = attachments?.length ?? 0
+    const logged = count > 0 ? `${text}${text ? ' ' : ''}[${count} attachment(s)]` : text
+    this.emitEvent(taskId, 'operator', { sub: 'operator', text: logged })
+    runner.send(text, attachments)
   }
 
   /**
@@ -877,6 +894,7 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
+    this.pendingAttachments.delete(taskId)
     this.repoSlugs.delete(taskId)
     this.freeLane(taskId)
     if (task.worktree) {
@@ -905,6 +923,7 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
+    this.pendingAttachments.delete(taskId)
     this.repoSlugs.delete(taskId)
     this.freeLane(taskId)
     if (task.worktree) {
