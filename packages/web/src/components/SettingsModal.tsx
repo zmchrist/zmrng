@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import styles from './SettingsModal.module.css'
+import { usePanelMount } from '../usePanelMount'
 import {
   THEMES,
   buildThemeVars,
@@ -19,9 +20,12 @@ interface Props {
  * Focused settings overlay: a blurred backdrop that dims everything behind it
  * and a small centered panel. First real content: a theme swatch grid plus a
  * sun/moon toggle for dark/light mode, persisted to localStorage. Closes on
- * the × button, a backdrop click, or Escape.
+ * the × button, a backdrop click, or Escape. Stays mounted a beat past `open`
+ * going false so the closing (minimize) animation can play before it
+ * actually unmounts.
  */
 export function SettingsModal({ open, onClose }: Props) {
+  const mounted = usePanelMount(open)
   const [themeId, setThemeId] = useState(() => loadStoredTheme().themeId)
   const [mode, setMode] = useState<ThemeMode>(() => loadStoredTheme().mode)
 
@@ -47,17 +51,22 @@ export function SettingsModal({ open, onClose }: Props) {
     saveStoredTheme({ themeId, mode: next })
   }
 
-  if (!open) return null
+  if (!mounted) return null
 
   return (
     <div
-      className={styles.backdrop}
+      className={`${styles.backdrop} ${open ? styles.backdropEnter : styles.backdropExit}`}
       role="presentation"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className={styles.panel} role="dialog" aria-modal="true" aria-label="Settings">
+      <div
+        className={`${styles.panel} ${open ? styles.panelEnter : styles.panelExit}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+      >
         <div className={styles.head}>
           <span className={styles.title}>Settings</span>
           <button
