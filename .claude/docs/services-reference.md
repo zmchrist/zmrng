@@ -112,6 +112,41 @@ spawn a real shell.
   - **`killAll(): void`** — best-effort `kill()` (try/catch) on every tracked session, then
     clears the set. Called from `index.ts`'s `shutdown()` alongside `manager.shutdown()`.
 
+## ChatManager — `packages/server/src/chatAgent.ts`
+
+Owns the live standalone agent-chat sessions backing the bottom-dock Chat tab (one
+`claude` session per `GET /ws/chat` WebSocket). Independent of the task lifecycle and
+distinct from the existing per-task `/api/tasks/:id/chat` REST chat (`chat.ts`,
+`ChatMessage`) — this is a free-form, ephemeral side channel, never persisted to the DB.
+
+- **`chatSystemPrompt(style: CaveStyle, projectsDir: string): string`** — the
+  conversational system prompt. Deliberately NOT `phases.ts`'s worker `systemPrompt()`:
+  no task, branch, PR, or control-token protocol. Frames the agent as a helpful
+  assistant embedded in the zmrng chat panel with read/explore filesystem access to
+  `projectsDir`, asks it to keep tool use purposeful, and appends the shared
+  `styleDirective(style)` (exported from `phases.ts` — was module-private — so the
+  caveman contract stays DRY between the worker and the chat agent).
+- **`parseChatClientMsg(raw: string): ChatClientMsg | undefined`** — pure, tolerant
+  parse of one client→server frame (mirrors `terminal.ts`'s `parseClientMsg`):
+  malformed JSON, a non-object, an unknown `type`, or an ill-typed field all yield
+  `undefined` rather than throwing. Accepts `{type:'start', model, effort, style}`,
+  `{type:'input', text}`, and `{type:'interrupt'}`.
+- **`ChatConfig`** — `{ model: string; effort: EffortLevel; style: CaveStyle }`, the
+  per-tab controls chosen for one session.
+- **`ChatManager`** — tracks live sessions in a `Set<RunnerLike>`; constructed with the
+  same `RunnerFactory` seam `TaskManager` uses (`defaultRunnerFactory` by default) so
+  tests never spawn a real `claude`.
+  - **`create(cfg: ChatConfig, cb: RunnerCallbacks): RunnerLike`** — spawns one
+    conversational `claude` rooted at `config.projectsDir` with `chatSystemPrompt(cfg.style,
+    config.projectsDir)` as its system prompt, wraps `onExit` to self-remove the session
+    from the tracked set *before* notifying the caller (so a later `killAll()` never
+    double-kills an already-exited session), and tracks the result. The OAuth env-strip
+    already lives inside `Runner`'s constructor, so (unlike `TerminalManager`) this
+    manager does not repeat it.
+  - **`killAll(): void`** — best-effort `kill()` (try/catch) on every tracked session, then
+    clears the set. Called from `index.ts`'s `shutdown()` alongside `manager.shutdown()`
+    and `terminals.killAll()`.
+
 ## Db — `packages/server/src/db.ts`
 
 SQLite (better-sqlite3, WAL).
@@ -190,19 +225,42 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `{type:'data', data}` frames and relays the exit code as `{type:'exit', code}` before
   closing the socket; client `input`/`resize` frames are parsed with the tolerant
   `parseClientMsg()` from `terminal.ts`. Spawn failures and mid-session errors close the
-  socket rather than throwing.
+  socket rather than throwing. `GET /ws/chat` — one socket owns at most one live chat
+  session; a `start` frame (re)spawns via `ChatManager.create()` (killing any prior
+  session on the socket first, so a config change respawns cleanly), an `input` frame
+  sends a turn, `interrupt` stops the in-flight turn without killing the session. Runner
+  callbacks map to server→client `ChatServerMsg` frames: `onSession`→`ready`,
+  `onPartial`→`partial`, `onAssistantText`→`assistant`, `onToolUse`→`tool` (`actor` is
+  the subagent type or `'main'`), `onResult`→`result`, `onExit`→`exit` (then closes the
+  socket), `onSpawnError`→`error` (then closes the socket); `onSubagentResult` is
+  intentionally **not** forwarded — the thread only shows the agent's own turns, tools,
+  and big decisions. Client frames are parsed with `parseChatClientMsg()` from
+  `chatAgent.ts`. Socket `close`/`error` kills the session.
 - **Static:** serves `web/dist` in production with an SPA not-found fallback.
 - **Lifecycle:** SIGINT/SIGTERM → `manager.shutdown()` (kill workers) + `terminals.killAll()`
-  (kill PTYs) → close. Logs `repoWarnings` at startup.
+  (kill PTYs) + `chats.killAll()` (kill standalone chat sessions) → close. Logs
+  `repoWarnings` at startup.
 - `asEffort` / `asStyle` validate enum inputs from the request body.
+
+### Chat wire types (`types.ts`, mirrored)
+- **`ChatClientMsg`** (client→server, over `GET /ws/chat`) — `{type:'start'; model:
+  string; effort: EffortLevel; style: CaveStyle}` (spawns a fresh session with the
+  chosen controls, killing any prior one on the socket) | `{type:'input'; text: string}`
+  (one operator turn) | `{type:'interrupt'}` (cuts the in-flight turn without killing
+  the session).
+- **`ChatServerMsg`** (server→client) — `{type:'ready'; sessionId: string}` |
+  `{type:'partial'; text: string}` | `{type:'assistant'; text: string}` |
+  `{type:'tool'; name: string; summary: string; actor: string; isSubagent: boolean}` |
+  `{type:'result'; isError: boolean}` | `{type:'exit'; code: number | null}` |
+  `{type:'error'; text: string}` — one variant per meaningful `Runner` callback.
 
 ## Web (frontend) — `packages/web/src/`
 
 > The `App.tsx`/`components/` bullets below predate the Workspace/Board merge (see the
 > root `CLAUDE.md` project-structure tree for the current `App.tsx`/`WorkspaceView`
 > shape — `TaskDetail` no longer exists, replaced by `TaskControls` + `WorkspaceTabs`).
-> Left as-is rather than speculatively rewritten in this change; the terminal-dock
-> bullets at the end of this section are current as of 2026-08-16.
+> Left as-is rather than speculatively rewritten in this change; the terminal-dock /
+> chat bullets at the end of this section are current as of 2026-08-17.
 
 - **App.tsx** — layout (TaskList rail | TaskDetail pane); fetches config + repos +
   tasks on mount; routes WsEvents into a task map + per-task event list.
@@ -231,23 +289,29 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
     `subagent` as `▸ {subagentType} — {summary}`, and `subagent_result` as
     `◂ {subagentType}: {summary}`; all actor rows left-accented with `actorColor(...)`
     as a sanctioned dynamic inline style.
-  - `TerminalDock` (`components/TerminalDock.tsx`) — the Zed-style bottom-dock terminal,
-    now doubling as the **bottom nav bar**: its always-visible bar holds four
-    content-sized pane toggles — **Terminal** (the dock body, unchanged), **Tasks** (the
-    right rail), **Workspace** (the centre tab pane), **Settings** (an overlay modal). Each
-    button highlights while its pane is open. Tasks/Workspace visibility persists in
-    `GlobalUiState.panes` (both default closed → a fresh load shows only the Files tree);
-    Settings is an ephemeral, non-persisted modal (`SettingsModal`). Global (not per-task),
-    rendered by `WorkspaceView` regardless of task selection.
+  - `TerminalDock` (`components/TerminalDock.tsx`) — the Zed-style bottom-dock terminal
+    (now hosting both PTY terminal tabs AND standalone chat tabs), doubling as the
+    **bottom nav bar**: its always-visible bar holds five content-sized pane toggles —
+    **Terminal** (the dock body), **Chat** (opens the dock + appends a new chat tab),
+    **Tasks** (the right rail), **Workspace** (the centre tab pane), **Settings** (an
+    overlay modal). Each button highlights while its pane is open. Tasks/Workspace
+    visibility persists in `GlobalUiState.panes` (both default closed → a fresh load
+    shows only the Files tree); Settings is an ephemeral, non-persisted modal
+    (`SettingsModal`). Global (not per-task), rendered by `WorkspaceView` regardless of
+    task selection.
     `open`/`height` are controlled props sourced from `App.tsx`'s
     `GlobalUiState.terminalDock` (default closed / 300px, clamped `[120, 640]`); the tab
     list itself is local `useState` driven by the pure `terminalDock.ts` reducer
-    (`emptyDock`/`addTerminal`/`closeTerminal`/`setActive`) — ephemeral, never persisted,
-    so a reload always starts with no shells. Auto-seeds one terminal only on the
-    closed→open transition (derived-during-render pattern, not a `useEffect`, per the
-    `react-hooks/set-state-in-effect` rule). Ctrl+` toggles the dock at the window level;
-    a drag handle resizes the body via `pointerdown`/`pointermove`/`pointerup`. Tabs are
-    unmounted (not just hidden) while the dock is closed, so no PTY exists until opened.
+    (`emptyDock`/`addTab`/`addTerminal`/`addChat`/`closeTerminal`/`setActive`) —
+    ephemeral, never persisted, so a reload always starts with no shells/sessions.
+    Auto-seeds one terminal only on the closed→open transition (derived-during-render
+    pattern, not a `useEffect`, per the `react-hooks/set-state-in-effect` rule); a `+💬`
+    button in the tab strip (alongside the `+` new-terminal button) appends a chat tab
+    without triggering that auto-seed. Per-kind tab labels ("Terminal N" / "Chat N",
+    counted independently). Ctrl+` toggles the dock at the window level; a drag handle
+    resizes the body via `pointerdown`/`pointermove`/`pointerup`. Tabs are unmounted
+    (not just hidden) while the dock is closed, so no PTY/chat session exists until
+    opened; each visible tab renders `<ChatPane>` or `<Terminal>` based on `t.kind`.
   - `Terminal` (`components/Terminal.tsx`) — one `@xterm/xterm` instance + one WebSocket to
     `/ws/terminal` per mounted instance (keyed by the dock tab's `id`). `@xterm/addon-fit`
     + a `ResizeObserver` keep the PTY geometry in sync, sending a `resize` frame on open
@@ -256,12 +320,42 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
     `attachCustomKeyEventHandler` swallows ctrl+` so the dock-toggle chord never reaches a
     focused shell. Not unit-tested (jsdom has no canvas) — the protocol logic it depends on
     (`terminalProtocol.ts`) is.
-- **terminalDock.ts** — pure reducer, `DockState { tabs: DockTab[]; activeId: string | null
-  }`. `emptyDock()`, `addTerminal(state, id)` (appends + focuses), `closeTerminal(state,
-  id)` (focus falls to the left neighbor, or `null` once empty), `setActive(state, id)`.
-  Ids are always caller-supplied (never `Math.random`/`Date.now` inside the module) so it
-  stays pure and deterministic to test.
+  - `ChatPane` (`components/ChatPane.tsx`) — the standalone agent-chat pane: a bubble
+    messaging thread (user/agent bubbles + slim tool-use notes) plus a config row (model
+    `sonnet`/`opus`, effort, style — defaulting `sonnet`/`medium`/`caveman-full`,
+    independent of the task-level `DEFAULT_*` controls) and a composer (Enter to send,
+    Shift+Enter for a newline). Owns one `WebSocket` to `/ws/chat` per instance, keyed by
+    the dock tab's `id` (mirrors `Terminal.tsx`, not the `useWs` hub); sends a `start`
+    frame on open and on every config change (a config change resets the thread and
+    respawns the session). Shows a **Stop** button (sends `interrupt`) while a turn is in
+    flight, else a **Send** button. Tool rows are left-colored via `actorColor(...)` (a
+    sanctioned dynamic inline style, same precedent as `WorkerLog`). All the testable
+    messaging logic lives in the pure `chatThread.ts` / `chatProtocol.ts` modules; the
+    component itself is not unit-tested (jsdom has no WebSocket glue worth exercising).
+- **terminalDock.ts** — pure reducer, `DockState { tabs: DockTab[]; activeId: string |
+  null }` where each `DockTab` now carries a `kind: 'terminal' | 'chat'` so terminal and
+  chat tabs coexist in one ordered list. `emptyDock()`, `addTab(state, id, kind)`
+  (appends + focuses a tab of the given kind), `addTerminal(state, id)` (back-compat
+  shorthand for `addTab(state, id, 'terminal')`), `addChat(state, id)` (shorthand for
+  `addTab(state, id, 'chat')`), `closeTerminal(state, id)` (focus falls to the left
+  neighbor, or `null` once empty — kind-agnostic despite the name), `setActive(state,
+  id)` (kind-agnostic). Ids are always caller-supplied (never `Math.random`/`Date.now`
+  inside the module) so it stays pure and deterministic to test.
 - **terminalProtocol.ts** — `encodeInput(data)` / `encodeResize(cols, rows)` produce exactly
   the frames the server's `parseClientMsg` accepts; `parseServerMsg(raw)` tolerantly parses
   a server→client `TermServerMsg` (`data` | `exit`), returning `undefined` on anything
   malformed rather than throwing.
+- **chatProtocol.ts** — `encodeStart(model, effort, style)` / `encodeInput(text)` /
+  `encodeInterrupt()` produce exactly the frames the server's `parseChatClientMsg`
+  accepts; `parseChatServerMsg(raw)` tolerantly parses a server→client `ChatServerMsg`
+  (`ready`/`partial`/`assistant`/`tool`/`result`/`exit`/`error`), returning `undefined` on
+  anything malformed rather than throwing (mirrors `terminalProtocol.parseServerMsg`).
+- **chatThread.ts** — pure, React-free reducer for the chat bubble thread, `ThreadState {
+  items: ThreadItem[]; busy: boolean }` (`ThreadItem` is a `user` bubble, a `agent` bubble
+  with a `streaming` flag, or a slim `tool` note). `emptyThread()`, `pushUser(state, text)`
+  (appends + marks busy), `appendPartial(state, delta)` (opens or extends the current
+  streaming agent bubble), `finalizeAssistant(state, text)` (closes the turn's bubble to
+  final text), `pushToolNote(state, note)`, `endTurn(state)` (clears `busy`, closes any
+  still-open streaming bubble), `resetThread()` (discards the whole thread — used on a
+  config change). Every function takes a state and returns a new one; nothing mutates its
+  input.
