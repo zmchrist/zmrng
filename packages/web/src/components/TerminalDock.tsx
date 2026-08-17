@@ -2,9 +2,31 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import styles from './TerminalDock.module.css'
 import { Terminal } from './Terminal'
 import { ChatPane } from './ChatPane'
-import { addChat, addTerminal, closeTerminal, emptyDock, setActive } from '../terminalDock'
-import type { DockTab } from '../terminalDock'
+import { addChat, addTab, addTerminal, closeTerminal, emptyDock, setActive } from '../terminalDock'
+import type { DockState, DockTab } from '../terminalDock'
+import { loadChatOrder, removeChatThread, saveChatOrder } from '../chatPersistence'
 import { usePanelMount } from '../usePanelMount'
+
+/** Rebuild the dock's chat tabs from the persisted order (auto-reopen on load).
+ *  Terminal tabs are never restored — only the chat feature persists. */
+function hydrateDock(): DockState {
+  const { order, activeId } = loadChatOrder()
+  let state = emptyDock()
+  for (const id of order) state = addTab(state, id, 'chat')
+  if (activeId && state.tabs.some((t) => t.id === activeId)) state = setActive(state, activeId)
+  return state
+}
+
+/** Next seed above every restored tab's numeric suffix, so a freshly spawned
+ *  tab's id never collides with a restored one. */
+function nextSeedFrom(tabs: DockTab[]): number {
+  let max = -1
+  for (const t of tabs) {
+    const m = /-(\d+)$/.exec(t.id)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return max + 1
+}
 
 /** Clamp bounds for the dock height (px). */
 const MIN_H = 120
@@ -57,9 +79,12 @@ export function TerminalDock({
   onFilesToggle,
   onSettingsToggle,
 }: Props) {
-  const [dock, setDock] = useState(emptyDock)
-  // Monotonic seed for stable, collision-free terminal ids (never Math.random).
-  const [seed, setSeed] = useState(0)
+  // Chat tabs auto-reopen from localStorage (order.length usually 0 for a
+  // fresh session); terminal tabs never restore.
+  const [dock, setDock] = useState(hydrateDock)
+  // Monotonic seed for stable, collision-free terminal ids (never Math.random),
+  // seeded past any restored chat tab's suffix so a new tab never collides.
+  const [seed, setSeed] = useState(() => nextSeedFrom(hydrateDock().tabs))
   // Tracks the last `open` value we reacted to, so the auto-seed below fires only
   // on the closed→open transition — not on every render while open.
   const [lastOpen, setLastOpen] = useState(false)
@@ -93,6 +118,27 @@ export function TerminalDock({
 
   const activeTab = dock.tabs.find((t) => t.id === dock.activeId) ?? null
   const chatActive = open && activeTab?.kind === 'chat'
+
+  // Persist the chat tab order + focused id on every dock change, so a
+  // reload can auto-reopen them (`hydrateDock` above).
+  useEffect(() => {
+    const chatIds = dock.tabs.filter((t) => t.kind === 'chat').map((t) => t.id)
+    const activeChatId = dock.activeId && chatIds.includes(dock.activeId) ? dock.activeId : (chatIds[0] ?? null)
+    saveChatOrder(chatIds, activeChatId)
+  }, [dock.tabs, dock.activeId])
+
+  // Auto-reopen the dock body on load when restored chat tabs exist, so their
+  // history is visible without the operator toggling anything. Fires at most
+  // once (the ref guard), evaluated against the very first commit's values —
+  // it must never re-trigger later, or a deliberate "Hide terminal" click
+  // would be forced back open as soon as this effect re-runs on the next
+  // dock/open change.
+  const autoReopenRanRef = useRef(false)
+  useEffect(() => {
+    if (autoReopenRanRef.current) return
+    autoReopenRanRef.current = true
+    if (dock.tabs.length > 0 && !open) onOpenChange(true)
+  }, [dock.tabs.length, open, onOpenChange])
 
   // Ctrl+` toggles the dock (Zed parity). Intercepted at the window level;
   // xterm swallows the same chord so it never reaches a focused PTY.
@@ -166,7 +212,10 @@ export function TerminalDock({
                     className={styles.ctrl}
                     aria-label={`Close ${label.toLowerCase()}`}
                     title="Close"
-                    onClick={() => setDock((d) => closeTerminal(d, t.id))}
+                    onClick={() => {
+                      if (t.kind === 'chat') removeChatThread(t.id)
+                      setDock((d) => closeTerminal(d, t.id))
+                    }}
                   >
                     ×
                   </button>
