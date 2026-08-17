@@ -145,6 +145,29 @@ non-obvious root cause, or is likely to recur. Template in
 - **Files:** `packages/desktop/scripts/bundle-sidecar.mjs` (esbuild `banner`)
 - **Date Found:** 2026-06-18
 
+### Dev server randomly dies with `ws proxy error: EPIPE` / `npm error code 143`
+- **Error:** During a live session (no file edits, just chatting with an agent), the
+  Vite dev server logs `[vite] ws proxy error: Error: write EPIPE` /
+  `[vite] ws proxy socket error: Error: write EPIPE`, then `npm run dev` exits with
+  `npm error code 143` (SIGTERM) for `@zmrng/web`.
+- **Cause:** `Runner.send()` (`packages/server/src/runner.ts`) wrote directly to
+  `this.child.stdin` with no guard. If the spawned `claude` child had already exited
+  (crashed, hit an internal error, or otherwise died) while the operator's socket was
+  still open, the next chat/steer message wrote to a dead pipe. That surfaces as an
+  async `EPIPE` `'error'` event on the stdin stream; with no listener registered on it,
+  Node treats it as an unhandled stream error and crashes the whole Fastify server
+  process. The Vite proxy's `EPIPE` logs are a downstream symptom — its own upstream
+  `/ws` connection to `:4500` was severed when the backend process died — and the
+  `code 143` is `npm run dev`'s sibling `dev:web` script getting torn down once the
+  backend half of the `dev` script exited.
+- **Solution:** Register a no-op `'error'` listener on `this.child.stdin` in the
+  `Runner` constructor (mirrors the existing `this.child.on('error', ...)` handling for
+  spawn failures), and wrap the `stdin.write()` in `send()` in try/catch, matching the
+  pattern already used by `interrupt()`/`kill()`. A dead child now silently drops the
+  write instead of taking the server down with it.
+- **Files:** `packages/server/src/runner.ts` (`Runner` constructor, `send()`)
+- **Date Found:** 2026-08-17
+
 ### Workspace terminal fails to spawn — `Error: posix_spawnp failed.` (node-pty)
 - **Error:** Opening the Workspace bottom-dock terminal fails at PTY spawn; the server
   throws `Error: posix_spawnp failed.` from inside `node-pty`.
