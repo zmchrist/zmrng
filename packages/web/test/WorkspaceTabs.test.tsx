@@ -24,21 +24,30 @@ function Harness({
   initial,
   status = 'executing',
   agents = [],
+  taskTitle = null,
+  liveTasks = [],
+  onSelectTask,
 }: {
   initial: WorkspaceLayout
   status?: TaskStatus
   agents?: AgentSummary[]
+  taskTitle?: string | null
+  liveTasks?: { id: string; title: string }[]
+  onSelectTask?: (id: string) => void
 }) {
   const [layout, setLayout] = useState(initial)
   return (
     <WorkspaceTabs
       taskId="t1"
+      taskTitle={taskTitle}
       status={status}
       events={[]}
       live=""
       agents={agents}
       layout={layout}
       onLayoutChange={setLayout}
+      liveTasks={liveTasks}
+      onSelectTask={onSelectTask}
     />
   )
 }
@@ -114,5 +123,62 @@ describe('<WorkspaceTabs>', () => {
     expect(screen.getByRole('button', { name: /close chat/i })).toBeInTheDocument()
     // Flush Chat's async load so its state settles inside act().
     await act(async () => {})
+  })
+
+  it('labels the Worker Log tab with the task title', () => {
+    render(<Harness initial={emptyLayout()} taskTitle="Add reboot button" />)
+    expect(screen.getByRole('tab', { name: 'Add reboot button' })).toBeInTheDocument()
+  })
+
+  it('truncates a long task title in the Worker Log tab', () => {
+    const long = 'A very long task title that will not fit in a tab'
+    render(<Harness initial={emptyLayout()} taskTitle={long} />)
+    const tab = screen.getByRole('tab', { name: /…$/ })
+    expect(tab.textContent).toHaveLength(24)
+  })
+
+  it('renders a tab per other live task, next to the Worker Log tab, and switches on click', async () => {
+    const onSelectTask = vi.fn()
+    render(
+      <Harness
+        initial={emptyLayout()}
+        taskTitle="Task A"
+        liveTasks={[{ id: 't2', title: 'Task B' }]}
+        onSelectTask={onSelectTask}
+      />,
+    )
+    expect(screen.getByRole('tab', { name: 'Task A' })).toBeInTheDocument()
+    const other = screen.getByRole('tab', { name: 'Task B' })
+    expect(other).toBeInTheDocument()
+    fireEvent.click(other)
+    expect(onSelectTask).toHaveBeenCalledWith('t2')
+    await act(async () => {})
+  })
+
+  it('only renders live-task tabs in the pane holding the Worker Log tab, not a sibling file pane', () => {
+    let layout = openFile(emptyLayout(), 'a.ts')
+    layout = splitWith(layout, fileTabId('a.ts'), 'left') // pane0 [file:a], pane1 [log]
+    render(
+      <Harness
+        initial={layout}
+        status="executing"
+        taskTitle="Task A"
+        liveTasks={[{ id: 't2', title: 'Task B' }]}
+      />,
+    )
+    expect(screen.getByRole('tab', { name: 'Task B' })).toBeInTheDocument()
+    expect(screen.getAllByRole('tab', { name: 'Task B' })).toHaveLength(1)
+  })
+
+  it('disambiguates same-titled live tasks with a short id suffix', () => {
+    render(
+      <Harness
+        initial={emptyLayout()}
+        taskTitle="Fix bug"
+        liveTasks={[{ id: 'abcd1234', title: 'Fix bug' }]}
+      />,
+    )
+    expect(screen.getByRole('tab', { name: 'Fix bug #t1' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Fix bug #abcd' })).toBeInTheDocument()
   })
 })
