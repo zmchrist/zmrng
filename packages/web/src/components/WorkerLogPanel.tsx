@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import styles from './WorkerLogPanel.module.css'
-import type { TaskEvent, TaskStatus } from '../types'
+import type { Attachment, TaskEvent, TaskStatus } from '../types'
 import { WorkerLog } from './WorkerLog'
 import { ClarifyChat } from './ClarifyChat'
 import { LIVE_STATUSES } from '../status'
@@ -11,7 +11,7 @@ interface Props {
   status: TaskStatus | null
   /** Send a steering message to the running worker (POST …/message). Absent ⇒
    *  the composer is never shown (e.g. the WorkspaceTabs unit harness). */
-  onMessage?: (text: string) => Promise<unknown>
+  onMessage?: (text: string, attachments?: Attachment[]) => Promise<unknown>
 }
 
 /** Worker-Log panel: the read-only transcript plus, while the task is in a live
@@ -20,11 +20,11 @@ interface Props {
 export function WorkerLogPanel({ events, live, status, onMessage }: Props) {
   const [busy, setBusy] = useState(false)
 
-  async function send(text: string) {
+  async function send(text: string, attachments?: Attachment[]) {
     if (!onMessage) return
     setBusy(true)
     try {
-      await onMessage(text)
+      await onMessage(text, attachments)
     } finally {
       setBusy(false)
     }
@@ -37,7 +37,7 @@ export function WorkerLogPanel({ events, live, status, onMessage }: Props) {
       <WorkerLog events={events} live={live} />
       {canSteer && (
         <ClarifyChat
-          onSend={(t) => void send(t)}
+          onSend={(t, a) => void send(t, a)}
           disabled={busy}
           placeholder={
             status === 'clarify' ? undefined : 'Steer the worker…  (⌘↵ to send)'

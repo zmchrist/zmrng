@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import styles from './NewTaskForm.module.css'
+import { useAttachments } from '../useAttachments'
+import { AttachmentTray } from './AttachmentTray'
 import {
   DEFAULT_EFFORT,
   DEFAULT_FLOW,
   DEFAULT_MODEL,
   DEFAULT_STYLE,
+  type Attachment,
   type CaveStyle,
   type EffortLevel,
   type FlowMode,
@@ -25,6 +28,7 @@ interface Props {
       flow: FlowMode
       repoId: string
     },
+    attachments?: Attachment[],
   ) => Promise<void>
 }
 
@@ -65,21 +69,23 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
   // '' means "follow the server default" until the operator explicitly picks a repo.
   const [repoId, setRepoId] = useState('')
   const [busy, setBusy] = useState(false)
+  const files = useAttachments()
 
   const effectiveRepoId = repoId || defaultRepoId
+  // A title is always required; an image-only description (no body text) is valid.
+  const canSubmit = !!title.trim() && (!!body.trim() || files.attachments.length > 0)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (!title.trim() || !body.trim() || busy) return
+    if (!canSubmit || busy) return
     setBusy(true)
     try {
-      await onCreate(title.trim(), body.trim(), {
-        model,
-        effort,
-        style,
-        flow,
-        repoId: effectiveRepoId,
-      })
+      await onCreate(
+        title.trim(),
+        body.trim(),
+        { model, effort, style, flow, repoId: effectiveRepoId },
+        files.attachments.length > 0 ? files.attachments : undefined,
+      )
       setTitle('')
       setBody('')
       setFlow(DEFAULT_FLOW)
@@ -87,6 +93,7 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
       setEffort(FLOW_DEFAULTS[DEFAULT_FLOW].effort)
       setStyle(DEFAULT_STYLE)
       setRepoId('')
+      files.clear()
       setOpen(false)
     } finally {
       setBusy(false)
@@ -104,7 +111,12 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
   }
 
   return (
-    <form className={styles.wrap} onSubmit={submit}>
+    <form
+      className={styles.wrap}
+      onSubmit={submit}
+      onDrop={files.onDrop}
+      onDragOver={(e) => e.preventDefault()}
+    >
       <input
         className={styles.input}
         placeholder="Task title"
@@ -114,10 +126,16 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
       />
       <textarea
         className={styles.textarea}
-        placeholder="What should the agent do?"
+        placeholder="What should the agent do?  (drop or paste images / PDFs)"
         rows={4}
         value={body}
         onChange={(e) => setBody(e.target.value)}
+        onPaste={files.onPaste}
+      />
+      <AttachmentTray
+        attachments={files.attachments}
+        onRemove={files.remove}
+        error={files.error}
       />
       <div className={styles.controls}>
         <label className={styles.control}>
@@ -199,7 +217,7 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
         <button
           type="submit"
           className={styles.primary}
-          disabled={busy || !title.trim() || !body.trim()}
+          disabled={busy || !canSubmit}
         >
           {busy ? 'Creating…' : 'Create'}
         </button>

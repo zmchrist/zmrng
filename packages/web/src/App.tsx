@@ -13,6 +13,7 @@ import type {
   FlowMode,
   RepoTarget,
   WorkspaceMode,
+  Attachment,
 } from './types'
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
@@ -168,8 +169,9 @@ export default function App() {
         flow: FlowMode
         repoId: string
       },
+      attachments?: Attachment[],
     ) => {
-      const task = await api.createTask(title, body, opts)
+      const task = await api.createTask(title, body, opts, attachments)
       setTasks((prev) => ({ ...prev, [task.id]: task }))
       void select(task.id)
     },
@@ -267,7 +269,9 @@ export default function App() {
           onSelect={select}
           onCreate={onCreate}
           onStart={() => (selected ? api.start(selected.id) : Promise.resolve())}
-          onMessage={(text) => (selected ? api.message(selected.id, text) : Promise.resolve())}
+          onMessage={(text, attachments) =>
+            selected ? api.message(selected.id, text, attachments) : Promise.resolve()
+          }
           onResume={() => (selected ? api.resume(selected.id) : Promise.resolve())}
           onInterrupt={() => (selected ? api.interrupt(selected.id) : Promise.resolve())}
           onDone={() => (selected ? api.done(selected.id) : Promise.resolve())}
