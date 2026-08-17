@@ -14,7 +14,7 @@ export type Edge = 'left' | 'right' | 'top' | 'bottom'
 /** Where a dragged tab landed within a pane: its center (move) or an edge (split). */
 export type DropIntent = 'center' | Edge
 /** The re-openable singleton panels. */
-export type SingletonKind = 'log' | 'notes' | 'chat'
+export type SingletonKind = 'log' | 'chat'
 
 /** Opaque tab id for a file path. The path is never parsed back out of the id —
  *  it lives on `tab.path` — so a path containing `:` is safe. */
