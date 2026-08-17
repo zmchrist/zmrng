@@ -113,7 +113,7 @@ export function TerminalDock({
 
   return (
     <div className={styles.dock}>
-      {bodyMounted && (
+      {bodyMounted && dock.tabs.length > 0 && (
         <div
           className={`${styles.body} ${open ? styles.paneEnter : styles.paneExit}`}
           style={{ height: clampedHeight }}

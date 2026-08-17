@@ -271,6 +271,7 @@ export type WsEvent =
   | { type: 'task'; task: Task }
   | { type: 'event'; taskId: string; event: TaskEvent }
   | { type: 'partial'; taskId: string; text: string }
+  | { type: 'task-removed'; taskId: string }
 
 // ---- terminal (bottom-dock PTY) --------------------------------------------
 
