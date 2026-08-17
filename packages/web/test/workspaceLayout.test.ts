@@ -99,17 +99,17 @@ describe('closeTab', () => {
 describe('openPanel', () => {
   it('re-opens a closed singleton into the active pane and focuses it', () => {
     let l = emptyLayout()
-    l = openPanel(l, 'notes')
-    expect(ids(l, 0)).toContain('notes')
-    expect(l.panes[0].activeId).toBe('notes')
+    l = openPanel(l, 'chat')
+    expect(ids(l, 0)).toContain('chat')
+    expect(l.panes[0].activeId).toBe('chat')
   })
 
   it('never duplicates an already-open singleton, just focuses it', () => {
-    let l = openPanel(emptyLayout(), 'notes')
+    let l = openPanel(emptyLayout(), 'chat')
     l = focusTab(l, 0, 'log')
-    l = openPanel(l, 'notes')
-    expect(ids(l, 0).filter((id) => id === 'notes')).toHaveLength(1)
-    expect(l.panes[0].activeId).toBe('notes')
+    l = openPanel(l, 'chat')
+    expect(ids(l, 0).filter((id) => id === 'chat')).toHaveLength(1)
+    expect(l.panes[0].activeId).toBe('chat')
   })
 
   it('un-minimizes the log when the log panel is re-opened', () => {

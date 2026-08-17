@@ -50,7 +50,7 @@ export function Notes({ taskId, selectedPath, onOpen }: Props) {
   const notes = loaded && loaded.id === taskId ? loaded.notes : null
 
   if (!taskId) {
-    return <div className={styles.empty}>Select a task to keep notes on it.</div>
+    return <div className={styles.empty}>No worktrees available yet — start a task to keep notes on it.</div>
   }
 
   const startCreate = () => {
