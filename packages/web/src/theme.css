@@ -71,6 +71,10 @@
   /* ---- motion ------------------------------------------------------------ */
   --transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
   --spring: 460ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* Crisp Apple-esque panel open/close (minimize/enlarge): short duration,
+     ease-out-heavy curve — snappier than --spring. */
+  --panel-duration: 170ms;
+  --panel-ease: cubic-bezier(0.32, 0.72, 0, 1);
 
   /* ---- elevation — flat, no shadow ---------------------------------------- */
   --shadow: none;
