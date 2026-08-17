@@ -1,7 +1,15 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { config } from './config.js'
-import type { EffortLevel, TaskUsage } from './types.js'
+import {
+  ALLOWED_MEDIA_TYPES,
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_BYTES,
+  type Attachment,
+  type AttachmentKind,
+  type EffortLevel,
+  type TaskUsage,
+} from './types.js'
 
 /** Per-result usage delta parsed from a `result` line. Shape mirrors `TaskUsage`. */
 export type ResultUsage = TaskUsage
@@ -106,6 +114,63 @@ export function parseUsage(obj: Record<string, unknown>): ResultUsage | undefine
     costUsd: typeof obj.total_cost_usd === 'number' ? obj.total_cost_usd : 0,
     turns: typeof obj.num_turns === 'number' ? obj.num_turns : 0,
   }
+}
+
+// ---- outbound multimodal user message ----
+
+/** Approximate decoded byte size of a base64 payload (ignores '='/whitespace slack). */
+function decodedByteLength(base64: string): number {
+  return Math.floor((base64.length * 3) / 4)
+}
+
+/**
+ * Coerce untyped request/frame input into a safe `Attachment[]`. Drops any entry
+ * with a bad shape, a disallowed media type, or an oversized decoded payload, and
+ * caps the count at `MAX_ATTACHMENTS`. Never throws — a bad attachment is dropped,
+ * never a 500. Shared by the REST routes and the `/ws/chat` frame parser.
+ */
+export function sanitizeAttachments(raw: unknown): Attachment[] {
+  if (!Array.isArray(raw)) return []
+  const out: Attachment[] = []
+  for (const entry of raw) {
+    if (out.length >= MAX_ATTACHMENTS) break
+    if (typeof entry !== 'object' || entry === null) continue
+    const e = entry as Record<string, unknown>
+    const mediaType = e.mediaType
+    const dataBase64 = e.dataBase64
+    if (typeof mediaType !== 'string' || typeof dataBase64 !== 'string') continue
+    if (!ALLOWED_MEDIA_TYPES.includes(mediaType)) continue
+    if (!dataBase64 || decodedByteLength(dataBase64) > MAX_ATTACHMENT_BYTES) continue
+    // Derive kind from the (allow-listed) media type so a mismatched/absent
+    // `kind` can never send an image as a document or vice-versa.
+    const kind: AttachmentKind = mediaType === 'application/pdf' ? 'document' : 'image'
+    const att: Attachment = { kind, mediaType, dataBase64 }
+    if (typeof e.name === 'string') att.name = e.name
+    out.push(att)
+  }
+  return out
+}
+
+/**
+ * Build the stream-json `user` message for one operator turn. Attachments become
+ * leading content blocks (images/docs first, then the text block, per the
+ * Anthropic content ordering convention); text-only turns keep the single
+ * `{type:'text'}` block shape used before this feature.
+ *
+ * PDFs are sent inline as `document` blocks (the documented base64-document
+ * shape); the `claude` CLI accepts these over stream-json stdin under Max OAuth.
+ * If a future CLI version rejects inline documents, the scope-sanctioned fallback
+ * is to spill the PDF to `os.tmpdir()` and reference its path in the text block —
+ * that decision stays isolated to this function.
+ */
+export function buildUserMessage(text: string, attachments?: Attachment[]): object {
+  const content: unknown[] = []
+  for (const a of attachments ?? []) {
+    const source = { type: 'base64', media_type: a.mediaType, data: a.dataBase64 }
+    content.push(a.kind === 'image' ? { type: 'image', source } : { type: 'document', source })
+  }
+  content.push({ type: 'text', text })
+  return { type: 'user', message: { role: 'user', content } }
 }
 
 export interface RunnerCallbacks {
@@ -283,13 +348,9 @@ export class Runner {
     }
   }
 
-  /** Send an operator turn into the live session. */
-  send(text: string): void {
-    const payload =
-      JSON.stringify({
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'text', text }] },
-      }) + '\n'
+  /** Send an operator turn (optionally with multimodal attachments) into the live session. */
+  send(text: string, attachments?: Attachment[]): void {
+    const payload = JSON.stringify(buildUserMessage(text, attachments)) + '\n'
     this.child.stdin.write(payload)
   }
 
@@ -333,7 +394,7 @@ export class Runner {
  * agent adapter — see Appendix A of the productization plan) can too.
  */
 export interface RunnerLike {
-  send(text: string): void
+  send(text: string, attachments?: Attachment[]): void
   interrupt(): void
   kill(): void
 }

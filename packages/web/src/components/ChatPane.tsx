@@ -3,6 +3,8 @@ import styles from './ChatPane.module.css'
 import { actorColor } from '../status'
 import { encodeInput, encodeInterrupt, encodeStart, parseChatServerMsg } from '../chatProtocol'
 import { loadChatThread, saveChatThread, serializeTranscript } from '../chatPersistence'
+import { useAttachments } from '../useAttachments'
+import { AttachmentTray } from './AttachmentTray'
 import {
   appendPartial,
   emptyThread,
@@ -55,6 +57,7 @@ export function ChatPane({ id }: Props) {
   // conversation back up, without showing the prefix in the displayed bubble.
   const primedRef = useRef(saved.length > 0)
   const [draft, setDraft] = useState('')
+  const files = useAttachments()
   const wsRef = useRef<WebSocket | null>(null)
   const threadRef = useRef<HTMLDivElement | null>(null)
 
@@ -112,14 +115,19 @@ export function ChatPane({ id }: Props) {
 
   const send = useCallback(() => {
     const text = draft.trim()
+    const attachments = files.attachments
     const ws = wsRef.current
-    if (!text || thread.busy || !ws || ws.readyState !== WebSocket.OPEN) return
-    setThread((s) => pushUser(s, text))
+    if ((!text && attachments.length === 0) || thread.busy || !ws || ws.readyState !== WebSocket.OPEN)
+      return
+    // Show what the operator sent — fall back to a marker for an image-only turn.
+    const bubble = text || `[${attachments.length} attachment(s)]`
+    setThread((s) => pushUser(s, bubble))
     const wireText = primedRef.current ? `${serializeTranscript(saved)}\n\n${text}` : text
-    ws.send(encodeInput(wireText))
+    ws.send(encodeInput(wireText, attachments.length > 0 ? attachments : undefined))
     primedRef.current = false
     setDraft('')
-  }, [draft, thread.busy, saved])
+    files.clear()
+  }, [draft, thread.busy, saved, files])
 
   const stop = useCallback(() => {
     const ws = wsRef.current
@@ -221,29 +229,43 @@ export function ChatPane({ id }: Props) {
         })}
       </div>
 
-      <div className={styles.composer}>
-        <textarea
-          className={styles.input}
-          placeholder="Message the agent…"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={2}
-        />
-        {thread.busy ? (
-          <button type="button" className={styles.stop} onClick={stop}>
-            Stop
-          </button>
-        ) : (
-          <button
-            type="button"
-            className={styles.sendBtn}
-            onClick={send}
-            disabled={!draft.trim()}
-          >
-            Send
-          </button>
+      <div
+        className={styles.composer}
+        onDrop={files.onDrop}
+        onDragOver={(e) => e.preventDefault()}
+      >
+        {(files.attachments.length > 0 || files.error) && (
+          <AttachmentTray
+            attachments={files.attachments}
+            onRemove={files.remove}
+            error={files.error}
+          />
         )}
+        <div className={styles.composerRow}>
+          <textarea
+            className={styles.input}
+            placeholder="Message the agent…  (drop/paste images)"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={files.onPaste}
+            rows={2}
+          />
+          {thread.busy ? (
+            <button type="button" className={styles.stop} onClick={stop}>
+              Stop
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={styles.sendBtn}
+              onClick={send}
+              disabled={!draft.trim() && files.attachments.length === 0}
+            >
+              Send
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

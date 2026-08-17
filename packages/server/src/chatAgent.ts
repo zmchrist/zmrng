@@ -2,6 +2,7 @@ import { config } from './config.js'
 import { styleDirective } from './phases.js'
 import {
   defaultRunnerFactory,
+  sanitizeAttachments,
   type RunnerCallbacks,
   type RunnerFactory,
   type RunnerLike,
@@ -70,7 +71,13 @@ export function parseChatClientMsg(raw: string): ChatClientMsg | undefined {
     return undefined
   }
   if (obj.type === 'input') {
-    return typeof obj.text === 'string' ? { type: 'input', text: obj.text } : undefined
+    if (typeof obj.text !== 'string') return undefined
+    // Tolerant: a malformed/oversized/disallowed attachments field is dropped,
+    // never thrown on. Only attach when at least one entry survives sanitizing.
+    const attachments = sanitizeAttachments(obj.attachments)
+    return attachments.length > 0
+      ? { type: 'input', text: obj.text, attachments }
+      : { type: 'input', text: obj.text }
   }
   if (obj.type === 'interrupt') {
     return { type: 'interrupt' }

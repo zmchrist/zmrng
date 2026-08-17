@@ -37,6 +37,39 @@ export type CaveStyle =
  */
 export type FlowMode = 'direct' | 'plan'
 
+// ---- multimodal attachments (operator image/PDF drop/paste) ----
+
+/** An attachment is either an image (vision) or a document (PDF). */
+export type AttachmentKind = 'image' | 'document'
+
+/**
+ * One transient operator-supplied attachment carried to a live agent as real
+ * multimodal content. Never persisted to disk or the DB — held only long enough
+ * to build the outbound stream-json `user` message.
+ */
+export interface Attachment {
+  kind: AttachmentKind
+  /** e.g. 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | 'application/pdf'. */
+  mediaType: string
+  /** Raw base64 payload — NO 'data:...;base64,' prefix. */
+  dataBase64: string
+  /** Original filename, for the operator log / thumbnail alt text. */
+  name?: string
+}
+
+/** Media types accepted as attachments (shared by server routes + web validation). */
+export const ALLOWED_MEDIA_TYPES: readonly string[] = [
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+]
+/** Hard cap on the number of attachments carried in one turn. */
+export const MAX_ATTACHMENTS = 10
+/** Per-attachment cap on the DECODED byte size (8 MB). */
+export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+
 /** Accumulated token/cost usage for a task, summed across all `result` events. */
 export interface TaskUsage {
   tokensIn: number // input_tokens (sum)
@@ -330,7 +363,7 @@ export type TermServerMsg =
  */
 export type ChatClientMsg =
   | { type: 'start'; model: string; effort: EffortLevel; style: CaveStyle }
-  | { type: 'input'; text: string }
+  | { type: 'input'; text: string; attachments?: Attachment[] }
   | { type: 'interrupt' }
 
 /** server -> client chat frames — one per meaningful Runner callback. */

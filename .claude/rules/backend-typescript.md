@@ -19,7 +19,7 @@ packages/server/src/
   config.ts    — env parsing + repo registry (config/repos.json → env → legacy)
   db.ts        — SQLite schema, prepared statements, idempotent migrations
   types.ts     — Task/WsEvent/usage/RepoTarget types (SOURCE OF TRUTH)
-  runner.ts    — spawn + parse the claude child (stream-json); strip API key
+  runner.ts    — spawn + parse the claude child (stream-json); strip API key; buildUserMessage()/sanitizeAttachments() for multimodal image/PDF attachments
   terminal.ts  — TerminalManager: node-pty shells for the Workspace bottom-dock terminal
   chatAgent.ts — ChatManager: standalone chat `claude` Runners (GET /ws/chat), same RunnerFactory seam as TaskManager
   phases.ts    — phase state machine + system/kickoff prompts + lane queue
@@ -49,6 +49,21 @@ spawn('claude', args, { cwd, env })
 `ChatManager` does **not** repeat the strip — it spawns through the same `RunnerFactory`
 seam as `TaskManager` (`Runner`'s own constructor already strips the key), so it is
 Max-OAuth-only by construction.
+
+### Attachment sanitization — trust nothing from the client
+Any request/frame field that can carry an operator's image/PDF attachment
+(`POST /api/tasks`, `POST /api/tasks/:id/message`, the `/ws/chat` `input` frame) must be
+run through `sanitizeAttachments(raw)` (`runner.ts`) before it reaches `Runner.send()`.
+It never throws — a malformed shape, a disallowed `mediaType`, or an oversized decoded
+payload is silently dropped, and the array is capped at `MAX_ATTACHMENTS`. `kind` is
+always *derived* from the allow-listed `mediaType`, never trusted from the client, so a
+mismatched `kind` field can't smuggle a PDF in as an image. The limits
+(`ALLOWED_MEDIA_TYPES`/`MAX_ATTACHMENTS`/`MAX_ATTACHMENT_BYTES`) live once in `types.ts`
+and are mirrored to the web side purely as a client-side fast-fail (`attachments.ts`'s
+`validateFile`) — the server-side `sanitizeAttachments` call is the actual enforcement
+point and must never be skipped for a new route/frame that accepts attachments.
+Attachments are transient by design: never written to disk or the DB, held only long
+enough to build one outbound stream-json message (`buildUserMessage`).
 
 ### Repo registry (config)
 Targets load with a fallback chain — `config/repos.json` → `ZMRNG_REPOS` env →

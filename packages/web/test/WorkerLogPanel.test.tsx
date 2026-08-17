@@ -15,7 +15,7 @@ describe('<WorkerLogPanel>', () => {
     const box = screen.getByRole('textbox')
     fireEvent.change(box, { target: { value: '  steer this  ' } })
     fireEvent.click(screen.getByRole('button', { name: /send/i }))
-    await waitFor(() => expect(onMessage).toHaveBeenCalledWith('steer this'))
+    await waitFor(() => expect(onMessage).toHaveBeenCalledWith('steer this', undefined))
   })
 
   it('shows the composer during clarify (the answer-questions phase)', () => {

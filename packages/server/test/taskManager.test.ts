@@ -7,7 +7,7 @@ import { TaskManager } from '../src/phases.js'
 import { Db } from '../src/db.js'
 import { config } from '../src/config.js'
 import type { RunnerCallbacks, RunnerFactory, RunnerLike, SpawnOptions } from '../src/runner.js'
-import type { WsEvent } from '../src/types.js'
+import type { Attachment, WsEvent } from '../src/types.js'
 
 // The state-machine test. It drives the REAL TaskManager over a REAL temp git
 // repo (createWorktree/removeWorktree run for real, ~50ms) but injects a FAKE
@@ -19,14 +19,17 @@ import type { WsEvent } from '../src/types.js'
 /** A test double for `Runner`: records turns and lets the test drive callbacks. */
 class FakeRunner implements RunnerLike {
   sent: string[] = []
+  /** Attachments carried by each `send`, index-aligned with `sent`. */
+  sentAttachments: (Attachment[] | undefined)[] = []
   killed = false
   interrupted = false
   constructor(
     readonly opts: SpawnOptions,
     readonly cb: RunnerCallbacks,
   ) {}
-  send(text: string): void {
+  send(text: string, attachments?: Attachment[]): void {
     this.sent.push(text)
+    this.sentAttachments.push(attachments)
   }
   interrupt(): void {
     this.interrupted = true
@@ -319,5 +322,67 @@ describe('deleteTask', () => {
 
     expect(db.getTask(id)).toBeUndefined()
     expect(existsSync(worktreePath)).toBe(false)
+  })
+
+  // ---- multimodal attachments (image/PDF drop/paste) ----
+
+  const attach = (name: string): Attachment => ({
+    kind: 'image',
+    mediaType: 'image/png',
+    dataBase64: 'aGVsbG8=',
+    name,
+  })
+
+  it('carries new-task-box attachments into the first clarify send', async () => {
+    const task = mgr.createTask(
+      'with image',
+      'do the thing',
+      undefined,
+      undefined,
+      'normal',
+      'sandbox',
+      'direct',
+      [attach('a.png')],
+    )
+    await mgr.start(task.id)
+    const clarify = latest()
+    // Exactly one send so far (the clarify kickoff) — it carries the attachment.
+    expect(clarify.sentAttachments[0]).toEqual([attach('a.png')])
+  })
+
+  it('consumes held attachments once — later turns do not re-inject them', async () => {
+    const task = mgr.createTask(
+      'with image',
+      'do the thing',
+      undefined,
+      undefined,
+      'normal',
+      'sandbox',
+      'direct',
+      [attach('a.png')],
+    )
+    await mgr.start(task.id)
+    const runner = latest()
+    // Only the clarify kickoff carried the held attachment...
+    expect(runner.sentAttachments[0]).toEqual([attach('a.png')])
+    // ...and a subsequent attachment-less operator turn does NOT re-inject it.
+    mgr.message(task.id, 'a follow-up')
+    expect(runner.sentAttachments.at(-1)).toBeUndefined()
+  })
+
+  it('passes steer attachments through message() to the live send', async () => {
+    const id = await startTask('steer me', 'direct')
+    expect(status(id)).toBe('clarify')
+    const runner = latest()
+    const sendsBefore = runner.sent.length
+    mgr.message(id, 'look at this', [attach('shot.png')])
+    expect(runner.sent[sendsBefore]).toBe('look at this')
+    expect(runner.sentAttachments[sendsBefore]).toEqual([attach('shot.png')])
+    // The logged operator event notes that a file rode along.
+    expect(
+      events.some(
+        (e) => e.type === 'event' && /\[1 attachment\(s\)\]/.test(e.event.payload.text ?? ''),
+      ),
+    ).toBe(true)
   })
 })
