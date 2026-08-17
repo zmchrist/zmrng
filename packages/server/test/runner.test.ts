@@ -6,7 +6,10 @@ import {
   summarizeResult,
   partialDelta,
   parseUsage,
+  buildUserMessage,
+  sanitizeAttachments,
 } from '../src/runner.js'
+import type { Attachment } from '../src/types.js'
 
 // Fed from REAL-shaped captured stream-json lines checked in under fixtures/.
 // Each line is one `claude --output-format stream-json` event; we parse the
@@ -126,5 +129,103 @@ describe('parseUsage', () => {
   it('returns undefined for a result line with no usage (e.g. an error turn)', () => {
     const errResult = lines.find((l) => l.type === 'result' && l.is_error === true)!
     expect(parseUsage(errResult)).toBeUndefined()
+  })
+})
+
+// ---- multimodal outbound message (image/PDF drop/paste) ----
+
+/** Pull the `content` block array out of a buildUserMessage() result. */
+function contentOf(msg: object): Record<string, unknown>[] {
+  const m = msg as { message?: { role?: string; content?: unknown[] } }
+  return (m.message?.content ?? []) as Record<string, unknown>[]
+}
+
+const img = (over: Partial<Attachment> = {}): Attachment => ({
+  kind: 'image',
+  mediaType: 'image/png',
+  dataBase64: 'aGVsbG8=',
+  ...over,
+})
+const pdf = (over: Partial<Attachment> = {}): Attachment => ({
+  kind: 'document',
+  mediaType: 'application/pdf',
+  dataBase64: 'JVBERi0=',
+  ...over,
+})
+
+describe('buildUserMessage', () => {
+  it('text-only → exactly one text block', () => {
+    const content = contentOf(buildUserMessage('hello'))
+    expect(content).toEqual([{ type: 'text', text: 'hello' }])
+  })
+
+  it('one image → image block then text block, in that order', () => {
+    const content = contentOf(buildUserMessage('describe this', [img()]))
+    expect(content).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } },
+      { type: 'text', text: 'describe this' },
+    ])
+  })
+
+  it('one PDF → document block shape', () => {
+    const content = contentOf(buildUserMessage('read it', [pdf()]))
+    expect(content[0]).toEqual({
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0=' },
+    })
+    expect(content.at(-1)).toEqual({ type: 'text', text: 'read it' })
+  })
+
+  it('mixed attachments all precede the single trailing text block', () => {
+    const content = contentOf(buildUserMessage('t', [img(), pdf(), img({ mediaType: 'image/webp' })]))
+    expect(content.map((b) => b.type)).toEqual(['image', 'document', 'image', 'text'])
+  })
+})
+
+describe('sanitizeAttachments', () => {
+  it('keeps allowed types and derives kind from the media type', () => {
+    const out = sanitizeAttachments([
+      { kind: 'image', mediaType: 'image/jpeg', dataBase64: 'YQ==' },
+      { kind: 'image', mediaType: 'application/pdf', dataBase64: 'Yg==' }, // wrong kind → corrected
+    ])
+    expect(out).toEqual([
+      { kind: 'image', mediaType: 'image/jpeg', dataBase64: 'YQ==' },
+      { kind: 'document', mediaType: 'application/pdf', dataBase64: 'Yg==' },
+    ])
+  })
+
+  it('drops disallowed media types and non-object / malformed entries', () => {
+    expect(
+      sanitizeAttachments([
+        { mediaType: 'image/svg+xml', dataBase64: 'YQ==' },
+        { mediaType: 'text/plain', dataBase64: 'YQ==' },
+        { mediaType: 'image/png' }, // no data
+        'nope',
+        null,
+        42,
+      ]),
+    ).toEqual([])
+  })
+
+  it('drops an oversized attachment (decoded > 8 MB)', () => {
+    const huge = 'A'.repeat(Math.ceil((8 * 1024 * 1024 + 1024) / 3) * 4)
+    expect(sanitizeAttachments([{ mediaType: 'image/png', dataBase64: huge }])).toEqual([])
+  })
+
+  it('caps the count at MAX_ATTACHMENTS (10)', () => {
+    const many = Array.from({ length: 15 }, () => ({ mediaType: 'image/png', dataBase64: 'YQ==' }))
+    expect(sanitizeAttachments(many)).toHaveLength(10)
+  })
+
+  it('returns [] for a non-array and never throws', () => {
+    expect(sanitizeAttachments(undefined)).toEqual([])
+    expect(sanitizeAttachments('image')).toEqual([])
+    expect(sanitizeAttachments({})).toEqual([])
+  })
+
+  it('preserves an optional name field', () => {
+    expect(sanitizeAttachments([{ mediaType: 'image/gif', dataBase64: 'YQ==', name: 'cat.gif' }])).toEqual([
+      { kind: 'image', mediaType: 'image/gif', dataBase64: 'YQ==', name: 'cat.gif' },
+    ])
   })
 })

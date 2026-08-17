@@ -1,13 +1,19 @@
 .bar {
   display: flex;
+  flex-direction: column;
   gap: 10px;
-  align-items: flex-end;
   padding: 16px 28px 20px;
   border-top: 1px solid var(--border);
   background: var(--surface-strong);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
   box-shadow: var(--hairline);
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
 }
 
 .input {

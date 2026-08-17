@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import styles from './WorkspaceView.module.css'
 import type {
   AgentSummary,
+  Attachment,
   CaveStyle,
   EffortLevel,
   FlowMode,
@@ -79,10 +80,11 @@ interface Props {
       flow: FlowMode
       repoId: string
     },
+    attachments?: Attachment[],
   ) => Promise<void>
   /** Selected-task lifecycle actions (moved from TaskDetail). */
   onStart: () => Promise<unknown>
-  onMessage: (text: string) => Promise<unknown>
+  onMessage: (text: string, attachments?: Attachment[]) => Promise<unknown>
   onResume: () => Promise<unknown>
   onInterrupt: () => Promise<unknown>
   onDone: () => Promise<unknown>
