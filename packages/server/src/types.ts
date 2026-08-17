@@ -306,6 +306,29 @@ export type TermServerMsg =
   | { type: 'data'; data: string }
   | { type: 'exit'; code: number | null }
 
+// ---- standalone chat agent (bottom-dock, GET /ws/chat) ---------------------
+
+/**
+ * client -> server chat frames (over GET /ws/chat). `start` spawns a fresh
+ * conversational `claude` session with the chosen controls (killing any prior
+ * one on the socket); `input` sends an operator turn; `interrupt` cuts the
+ * in-flight turn without killing the session.
+ */
+export type ChatClientMsg =
+  | { type: 'start'; model: string; effort: EffortLevel; style: CaveStyle }
+  | { type: 'input'; text: string }
+  | { type: 'interrupt' }
+
+/** server -> client chat frames — one per meaningful Runner callback. */
+export type ChatServerMsg =
+  | { type: 'ready'; sessionId: string }
+  | { type: 'partial'; text: string }
+  | { type: 'assistant'; text: string }
+  | { type: 'tool'; name: string; summary: string; actor: string; isSubagent: boolean }
+  | { type: 'result'; isError: boolean }
+  | { type: 'exit'; code: number | null }
+  | { type: 'error'; text: string }
+
 // ---- preflight (advisory auth presence probe) ----
 
 /** One advisory presence signal — never a hard gate on Start. */
