@@ -62,8 +62,10 @@ interface Props {
 /**
  * The Zed-style bottom bar: a slim always-visible nav bar of pane toggles, plus
  * an expandable terminal body above it. The Terminal button toggles the body of
- * N terminal tabs (each a live `<Terminal>` — one PTY / WebSocket per tab; no
- * terminal is mounted while the dock is closed). The Tasks / Workspace / Settings
+ * N terminal tabs (each a live `<Terminal>` — one PTY / WebSocket per tab). Once
+ * a tab exists the body stays mounted (hidden via `display: none` while the dock
+ * is minimized) so a live PTY / `claude` session survives a minimize rather than
+ * being torn down. The Tasks / Workspace / Settings
  * buttons toggle their regions in place. The ephemeral terminal tab list is owned
  * here via the pure `terminalDock` reducer; only `open`/`height` persist.
  */
@@ -200,14 +202,21 @@ export function TerminalDock({
   )
 
   const clampedHeight = Math.max(MIN_H, Math.min(MAX_H, height))
-  const bodyMounted = usePanelMount(open)
+  // `bodyVisible` is true while the dock is open AND for the beat its exit
+  // animation plays; it drops to false once fully collapsed. We keep the body
+  // in the DOM the whole time (never unmount it), only toggling `display` —
+  // unmounting it would tear down every child `<Terminal>`/`<ChatPane>`, closing
+  // its per-instance WebSocket and killing the backing PTY / `claude` session.
+  // `display: none` keeps those components mounted so their sockets survive a
+  // minimize; the panes resume exactly where they were on re-open.
+  const bodyVisible = usePanelMount(open)
 
   return (
     <div className={styles.dock}>
-      {bodyMounted && dock.tabs.length > 0 && (
+      {dock.tabs.length > 0 && (
         <div
           className={`${styles.body} ${open ? styles.paneEnter : styles.paneExit}`}
-          style={{ height: clampedHeight }}
+          style={{ height: clampedHeight, display: bodyVisible ? undefined : 'none' }}
         >
           <div
             className={styles.resizeHandle}
