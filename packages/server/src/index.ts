@@ -9,6 +9,7 @@ import { Db } from './db.js'
 import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { TerminalManager, parseClientMsg } from './terminal.js'
+import { ChatManager, parseChatClientMsg } from './chatAgent.js'
 import { listWorktreeFiles } from './worktree.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
@@ -24,6 +25,7 @@ import type {
   ChatMessage,
   UiState,
   TermServerMsg,
+  ChatServerMsg,
 } from './types.js'
 
 function errMsg(e: unknown): string {
@@ -61,6 +63,7 @@ const db = new Db(config.dbPath)
 const hub = new WsHub()
 const manager = new TaskManager(db, (e: WsEvent) => hub.broadcast(e))
 const terminals = new TerminalManager()
+const chats = new ChatManager()
 
 await app.register(websocket)
 
@@ -470,6 +473,83 @@ app.get('/ws/terminal', { websocket: true }, (socket: WebSocket) => {
   }
 })
 
+// Bidirectional chat channel for the bottom-dock standalone agent chat. One
+// socket owns at most one conversational `claude` session: a `start` frame
+// (re)spawns it, `input` sends an operator turn, `interrupt` cuts the in-flight
+// turn. The session is ephemeral — socket close ⇒ session killed.
+app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
+  let session: ReturnType<ChatManager['create']> | null = null
+
+  const send = (msg: ChatServerMsg): void => {
+    try {
+      socket.send(JSON.stringify(msg))
+    } catch {
+      // socket closed mid-send
+    }
+  }
+
+  const startSession = (model: string, effort: EffortLevel, style: CaveStyle): void => {
+    // Replace any prior session on this socket (a config change respawns).
+    if (session) {
+      try {
+        session.kill()
+      } catch {
+        // already exited
+      }
+      session = null
+    }
+    try {
+      session = chats.create(
+        { model, effort, style },
+        {
+          onSession: (sessionId) => send({ type: 'ready', sessionId }),
+          onPartial: (text) => send({ type: 'partial', text }),
+          onAssistantText: (text) => send({ type: 'assistant', text }),
+          onToolUse: (name, summary, isSubagent, subagentType) =>
+            send({
+              type: 'tool',
+              name,
+              summary,
+              actor: isSubagent ? (subagentType ?? 'subagent') : 'main',
+              isSubagent,
+            }),
+          // Subagent results are intentionally not forwarded — keep the thread
+          // to the agent's own turns, tools, and big decisions only.
+          onSubagentResult: () => {},
+          onResult: (_text, isError) => send({ type: 'result', isError }),
+          onExit: (code) => {
+            send({ type: 'exit', code })
+            socket.close()
+          },
+          onSpawnError: (err) => {
+            send({ type: 'error', text: errMsg(err) })
+            socket.close()
+          },
+        },
+      )
+    } catch (err) {
+      app.log.error({ err }, 'chat spawn failed')
+      send({ type: 'error', text: errMsg(err) })
+      socket.close()
+    }
+  }
+
+  socket.on('message', (raw) => {
+    try {
+      const msg = parseChatClientMsg(String(raw))
+      if (!msg) return
+      if (msg.type === 'start') startSession(msg.model, msg.effort, msg.style)
+      else if (msg.type === 'input') session?.send(msg.text)
+      else if (msg.type === 'interrupt') session?.interrupt()
+    } catch (err) {
+      app.log.error({ err }, 'chat message handler failed')
+      socket.close()
+    }
+  })
+  socket.on('close', () => session?.kill())
+  socket.on('error', () => session?.kill())
+})
+
 // ---- static (production) ----
 
 if (existsSync(config.webDist)) {
@@ -494,6 +574,7 @@ function shutdown(signal: string): void {
   app.log.info({ signal }, 'shutting down — killing live claude workers')
   manager.shutdown()
   terminals.killAll()
+  chats.killAll()
   app.close().finally(() => {
     // Checkpoint the WAL into the durable .db before exit so tasks survive the
     // restart — tsx-watch/SIGTERM otherwise kill us before any clean close.

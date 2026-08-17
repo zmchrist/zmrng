@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  addChat,
+  addTab,
   addTerminal,
   closeTerminal,
   emptyDock,
@@ -25,6 +27,7 @@ describe('addTerminal', () => {
     const d = addTerminal(emptyDock(), 'term-1')
     expect(ids(d)).toEqual(['term-1'])
     expect(d.activeId).toBe('term-1')
+    expect(d.tabs[0].kind).toBe('terminal')
   })
 
   it('appends and focuses subsequent terminals, keeping earlier ones', () => {
@@ -81,6 +84,33 @@ describe('closeTerminal', () => {
   it('is a no-op for an unknown id', () => {
     const d = addTerminal(emptyDock(), 'term-1')
     expect(closeTerminal(d, 'term-9')).toEqual(d)
+  })
+})
+
+describe('addChat / addTab (tab kinds)', () => {
+  it('addChat appends a chat-kind tab and focuses it', () => {
+    const d = addChat(emptyDock(), 'chat-1')
+    expect(ids(d)).toEqual(['chat-1'])
+    expect(d.activeId).toBe('chat-1')
+    expect(d.tabs[0].kind).toBe('chat')
+  })
+
+  it('addTab sets the requested kind', () => {
+    expect(addTab(emptyDock(), 't', 'terminal').tabs[0].kind).toBe('terminal')
+    expect(addTab(emptyDock(), 'c', 'chat').tabs[0].kind).toBe('chat')
+  })
+
+  it('terminal and chat tabs coexist in one ordered list, closed/focused by id across kinds', () => {
+    let d = addTerminal(emptyDock(), 'term-1')
+    d = addChat(d, 'chat-1')
+    d = addTerminal(d, 'term-2')
+    expect(ids(d)).toEqual(['term-1', 'chat-1', 'term-2'])
+    expect(d.tabs.map((t) => t.kind)).toEqual(['terminal', 'chat', 'terminal'])
+    d = setActive(d, 'chat-1')
+    expect(d.activeId).toBe('chat-1')
+    d = closeTerminal(d, 'chat-1')
+    expect(ids(d)).toEqual(['term-1', 'term-2'])
+    expect(d.activeId).toBe('term-1')
   })
 })
 
