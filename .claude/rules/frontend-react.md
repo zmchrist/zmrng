@@ -63,6 +63,16 @@ mirroring `Terminal.tsx` — not the `useWs` hub, since each chat tab owns a ded
 `chatProtocol.ts` (`encodeStart`/`encodeInput`/`encodeInterrupt`/`parseChatServerMsg`),
 never hand-rolled JSON inline.
 
+### Attachment drop/paste (shared hook, never hand-rolled per composer)
+Any composer that accepts image/PDF drop/paste (`NewTaskForm`, `ClarifyChat`,
+`ChatPane`) uses the shared `useAttachments()` hook (`useAttachments.ts`) rather than
+rolling its own file-reading/validation: spread `onPaste`/`onDrop` from the hook onto
+the textarea and render `<AttachmentTray attachments={...} onRemove={...}
+error={...} />` beneath it. File validation (`validateFile` in `attachments.ts`) mirrors
+the server's `ALLOWED_MEDIA_TYPES`/`MAX_ATTACHMENT_BYTES` — treat it as a fast-fail UX
+convenience only; the server's `sanitizeAttachments()` is the real enforcement point, so
+never skip re-validating a new attachment-accepting field on the server.
+
 ### Type mirror
 `packages/web/src/types.ts` mirrors `packages/server/src/types.ts`. When a server
 type changes, update this file in the same change — there is no shared package.
@@ -81,8 +91,10 @@ packages/web/src/
   terminalProtocol.ts — pure wire helpers for /ws/terminal (encodeInput/encodeResize/parseServerMsg)
   chatProtocol.ts — pure wire helpers for /ws/chat (encodeStart/encodeInput/encodeInterrupt/parseChatServerMsg)
   chatThread.ts   — React-free bubble-thread reducer for the standalone chat pane (emptyThread/pushUser/appendPartial/finalizeAssistant/pushToolNote/endTurn/resetThread)
+  attachments.ts  — pure image/PDF drop-paste helpers (mimeToKind/validateFile/fileToAttachment/filesFromPaste/filesFromDrop), mirroring the server's allow-list/size limits
+  useAttachments.ts — shared hook (attachments/addFiles/remove/clear/error/onPaste/onDrop) used by NewTaskForm, ClarifyChat, and ChatPane
   themes.ts       — theme catalog (11 themes: one per color + black/white/grey) + pure helpers (buildThemeVars/applyTheme/loadStoredTheme/saveStoredTheme), persisted to localStorage only
-  components/     — TaskList, NewTaskForm, ClarifyChat (live composer, placeholder prop), WorkerLog (read-only tool/subagent rows), WorkerLogPanel (WorkerLog + steer composer), TaskControls (compact selected-task card + dropdown), WorkspaceView (locked-left Files sidebar + toggleable WorkspaceTabs center + toggleable task rail right bar + global TerminalDock; Files tree shows the Projects dir when no task is selected), WorkspaceTabs (draggable tabs — file Viewers/WorkerLogPanel/Notes/Chat), TerminalDock (Zed-style bottom dock + bottom nav bar of Terminal/Chat/Tasks/Workspace/Settings pane toggles, `+💬` new-chat tab-strip affordance, ctrl+` toggle, drag-resize), ChatPane (standalone agent-chat bubble thread, one WebSocket per instance to /ws/chat, per-tab model/effort/style selects, Stop button while busy), SettingsModal (ephemeral focused overlay; theme swatch grid + dark/light toggle, backed by `themes.ts`), Terminal (xterm.js glue, one WebSocket per instance)
+  components/     — TaskList, NewTaskForm (title/body + drop-paste attachments), ClarifyChat (live composer, placeholder prop, drop-paste attachments), AttachmentTray (thumbnail strip for a composer's pending attachments — image previews, PDF chip, remove + error), WorkerLog (read-only tool/subagent rows), WorkerLogPanel (WorkerLog + steer composer, forwards attachments), TaskControls (compact selected-task card + dropdown), WorkspaceView (locked-left Files sidebar + toggleable WorkspaceTabs center + toggleable task rail right bar + global TerminalDock; Files tree shows the Projects dir when no task is selected), WorkspaceTabs (draggable tabs — file Viewers/WorkerLogPanel/Notes/Chat), TerminalDock (Zed-style bottom dock + bottom nav bar of Terminal/Chat/Tasks/Workspace/Settings pane toggles, `+💬` new-chat tab-strip affordance, ctrl+` toggle, drag-resize), ChatPane (standalone agent-chat bubble thread, one WebSocket per instance to /ws/chat, per-tab model/effort/style selects, Stop button while busy, drop-paste attachments), SettingsModal (ephemeral focused overlay; theme swatch grid + dark/light toggle, backed by `themes.ts`), Terminal (xterm.js glue, one WebSocket per instance)
 ```
 
 ## Anti-Patterns

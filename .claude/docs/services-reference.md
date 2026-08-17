@@ -29,12 +29,39 @@ Wraps one long-lived headless `claude` child process per task.
   - `result` → `onResult(result, is_error, usage)`; `parseUsage` reads
     `input_tokens` / `output_tokens` / `cache_*` / `total_cost_usd` / `num_turns`.
   - all other types (including `control_response`) → tolerant no-op.
-- **`send(text)`** writes a stream-json `user` turn to the child's stdin.
+- **`send(text, attachments?: Attachment[])`** writes a stream-json `user` turn to the
+  child's stdin, built via `buildUserMessage(text, attachments)`.
 - **`interrupt()`** writes a `{type:'control_request', request_id:<uuid>, request:{subtype:'interrupt'}}` line to stdin (ESC-style hard stop; child stays alive and idles). Wrapped in try/catch for a closed stdin.
 - **`kill()`** ends stdin and sends SIGTERM (both wrapped in try/catch).
 - **`pendingTasks`** — bounded `Map<tool_use_id, subagent_type>`; prunes on result; capped at 200 entries (oldest evicted) to prevent unbounded growth.
 - Callbacks: `onSession`, `onAssistantText`, `onPartial`, `onResult`, `onToolUse(name, summary, isSubagent, subagentType?)`, `onSubagentResult(subagentType, summary, isError)`, `onExit`, `onSpawnError`.
 - Helpers `asRecord` / `asString` keep parsing typed without `any`. `summarizeTool(name, input)` and `summarizeResult(content)` produce compact one-line summaries.
+
+### Multimodal attachments (operator image/PDF drop/paste)
+- **`Attachment`** (`types.ts`) — `{ kind: 'image' | 'document'; mediaType: string;
+  dataBase64: string; name?: string }`. `dataBase64` carries no `data:...;base64,`
+  prefix. Never persisted to disk or the DB — transient, held only long enough to build
+  one outbound stream-json message.
+- **`ALLOWED_MEDIA_TYPES`** — `image/png`, `image/jpeg`, `image/gif`, `image/webp`,
+  `application/pdf`. **`MAX_ATTACHMENTS`** — 10 per turn. **`MAX_ATTACHMENT_BYTES`** —
+  8 MB, checked against the *decoded* size (`Math.floor(base64.length * 3 / 4)`).
+- **`sanitizeAttachments(raw: unknown): Attachment[]`** — tolerant coercion of untyped
+  request/frame input: drops any entry with a bad shape, a disallowed `mediaType`, or an
+  oversized decoded payload, and caps the array at `MAX_ATTACHMENTS`. `kind` is always
+  *derived* from the (allow-listed) `mediaType` — `application/pdf` → `document`, else
+  `image` — so a mismatched/absent client-supplied `kind` field can never smuggle a PDF in
+  as an image or vice-versa. Never throws — a bad attachment is dropped, never a 500.
+  Shared by `POST /api/tasks`, `POST /api/tasks/:id/message`, and the `/ws/chat` `input`
+  frame parser.
+- **`buildUserMessage(text: string, attachments?: Attachment[]): object`** — builds the
+  stream-json `{type:'user', message:{role:'user', content:[...]}}` envelope. Attachments
+  become leading content blocks (`{type:'image', source:{type:'base64', media_type, data}}`
+  for images, `{type:'document', ...}` for PDFs) ahead of the trailing `{type:'text',
+  text}` block, per the Anthropic content-ordering convention; a text-only turn keeps the
+  pre-feature single-text-block shape. PDFs are sent inline as base64 `document` blocks
+  over stream-json stdin under Max OAuth — if a future CLI version rejects inline
+  documents, the sanctioned fallback (spilling to `os.tmpdir()` and referencing the path in
+  the text block) stays isolated to this function.
 
 ## TaskManager / phases — `packages/server/src/phases.ts`
 
@@ -44,10 +71,15 @@ The phase state machine and orchestration.
   (plus `blocked` for a missing subagent, and `failed`). Each autonomous phase
   (planning/executing) runs in its own fresh `claude` session. `building` is a legacy
   single-phase status, retained only for old DB rows/events.
-- **`createTask(title, body, model?, effort?, style?, repoId?)`** — resolves `repoId`
-  against the registry (falls back to `config.defaultRepoId`), inserts, broadcasts.
+- **`createTask(title, body, model?, effort?, style?, repoId?, flow?, attachments?:
+  Attachment[])`** — resolves `repoId` against the registry (falls back to
+  `config.defaultRepoId`), inserts, broadcasts. A non-empty `attachments` (new-task-box
+  drop/paste) is held in the private `pendingAttachments: Map<taskId, Attachment[]>` —
+  it is not sent yet, since the runner doesn't exist until `start()`.
 - **`start(taskId)`** — resolves the target repo via `repoById`, creates a worktree in
-  it, transitions to `clarify`, spawns the runner, sends the clarify kickoff.
+  it, transitions to `clarify`, spawns the runner, sends the clarify kickoff. Consumes (and
+  deletes) any `pendingAttachments` entry for the task at this single send, so a re-start
+  after a `fail` never double-injects the original attachments.
 - **`systemPrompt(branch, repoPath, defaultBranch, style)`** — repo-agnostic; tells the
   worker it operates on the target repo at `repoPath`, on branch `branch` cut from
   `defaultBranch`, to obey *that repo's* CLAUDE.md/.claude/rules, never touch the
@@ -63,9 +95,11 @@ The phase state machine and orchestration.
 - **Execute lanes:** cap = `config.maxLanes` (`ZMRNG_MAX_LANES`, default 2). A task takes
   a lane at `ZMRNG_READY`; extra READY tasks park in `planning` with `queued=true` in
   `executeQueue`; `freeLane` (on PR/done/cancel/fail) promotes the next via `beginPlan`.
-- **`message(taskId, text)`** — accepted while `status ∈ {clarify, planning, executing,
-  validating}` and a runner exists (gate lifted from clarify-only); throws otherwise.
-  Emits an `operator` event and calls `runner.send(text)`.
+- **`message(taskId, text, attachments?: Attachment[])`** — accepted while `status ∈
+  {clarify, planning, executing, validating}` and a runner exists (gate lifted from
+  clarify-only); throws otherwise. Emits an `operator` event (its logged text gains a
+  trailing `[n attachment(s)]` suffix when `attachments` is non-empty) and calls
+  `runner.send(text, attachments)`.
 - **`interrupt(taskId)`** (new) — looks up the runner (throws if none); adds the task to
   the private `interrupting` Set; calls `runner.interrupt()`; emits a `status` note. Does
   **not** change the task's status (worker idles awaiting the next `message()`).
@@ -73,7 +107,9 @@ The phase state machine and orchestration.
   `interrupting.has(taskId)` and `isResult` is true, the flag is consumed, a
   `'turn interrupted — awaiting your direction'` status event is emitted, and the method
   returns early — skipping all token detection and the `isError`-fail branch. This
-  prevents a hard Stop from failing the task.
+  prevents a hard Stop from failing the task. `pendingAttachments` is cleaned up the same
+  way — deleted in `cancel()`/`deleteTask()` alongside `interrupting`/`blockedFrom` — so an
+  un-started task's held attachments never leak past its lifecycle.
 - **`resume` / `done` / `cancel` / `shutdown`** — resume a `blocked` task after the
   missing agent is added; finish + local-sync after merge + remove worktree; cancel +
   remove worktree; kill all live runners. `done()`/`cancel()`/`fail()`/`onPr()` each call
@@ -130,7 +166,11 @@ distinct from the existing per-task `/api/tasks/:id/chat` REST chat (`chat.ts`,
   parse of one client→server frame (mirrors `terminal.ts`'s `parseClientMsg`):
   malformed JSON, a non-object, an unknown `type`, or an ill-typed field all yield
   `undefined` rather than throwing. Accepts `{type:'start', model, effort, style}`,
-  `{type:'input', text}`, and `{type:'interrupt'}`.
+  `{type:'input', text, attachments?}`, and `{type:'interrupt'}`. An `input` frame's
+  `attachments` field is run through `sanitizeAttachments()` (from `runner.ts`) — a
+  malformed/oversized/disallowed entry is silently dropped rather than reaching the
+  runner; the field is entirely omitted from the returned object when the sanitized
+  array is empty.
 - **`ChatConfig`** — `{ model: string; effort: EffortLevel; style: CaveStyle }`, the
   per-tab controls chosen for one session.
 - **`ChatManager`** — tracks live sessions in a `Set<RunnerLike>`; constructed with the
@@ -208,11 +248,20 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
 
 ## Fastify server — `packages/server/src/index.ts`
 
+- **Body limit:** Fastify's default 1MB `bodyLimit` is raised to `32 * 1024 * 1024` (32MB)
+  at construction (`Fastify({ logger: true, bodyLimit: ... })`) so a POST body carrying
+  base64-encoded image/PDF attachments (up to `MAX_ATTACHMENTS` × `MAX_ATTACHMENT_BYTES`
+  each) doesn't hit `FST_ERR_CTP_BODY_TOO_LARGE`.
 - **REST:** `GET /api/config` (model, maxLanes, targetRepo, defaultRepoId, authMode),
   `GET /api/repos` (the registry), `GET /api/tasks`, `POST /api/tasks`
-  (title/body/model/effort/style/repoId), `GET /api/tasks/:id/events`,
+  (title/body/model/effort/style/repoId/flow/**attachments**), `GET /api/tasks/:id/events`,
   `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`.
   `interrupt` is bodyless; mirrors the `resume` route's try/catch + 400 on error shape.
+  `POST /api/tasks` and `POST /api/tasks/:id/message` both run `body.attachments` through
+  `sanitizeAttachments()` (from `runner.ts`) before handing it to `manager.createTask()` /
+  `manager.message()`; each route's title/text is now required *or* an attachment is
+  present (image/PDF-only turns are valid — `POST /api/tasks` still always requires a
+  title, `POST /api/tasks/:id/message` requires text or an attachment).
   (This list predates several routes — `/api/agents`, `/api/preflight`, `/api/ui-state`,
   `/api/tasks/:id/{files,file,notes,chat}`, `/api/tasks/:id/archive`, and the
   Projects-dir browsing pair `GET /api/projects/files` (dotfile-skipping, depth-capped
@@ -228,7 +277,9 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   socket rather than throwing. `GET /ws/chat` — one socket owns at most one live chat
   session; a `start` frame (re)spawns via `ChatManager.create()` (killing any prior
   session on the socket first, so a config change respawns cleanly), an `input` frame
-  sends a turn, `interrupt` stops the in-flight turn without killing the session. Runner
+  sends a turn (`session.send(msg.text, msg.attachments)` — the frame's already-sanitized
+  `attachments`, if any, ride along), `interrupt` stops the in-flight turn without killing
+  the session. Runner
   callbacks map to server→client `ChatServerMsg` frames: `onSession`→`ready`,
   `onPartial`→`partial`, `onAssistantText`→`assistant`, `onToolUse`→`tool` (`actor` is
   the subagent type or `'main'`), `onResult`→`result`, `onExit`→`exit` (then closes the
@@ -245,8 +296,9 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
 ### Chat wire types (`types.ts`, mirrored)
 - **`ChatClientMsg`** (client→server, over `GET /ws/chat`) — `{type:'start'; model:
   string; effort: EffortLevel; style: CaveStyle}` (spawns a fresh session with the
-  chosen controls, killing any prior one on the socket) | `{type:'input'; text: string}`
-  (one operator turn) | `{type:'interrupt'}` (cuts the in-flight turn without killing
+  chosen controls, killing any prior one on the socket) | `{type:'input'; text: string;
+  attachments?: Attachment[]}` (one operator turn, optionally carrying image/PDF
+  drop/paste attachments) | `{type:'interrupt'}` (cuts the in-flight turn without killing
   the session).
 - **`ChatServerMsg`** (server→client) — `{type:'ready'; sessionId: string}` |
   `{type:'partial'; text: string}` | `{type:'assistant'; text: string}` |
@@ -268,6 +320,9 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
 - **useWs.ts** — auto-reconnect WebSocket (1s→30s backoff).
 - **api.ts** — REST client; only sets JSON content-type when a body is sent (avoids
   `FST_ERR_CTP_EMPTY_JSON_BODY` on bodyless POSTs). Includes `interrupt(id)` (bodyless POST).
+  `createTask(...)` and `message(id, text, attachments?)` both take an optional trailing
+  `attachments?: Attachment[]`, sent as-is in the JSON body for the server's
+  `sanitizeAttachments()` to re-validate.
 - **types.ts** — MANUAL mirror of `packages/server/src/types.ts`. `EventSub` includes
   `'tool' | 'subagent' | 'subagent_result'`; `EventPayload` includes `tool?`, `actor?`,
   `subagentType?`, `summary?`.
@@ -332,6 +387,21 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
     sanctioned dynamic inline style, same precedent as `WorkerLog`). All the testable
     messaging logic lives in the pure `chatThread.ts` / `chatProtocol.ts` modules; the
     component itself is not unit-tested (jsdom has no WebSocket glue worth exercising).
+    Wired for image/PDF drop/paste (see the `AttachmentTray` bullet below): a local
+    `useAttachments()` feeds the tray + sends via `encodeInput(text, attachments)`.
+  - `AttachmentTray` (`components/AttachmentTray.tsx`, current as of 2026-08-17) —
+    purely presentational thumbnail strip for one composer's pending `Attachment[]`:
+    image attachments render an inline `<img>` preview (built from a `data:` URL via
+    `dataUrl(a)`), PDFs render a generic "PDF" chip, each item has a remove button, and a
+    validation/limit error string (if any) renders on its own line below. Renders `null`
+    when there are no attachments and no error. All state lives in the `useAttachments()`
+    hook that owns it — shared, in the same shape, by `NewTaskForm`, `ClarifyChat`, and
+    `ChatPane`, each of which spreads `onPaste`/`onDrop` from the hook onto its textarea
+    and renders `<AttachmentTray attachments={...} onRemove={...} error={...} />`
+    beneath it. `NewTaskForm`'s submit and `ClarifyChat`'s `onSend` gain an optional
+    trailing `attachments?: Attachment[]` argument (an image-only task/message is valid);
+    `WorkerLogPanel`'s `onMessage(text, attachments?)` forwards straight through to
+    `api.message(id, text, attachments)`.
 - **terminalDock.ts** — pure reducer, `DockState { tabs: DockTab[]; activeId: string |
   null }` where each `DockTab` now carries a `kind: 'terminal' | 'chat'` so terminal and
   chat tabs coexist in one ordered list. `emptyDock()`, `addTab(state, id, kind)`
@@ -345,11 +415,26 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   the frames the server's `parseClientMsg` accepts; `parseServerMsg(raw)` tolerantly parses
   a server→client `TermServerMsg` (`data` | `exit`), returning `undefined` on anything
   malformed rather than throwing.
-- **chatProtocol.ts** — `encodeStart(model, effort, style)` / `encodeInput(text)` /
+- **chatProtocol.ts** — `encodeStart(model, effort, style)` / `encodeInput(text,
+  attachments?)` (omits the `attachments` field entirely when the array is empty/absent) /
   `encodeInterrupt()` produce exactly the frames the server's `parseChatClientMsg`
   accepts; `parseChatServerMsg(raw)` tolerantly parses a server→client `ChatServerMsg`
   (`ready`/`partial`/`assistant`/`tool`/`result`/`exit`/`error`), returning `undefined` on
   anything malformed rather than throwing (mirrors `terminalProtocol.parseServerMsg`).
+- **attachments.ts** — pure helpers turning dropped/pasted browser `File`s into the
+  transient `Attachment` shape, unit-testable without a DOM: `mimeToKind(mime)` (PDFs are
+  documents, everything else an image), `validateFile(file)` (checks against
+  `ALLOWED_MEDIA_TYPES`/`MAX_ATTACHMENT_BYTES`, mirroring the server's limits — returns a
+  human-readable error string or `null`), `fileToAttachment(file)` (async `FileReader` →
+  base64, strips the `data:...;base64,` prefix), `filesFromPaste(e)` /
+  `filesFromDrop(e)` (pull the `File[]` off a clipboard-paste / drag-drop event).
+- **useAttachments.ts** — the `useAttachments()` hook shared by the three composers
+  (`NewTaskForm`, `ClarifyChat`, `ChatPane`) so the drop/paste glue is DRY: `attachments`,
+  `addFiles(files)` (validates + reads, surfacing the first validation error, appending
+  survivors up to `MAX_ATTACHMENTS` and reporting when the cap is hit), `remove(index)`,
+  `clear()`, `error`, and ready-to-spread `onPaste`/`onDrop` handlers (each calls
+  `e.preventDefault()` only when it actually found files, so normal text paste/drop is
+  untouched).
 - **chatThread.ts** — pure, React-free reducer for the chat bubble thread, `ThreadState {
   items: ThreadItem[]; busy: boolean }` (`ThreadItem` is a `user` bubble, a `agent` bubble
   with a `streaming` flag, or a slim `tool` note). `emptyThread()`, `pushUser(state, text)`

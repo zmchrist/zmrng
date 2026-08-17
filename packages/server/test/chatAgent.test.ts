@@ -83,6 +83,28 @@ describe('parseChatClientMsg', () => {
     expect(parseChatClientMsg(JSON.stringify({ type: 'interrupt' }))).toEqual({ type: 'interrupt' })
   })
 
+  it('parses an input frame carrying valid attachments', () => {
+    const att = { kind: 'image', mediaType: 'image/png', dataBase64: 'YQ==' }
+    expect(
+      parseChatClientMsg(JSON.stringify({ type: 'input', text: 'see this', attachments: [att] })),
+    ).toEqual({
+      type: 'input',
+      text: 'see this',
+      attachments: [{ kind: 'image', mediaType: 'image/png', dataBase64: 'YQ==' }],
+    })
+  })
+
+  it('drops a malformed attachments field without throwing (tolerant parse)', () => {
+    expect(parseChatClientMsg(JSON.stringify({ type: 'input', text: 'hi', attachments: 'oops' }))).toEqual(
+      { type: 'input', text: 'hi' },
+    )
+    expect(
+      parseChatClientMsg(
+        JSON.stringify({ type: 'input', text: 'hi', attachments: [{ mediaType: 'text/plain', dataBase64: 'YQ==' }] }),
+      ),
+    ).toEqual({ type: 'input', text: 'hi' })
+  })
+
   it('returns undefined for near-miss cases and never throws', () => {
     expect(parseChatClientMsg('{not json')).toBeUndefined()
     expect(parseChatClientMsg(JSON.stringify({ type: 'nope' }))).toBeUndefined()
