@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { WebSocket } from 'ws'
-import { config } from './config.js'
+import { config, liveRepos } from './config.js'
 import { Db } from './db.js'
 import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
@@ -88,7 +88,9 @@ app.get('/api/config', () => ({
   dev: IS_DEV,
 }))
 
-app.get('/api/repos', () => config.repos)
+// Rescanned live on every request (not the boot-time `config.repos` singleton) so
+// a repo added/renamed under the projects dir shows up on a plain page refresh.
+app.get('/api/repos', () => liveRepos())
 
 // Self-update reboot (Settings panel): fast-forward zmrng's own checkout to
 // origin/main, rebuild, then restart so the fresh code takes effect. Runs in
