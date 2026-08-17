@@ -46,6 +46,9 @@ function initFakeHarness(): string {
   writeFileSync(path.join(dir, 'hooks', 'post_tool_use_lint.py'), '# lint\n')
   writeFileSync(path.join(dir, 'hooks', 'stop_validate.py'), '# validate\n')
   writeFileSync(path.join(dir, 'CLAUDE.md'), '# harness CLAUDE\n')
+  mkdirSync(path.join(dir, 'commands', 'core_piv_loop'), { recursive: true })
+  writeFileSync(path.join(dir, 'commands', 'core_piv_loop', 'plan-feature.md'), '# plan-feature\n')
+  writeFileSync(path.join(dir, 'commands', 'core_piv_loop', 'execute.md'), '# execute\n')
   return dir
 }
 
@@ -81,6 +84,29 @@ describe('seedHarness', () => {
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('security_guard.py')
   })
 
+  it('copies core_piv_loop commands unprefixed — slash resolution needs the exact name', async () => {
+    await seedHarness(worktreeDir, '/some/target/repo', harnessDir)
+
+    expect(
+      existsSync(path.join(worktreeDir, '.claude', 'commands', 'core_piv_loop', 'plan-feature.md')),
+    ).toBe(true)
+    expect(
+      existsSync(path.join(worktreeDir, '.claude', 'commands', 'core_piv_loop', 'execute.md')),
+    ).toBe(true)
+  })
+
+  it('never clobbers a pre-existing command file with the same name', async () => {
+    const commandsDir = path.join(worktreeDir, '.claude', 'commands', 'core_piv_loop')
+    mkdirSync(commandsDir, { recursive: true })
+    const ownContent = '# the target repo already owns this command\n'
+    writeFileSync(path.join(commandsDir, 'plan-feature.md'), ownContent)
+
+    await seedHarness(worktreeDir, '/some/target/repo', harnessDir)
+
+    expect(readFileSync(path.join(commandsDir, 'plan-feature.md'), 'utf8')).toBe(ownContent)
+    expect(existsSync(path.join(commandsDir, 'execute.md'))).toBe(true)
+  })
+
   it('is never swept into `git add -A` — seeded paths stay untracked', async () => {
     await seedHarness(worktreeDir, '/some/target/repo', harnessDir)
     git(worktreeDir, ['add', '-A'])
@@ -89,6 +115,7 @@ describe('seedHarness', () => {
     expect(status).not.toContain('zmrng-')
     expect(status).not.toContain('settings.local.json')
     expect(status).not.toContain('zmrng-hooks')
+    expect(status).not.toContain('core_piv_loop')
   })
 
   it('running twice does not duplicate info/exclude lines or throw', async () => {
