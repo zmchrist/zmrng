@@ -215,6 +215,23 @@ export async function seedHarness(
     seeded.push(`.claude/agents/${destName}`)
   }
 
+  // core_piv_loop commands seed unprefixed (unlike rules/skills/agents above):
+  // `/core_piv_loop:plan-feature` and `:execute` only slash-resolve on an exact
+  // `.claude/commands/core_piv_loop/<name>` path, so a `zmrng-` prefix would break
+  // resolution. Never clobber a target repo's own file of the same name.
+  const pivCommandsSrc = path.join(harnessDir, 'commands', 'core_piv_loop')
+  if (existsSync(pivCommandsSrc)) {
+    const pivCommandsDest = path.join(claudeDir, 'commands', 'core_piv_loop')
+    mkdirSync(pivCommandsDest, { recursive: true })
+    for (const name of listEntries(pivCommandsSrc)) {
+      const dest = path.join(pivCommandsDest, name)
+      if (!existsSync(dest)) {
+        copyFileSync(path.join(pivCommandsSrc, name), dest)
+      }
+      seeded.push(`.claude/commands/core_piv_loop/${name}`)
+    }
+  }
+
   if (hooksAvailable) {
     for (const name of listEntries(path.join(harnessDir, 'hooks'))) {
       copyFileSync(path.join(harnessDir, 'hooks', name), path.join(hooksDestDir, name))

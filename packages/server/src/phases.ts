@@ -176,7 +176,7 @@ export function planKickoff(task: Task, transcript: string): string {
     '',
     'Steps:',
     '1. GRILL THE APPROACH FIRST — no code before the plan is sharp. Read the actual files you intend to change; do not plan against assumptions. Then interrogate your own approach in writing: what is the simplest thing that works, what does this break, what did you assume that the code does not support, what is out of scope. Name at least one alternative you rejected and why. Nothing is written to the plan until it survives this.',
-    '2. Run the `/core_piv_loop:plan-feature` workflow for this task and write the resulting plan to `.agents/plans/<kebab-case-name>.md` within THIS repository. The plan MUST contain an explicit "Test strategy" section naming: the test runner/command this repo uses, exactly which tests you will add or update (file paths), and what each one proves. If this repo has NO test runner, the section must say so plainly and state how the change will be verified instead — never omit the section.',
+    '2. Write a plan for this task to `.agents/plans/<kebab-case-name>.md` within THIS repository. A good plan states the goal, the approach, the exact files you expect to change, and the step-by-step implementation. The plan MUST contain an explicit "Test strategy" section naming: the test runner/command this repo uses, exactly which tests you will add or update (file paths), and what each one proves. If this repo has NO test runner, the section must say so plainly and state how the change will be verified instead — never omit the section.',
     '3. Have a subagent QA the plan: invoke the `zmrng-code-reviewer` agent (fall back to `zmrng-qa`) — both are seeded into this worktree and guaranteed present — to review the plan for soundness against the task and the repo conventions. If it finds the plan unsound, revise the plan and re-QA. Do AT MOST 2 revise+re-QA rounds, then proceed regardless.',
     '4. Assess complexity and choose the execute-phase model and effort: use `opus` for non-trivial/architectural/multi-file work and `sonnet` only for simple, mechanical changes; effort defaults to `high`, raise to `xhigh`/`max` for genuinely complex work and drop to `medium` only for trivial work.',
     'When the plan is written and QA is complete, output on its own line exactly:',
@@ -587,7 +587,7 @@ export class TaskManager {
     if (!this.spawnPhase(task, 'opus', 'high')) return
     this.emitEvent(task.id, 'status', {
       sub: 'status',
-      note: 'plan phase — fresh session (opus · high), running /core_piv_loop:plan-feature',
+      note: 'plan phase — fresh session (opus · high), writing plan',
     })
     this.runners.get(task.id)?.send(planKickoff(task, this.clarifyTranscript(task.id)))
   }
