@@ -134,11 +134,12 @@ export interface GlobalUiState {
   /**
    * Bottom-nav pane visibility. The Tasks right rail and the Workspace center
    * pane each toggle from the bottom nav bar; both default closed so a fresh
-   * load shows only the locked-left Files tree. The Terminal pane's visibility
-   * lives in `terminalDock.open`; the Settings modal is an ephemeral overlay
-   * that is never persisted.
+   * load shows only the Files tree. The Files sidebar also toggles from the
+   * bottom nav bar and defaults OPEN (preserves the prior locked-left
+   * behavior). The Terminal pane's visibility lives in `terminalDock.open`;
+   * the Settings modal is an ephemeral overlay that is never persisted.
    */
-  panes?: { tasks?: boolean; workspace?: boolean }
+  panes?: { tasks?: boolean; workspace?: boolean; files?: boolean }
 }
 
 // ---- workspace tab-pane layout (Zed-style collapsible tabs) ----
