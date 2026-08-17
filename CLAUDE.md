@@ -64,6 +64,7 @@ zmrng/
 │   │       ├── types.ts        — Task/Phase/WsEvent/usage/WorkspaceLayout types (SOURCE OF TRUTH)
 │   │       ├── runner.ts       — spawn + parse the claude child (stream-json), strip API key
 │   │       ├── terminal.ts     — TerminalManager: spawns node-pty shells for the Workspace bottom-dock terminal (GET /ws/terminal), strips API key under oauth
+│   │       ├── chatAgent.ts    — ChatManager: owns live standalone-chat `claude` Runners (GET /ws/chat) via the same RunnerFactory seam as TaskManager; chatSystemPrompt() (conversational, non-worker prompt) + parseChatClientMsg()
 │   │       ├── phases.ts       — phase state machine + system/kickoff prompts + lane queue
 │   │       ├── worktree.ts     — git worktree create/remove per task
 │   │       └── ws.ts           — WebSocket broadcast hub
@@ -79,9 +80,11 @@ zmrng/
 │           ├── workspaceLayout.ts — pure reducer for the Workspace mode's Zed-style tab-pane layout (emptyLayout/hydrateLayout/openFile/focusTab/closeTab/openPanel/moveTab/splitWith/setLogMinimized/pruneFileTabs/dropIntent); enforces panes.length ∈ {1,2} and a single split axis
 │           ├── terminalDock.ts — pure reducer for the bottom-dock terminal's ephemeral tab list (emptyDock/addTerminal/closeTerminal/setActive) — only open/height persist, tabs never do
 │           ├── terminalProtocol.ts — pure wire-protocol helpers for `/ws/terminal` (encodeInput/encodeResize/parseServerMsg)
+│           ├── chatProtocol.ts — pure wire-protocol helpers for `/ws/chat` (encodeStart/encodeInput/encodeInterrupt/parseChatServerMsg)
+│           ├── chatThread.ts   — React-free bubble-thread reducer for the standalone chat pane (emptyThread/pushUser/appendPartial/finalizeAssistant/pushToolNote/endTurn/resetThread)
 │           ├── usePanelMount.ts — hook that keeps a conditionally-rendered panel mounted for `--panel-duration` past a toggle-to-closed, so its CSS closing (minimize) animation can play before unmount; used by every toggleable "window" (Files sidebar, Workspace center pane, task rail, terminal dock body, Settings modal)
 │           ├── themes.ts       — theme catalog (11 themes: one per color + black/white/grey) + pure helpers (`buildThemeVars`/`applyTheme`/`loadStoredTheme`/`saveStoredTheme`); each theme has a dark + light accent pair, swapped via CSS custom properties set on the document root; persisted to localStorage only (`zmrng-theme` key), no server involvement
-│           └── components/      — TaskList, NewTaskForm, ClarifyChat (live composer with `placeholder` prop), WorkerLog (read-only tool/subagent/subagent_result rows color-coded by actor), WorkerLogPanel (WorkerLog + the ClarifyChat steer composer, shown in live phases — the channel that replaced TaskDetail's inline composer), TaskControls (compact selected-task card in the Workspace right bar: title + status pill + lifecycle buttons always visible, repo/flow/model/effort/style/description/usage behind a dropdown), WorkspaceView (the merged home: Files sidebar + WorkspaceTabs center pane + a collapsible right bar = NewTaskForm + TaskControls + TaskList; the Files sidebar, center pane, and right rail each toggle from the bottom nav bar via `GlobalUiState.panes` — Files defaults open (preserves the old locked-left look), center pane + right rail default closed so a fresh load shows only the Files tree; the Files tree shows the task worktree when a task is selected, else the Projects dir (`/api/projects/files`), and opening any file auto-opens the Workspace pane; layout hydrated/persisted per task via `PerTaskUiState.layout`; wraps the region grid + `TerminalDock` in a vertical flex shell so the dock renders regardless of task selection; all three toggleable regions animate open/close via `usePanelMount` + CSS Module `paneEnter`/`paneExit` keyframes), WorkspaceTabs (draggable tabs for file Viewers/WorkerLogPanel/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop), TerminalDock (Zed-style bottom dock **and** the bottom nav bar: five content-sized pane toggles — Terminal/Tasks/Workspace/Files/Settings, each highlighted while its pane is open — plus ctrl+` shortcut, tab strip + drag-resize, terminals mounted only while open; the dock body animates open/close via `usePanelMount`), SettingsModal (ephemeral focused overlay with a dimmed backdrop, animates open/close via `usePanelMount`; first real content is a theme swatch grid + sun/moon dark/light toggle, backed by `themes.ts` and persisted to localStorage), Terminal (xterm.js glue — one WebSocket per instance to `/ws/terminal`, theme-token colors, ResizeObserver fit)
+│           └── components/      — TaskList, NewTaskForm, ClarifyChat (live composer with `placeholder` prop), WorkerLog (read-only tool/subagent/subagent_result rows color-coded by actor), WorkerLogPanel (WorkerLog + the ClarifyChat steer composer, shown in live phases — the channel that replaced TaskDetail's inline composer), TaskControls (compact selected-task card in the Workspace right bar: title + status pill + lifecycle buttons always visible, repo/flow/model/effort/style/description/usage behind a dropdown), WorkspaceView (the merged home: Files sidebar + WorkspaceTabs center pane + a collapsible right bar = NewTaskForm + TaskControls + TaskList; the Files sidebar, center pane, and right rail each toggle from the bottom nav bar via `GlobalUiState.panes` — Files defaults open (preserves the old locked-left look), center pane + right rail default closed so a fresh load shows only the Files tree; the Files tree shows the task worktree when a task is selected, else the Projects dir (`/api/projects/files`), and opening any file auto-opens the Workspace pane; layout hydrated/persisted per task via `PerTaskUiState.layout`; wraps the region grid + `TerminalDock` in a vertical flex shell so the dock renders regardless of task selection; all three toggleable regions animate open/close via `usePanelMount` + CSS Module `paneEnter`/`paneExit` keyframes), WorkspaceTabs (draggable tabs for file Viewers/WorkerLogPanel/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop), TerminalDock (Zed-style bottom dock **and** the bottom nav bar: six content-sized pane toggles — Terminal/Chat/Tasks/Workspace/Files/Settings, each highlighted while its pane is open, plus a `+💬` tab-strip affordance for a new chat tab — Terminal and Chat tabs coexist in one ordered list via the generalized `terminalDock.ts` reducer, ctrl+` shortcut, tab strip + drag-resize, tabs mounted only while the dock is open; the dock body animates open/close via `usePanelMount`), ChatPane (standalone agent-chat bubble thread — one WebSocket per instance to `/ws/chat`, mirrors Terminal.tsx not the useWs hub; per-tab model/effort/style selects default sonnet/medium/caveman-full, a config change respawns the session + resets the thread; Stop button while a turn is in flight; ephemeral, no DB persistence), SettingsModal (ephemeral focused overlay with a dimmed backdrop, animates open/close via `usePanelMount`; first real content is a theme swatch grid + sun/moon dark/light toggle, backed by `themes.ts` and persisted to localStorage), Terminal (xterm.js glue — one WebSocket per instance to `/ws/terminal`, theme-token colors, ResizeObserver fit)
 │   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
 │       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
 │       ├── splash/index.html   — galaxy-warp canvas loader (vanilla JS, no build); click/Enter → warp-dive → white-bloom → navigate to app; two-signal boot handshake: splash emits `splash-ready`, Rust emits `engine-ready {port}` once both sidecar + splash are ready; requires `withGlobalTauri: true` in tauri.conf.json
@@ -187,13 +190,27 @@ See `.claude/docs/services-reference.md` for full method signatures and behavior
   `ANTHROPIC_API_KEY` under oauth mode, self-removes from the tracked `Set` on exit;
   `killAll()` tears every session down on shutdown. Pure `parseClientMsg()` tolerantly
   decodes client `input`/`resize` frames.
+- **ChatManager** (`packages/server/src/chatAgent.ts`) — owns the live standalone
+  agent-chat sessions behind `GET /ws/chat`, one per socket; `create(cfg, cb)` spawns a
+  conversational `claude` at `config.projectsDir` via the same `RunnerFactory` seam
+  `TaskManager` uses (so tests never spawn a real `claude`), self-removes from the
+  tracked `Set` on exit; `killAll()` tears every session down on shutdown.
+  `chatSystemPrompt(style, projectsDir)` is a deliberately non-worker prompt — no task,
+  branch, PR, or control-token protocol, just a helpful assistant with read/explore
+  filesystem access, reusing the exported `styleDirective` from `phases.ts` for the
+  caveman register. `parseChatClientMsg()` tolerantly decodes client `start`/`input`/
+  `interrupt` frames (mirrors `terminal.ts`'s `parseClientMsg`). Distinct from the
+  existing per-task `/api/tasks/:id/chat` REST chat (`chat.ts`) — this one is
+  task-independent and never touches the DB.
 - **Fastify server** (`packages/server/src/index.ts`) — REST surface includes
   `GET /api/config`, `GET /api/repos`, `GET /api/tasks`, `POST /api/tasks`,
   `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`, `GET /api/tasks/:id/events`
   (see `.claude/docs/services-reference.md` for the full, current route list — it has grown
-  since this line was last trimmed). WS: `GET /ws` (task/claude event fan-out) and
-  `GET /ws/terminal` (one PTY per socket, via `TerminalManager`). Static serve of `web/dist`.
-  `shutdown()` calls both `manager.shutdown()` and `terminals.killAll()`.
+  since this line was last trimmed). WS: `GET /ws` (task/claude event fan-out),
+  `GET /ws/terminal` (one PTY per socket, via `TerminalManager`), and `GET /ws/chat` (one
+  standalone chat `claude` session per socket, via `ChatManager`). Static serve of
+  `web/dist`. `shutdown()` calls `manager.shutdown()`, `terminals.killAll()`, and
+  `chats.killAll()`.
 - **useWs** (`packages/web/src/useWs.ts`) — auto-reconnect WebSocket hook (1s→30s backoff).
 
 ## Commands
@@ -273,3 +290,7 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
   `open`/`height` chrome round-trips through `GlobalUiState.terminalDock`. Desktop-sidecar
   vendoring of `node-pty`'s native binding is an explicit out-of-scope follow-up (the
   public-readiness plan's web-only override applies here too).
+- Standalone chat-panel sessions (`/ws/chat`, `ChatManager`) are equally ephemeral — no
+  DB persistence, no task lifecycle — and independent of the pre-existing per-task
+  `/api/tasks/:id/chat` REST chat (`chat.ts`); the two are separate features that happen
+  to share the word "chat".

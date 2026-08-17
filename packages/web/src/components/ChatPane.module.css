@@ -1,0 +1,171 @@
+/* Standalone agent-chat pane — a messaging thread of user/agent bubbles plus a
+   config row and composer. All colors/blur/radius from theme tokens, no raw
+   values. */
+.pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--well);
+}
+
+/* ---- config row (model / effort / style) ------------------------------ */
+.configRow {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  flex: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-strong);
+}
+
+.select {
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  transition: var(--transition);
+}
+.select:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.select:disabled {
+  opacity: 0.5;
+}
+
+/* ---- scrollable message thread ---------------------------------------- */
+.thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.bubble {
+  max-width: 78%;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Operator turns: accent-tinted, right-aligned. */
+.user {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+/* Agent turns: neutral surface, left-aligned. */
+.agent {
+  align-self: flex-start;
+  background: var(--surface-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+/* Blinking caret shown while a bubble is still streaming. */
+.caret {
+  display: inline-block;
+  width: 6px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: blink 1s steps(2, start) infinite;
+}
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* Slim, centered tool-use note between bubbles. Color is set inline from
+   actorColor() — the one sanctioned dynamic inline-style precedent. */
+.toolNote {
+  align-self: center;
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  max-width: 90%;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  opacity: 0.85;
+}
+.toolName {
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+.toolSummary {
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- composer --------------------------------------------------------- */
+.composer {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  flex: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface-strong);
+}
+
+.input {
+  flex: 1;
+  resize: none;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  transition: var(--transition);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sendBtn,
+.stop {
+  flex: none;
+  align-self: stretch;
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.sendBtn:hover:not(:disabled),
+.stop:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.sendBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.stop {
+  color: var(--accent);
+  border-color: var(--accent);
+}

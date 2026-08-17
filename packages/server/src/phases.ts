@@ -97,7 +97,7 @@ const CAVEMAN_RULES: Record<Exclude<CaveStyle, 'normal'>, string> = {
  * operator running `/caveman <level>`); the register rules remain only as a
  * fallback for environments where that skill is not installed.
  */
-function styleDirective(style: CaveStyle): string {
+export function styleDirective(style: CaveStyle): string {
   if (style === 'normal') return ''
   const arg = CAVEMAN_SKILL_ARG[style]
   return [

@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import styles from './TerminalDock.module.css'
 import { Terminal } from './Terminal'
-import { addTerminal, closeTerminal, emptyDock, setActive } from '../terminalDock'
+import { ChatPane } from './ChatPane'
+import { addChat, addTerminal, closeTerminal, emptyDock, setActive } from '../terminalDock'
+import type { DockTab } from '../terminalDock'
 import { usePanelMount } from '../usePanelMount'
 
 /** Clamp bounds for the dock height (px). */
 const MIN_H = 120
 const MAX_H = 640
+
+/** Per-kind label ("Terminal N" / "Chat N"), counting prior tabs of the same kind. */
+function labelFor(tabs: DockTab[], i: number): string {
+  const kind = tabs[i].kind
+  const n = tabs.slice(0, i + 1).filter((t) => t.kind === kind).length
+  return `${kind === 'chat' ? 'Chat' : 'Terminal'} ${n}`
+}
 
 interface Props {
   /** Whether the dock body is expanded (persisted chrome, from App). */
@@ -73,6 +82,18 @@ export function TerminalDock({
     setSeed((s) => s + 1)
   }, [seed])
 
+  // Open a new chat tab, opening the dock body if it is closed. Appending the
+  // chat before flipping `open` means the closed→open auto-seed above sees a
+  // non-empty dock and does NOT also spawn a terminal.
+  const spawnChat = useCallback(() => {
+    setDock((d) => addChat(d, `chat-${seed}`))
+    setSeed((s) => s + 1)
+    if (!open) onOpenChange(true)
+  }, [seed, open, onOpenChange])
+
+  const activeTab = dock.tabs.find((t) => t.id === dock.activeId) ?? null
+  const chatActive = open && activeTab?.kind === 'chat'
+
   // Ctrl+` toggles the dock (Zed parity). Intercepted at the window level;
   // xterm swallows the same chord so it never reaches a focused PTY.
   useEffect(() => {
@@ -125,9 +146,10 @@ export function TerminalDock({
             aria-orientation="horizontal"
             aria-label="Resize terminal"
           />
-          <div className={styles.tabStrip} role="tablist" aria-label="Terminal tabs">
+          <div className={styles.tabStrip} role="tablist" aria-label="Terminal and chat tabs">
             {dock.tabs.map((t, i) => {
               const active = t.id === dock.activeId
+              const label = labelFor(dock.tabs, i)
               return (
                 <div className={styles.tab} role="presentation" key={t.id}>
                   <button
@@ -137,12 +159,12 @@ export function TerminalDock({
                     className={`${styles.tabLabel} ${active ? styles.tabActive : ''}`}
                     onClick={() => setDock((d) => setActive(d, t.id))}
                   >
-                    {`Terminal ${i + 1}`}
+                    {label}
                   </button>
                   <button
                     type="button"
                     className={styles.ctrl}
-                    aria-label={`Close terminal ${i + 1}`}
+                    aria-label={`Close ${label.toLowerCase()}`}
                     title="Close"
                     onClick={() => setDock((d) => closeTerminal(d, t.id))}
                   >
@@ -160,6 +182,15 @@ export function TerminalDock({
             >
               +
             </button>
+            <button
+              type="button"
+              className={styles.add}
+              aria-label="New chat"
+              title="New chat"
+              onClick={spawnChat}
+            >
+              +💬
+            </button>
           </div>
           <div className={styles.terminals}>
             {dock.tabs.map((t) => (
@@ -168,7 +199,7 @@ export function TerminalDock({
                 className={styles.termHost}
                 style={{ display: t.id === dock.activeId ? 'block' : 'none' }}
               >
-                <Terminal id={t.id} />
+                {t.kind === 'chat' ? <ChatPane id={t.id} /> : <Terminal id={t.id} />}
               </div>
             ))}
           </div>
@@ -186,6 +217,18 @@ export function TerminalDock({
             {'>_'}
           </span>
           <span className={styles.navLabel}>Terminal</span>
+        </button>
+        <button
+          type="button"
+          className={`${styles.navBtn} ${chatActive ? styles.navBtnActive : ''}`}
+          aria-pressed={chatActive}
+          aria-label="New chat"
+          onClick={spawnChat}
+        >
+          <span className={styles.glyph} aria-hidden="true">
+            💬
+          </span>
+          <span className={styles.navLabel}>Chat</span>
         </button>
         <button
           type="button"
