@@ -3,14 +3,13 @@ import { useState } from 'react'
 import { render, screen, fireEvent, within, act } from '@testing-library/react'
 import { WorkspaceTabs } from '../src/components/WorkspaceTabs'
 import { emptyLayout, fileTabId, openFile, openPanel, splitWith } from '../src/workspaceLayout'
-import type { TaskStatus, WorkspaceLayout } from '../src/types'
+import type { AgentSummary, TaskStatus, WorkspaceLayout } from '../src/types'
 
-// Keep the tab-content children (Viewer / Notes / Chat) hermetic — they fetch on
+// Keep the tab-content children (Viewer / Chat) hermetic — they fetch on
 // mount, which we never want to hit the network in a unit test.
 vi.mock('../src/api', () => ({
   api: {
     readFile: vi.fn().mockResolvedValue({ path: 'x', format: 'code', encoding: 'utf8', content: '' }),
-    listNotes: vi.fn().mockResolvedValue([]),
     getChat: vi.fn().mockResolvedValue([]),
     listAgents: vi.fn().mockResolvedValue([]),
     writeFile: vi.fn().mockResolvedValue({ ok: true }),
@@ -18,8 +17,18 @@ vi.mock('../src/api', () => ({
   },
 }))
 
+const AGENTS: AgentSummary[] = [{ id: 'a1', label: 'Agent One' }]
+
 /** Stateful harness so reducer-driven interactions actually re-render. */
-function Harness({ initial, status = 'executing' }: { initial: WorkspaceLayout; status?: TaskStatus }) {
+function Harness({
+  initial,
+  status = 'executing',
+  agents = [],
+}: {
+  initial: WorkspaceLayout
+  status?: TaskStatus
+  agents?: AgentSummary[]
+}) {
   const [layout, setLayout] = useState(initial)
   return (
     <WorkspaceTabs
@@ -27,7 +36,7 @@ function Harness({ initial, status = 'executing' }: { initial: WorkspaceLayout; 
       status={status}
       events={[]}
       live=""
-      agents={[]}
+      agents={agents}
       layout={layout}
       onLayoutChange={setLayout}
     />
@@ -71,17 +80,17 @@ describe('<WorkspaceTabs>', () => {
     await act(async () => {}) // flush Viewer's async load inside act()
   })
 
-  it('closes Notes and re-opens it from the button bar', async () => {
-    const layout = openPanel(emptyLayout(), 'notes') // [log, notes], active notes
-    render(<Harness initial={layout} status="review" />)
+  it('closes Chat and re-opens it from the button bar', async () => {
+    const layout = openPanel(emptyLayout(), 'chat') // [log, chat], active chat
+    render(<Harness initial={layout} status="review" agents={AGENTS} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /close notes/i }))
-    expect(screen.queryByRole('tab', { name: 'Notes' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /close chat/i }))
+    expect(screen.queryByRole('tab', { name: 'Chat' })).toBeNull()
 
     // The button bar now offers a re-open control.
-    fireEvent.click(screen.getByRole('button', { name: 'Notes' }))
-    expect(screen.getByRole('tab', { name: 'Notes' })).toBeInTheDocument()
-    // Flush Notes' async load so its state settles inside act().
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }))
+    expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument()
+    // Flush Chat's async load so its state settles inside act().
     await act(async () => {})
   })
 
@@ -94,16 +103,16 @@ describe('<WorkspaceTabs>', () => {
   })
 
   it('exposes the ARIA tab roles and control labels', async () => {
-    const layout = openPanel(emptyLayout(), 'notes')
-    render(<Harness initial={layout} status="review" />)
+    const layout = openPanel(emptyLayout(), 'chat')
+    render(<Harness initial={layout} status="review" agents={AGENTS} />)
     const tablist = screen.getByRole('tablist')
     expect(tablist).toBeInTheDocument()
     const tabs = within(tablist).getAllByRole('tab')
     expect(tabs.length).toBeGreaterThanOrEqual(2)
     for (const tab of tabs) expect(tab).toHaveAttribute('aria-selected')
     expect(screen.getByRole('button', { name: /minimize worker log/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /close notes/i })).toBeInTheDocument()
-    // Flush Notes' async load so its state settles inside act().
+    expect(screen.getByRole('button', { name: /close chat/i })).toBeInTheDocument()
+    // Flush Chat's async load so its state settles inside act().
     await act(async () => {})
   })
 })

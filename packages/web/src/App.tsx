@@ -62,6 +62,7 @@ export default function App() {
   const tasksOpen = ui.state.global.panes?.tasks ?? false
   const workspaceOpen = ui.state.global.panes?.workspace ?? false
   const filesOpen = ui.state.global.panes?.files ?? true
+  const notesOpen = ui.state.global.panes?.notes ?? false
   const setTasksOpen = useCallback(
     (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, tasks: v } }),
     [ui],
@@ -72,6 +73,19 @@ export default function App() {
   )
   const setFilesOpen = useCallback(
     (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, files: v } }),
+    [ui],
+  )
+  const setNotesOpen = useCallback(
+    (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, notes: v } }),
+    [ui],
+  )
+  // The Notes panel's own worktree/task choice — independent of `selectedId`.
+  const notesTaskId = ui.state.global.notesTaskId ?? null
+  const setNotesTaskId = useCallback((id: string) => ui.patchGlobal({ notesTaskId: id }), [ui])
+  const filesNotesSplit = ui.state.global.splitSizes?.filesNotesSplit ?? 0.5
+  const setFilesNotesSplit = useCallback(
+    (ratio: number) =>
+      ui.patchGlobal({ splitSizes: { ...ui.state.global.splitSizes, filesNotesSplit: ratio } }),
     [ui],
   )
   // Settings is an ephemeral modal overlay — never persisted.
@@ -277,9 +291,15 @@ export default function App() {
           tasksOpen={tasksOpen}
           workspaceOpen={workspaceOpen}
           filesOpen={filesOpen}
+          notesOpen={notesOpen}
           onTasksOpenChange={setTasksOpen}
           onWorkspaceOpenChange={setWorkspaceOpen}
           onFilesOpenChange={setFilesOpen}
+          onNotesOpenChange={setNotesOpen}
+          notesTaskId={notesTaskId}
+          onNotesTaskIdChange={setNotesTaskId}
+          filesNotesSplit={filesNotesSplit}
+          onFilesNotesSplitChange={setFilesNotesSplit}
           settingsOpen={settingsOpen}
           onSettingsToggle={() => setSettingsOpen((v) => !v)}
           onSelect={select}

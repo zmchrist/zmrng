@@ -6,7 +6,6 @@ import {
   dropIntent,
   focusTab,
   moveTab,
-  openFile,
   openPanel,
   setLogMinimized,
   splitWith,
@@ -14,7 +13,6 @@ import {
 } from '../workspaceLayout'
 import { Viewer } from './Viewer'
 import { WorkerLogPanel } from './WorkerLogPanel'
-import { Notes } from './Notes'
 import { Chat } from './Chat'
 
 /** Statuses at which the Worker-Log tab becomes freely closeable (PR up / stopped
@@ -44,18 +42,9 @@ function tabLabel(tab: WsTab): string {
       return tab.path ? (tab.path.split('/').pop() ?? tab.path) : 'File'
     case 'log':
       return 'Worker Log'
-    case 'notes':
-      return 'Notes'
     case 'chat':
       return 'Chat'
   }
-}
-
-/** The active file path in the active pane, if any — feeds Notes' `selectedPath`. */
-function activeFilePath(layout: WorkspaceLayout): string | null {
-  const pane = layout.panes[layout.activePane]
-  const tab = pane?.tabs.find((t) => t.id === pane.activeId)
-  return tab?.kind === 'file' ? (tab.path ?? null) : null
 }
 
 /** Grid template so the split axis (and a minimized log pane) size correctly. */
@@ -86,9 +75,6 @@ export function WorkspaceTabs({ taskId, status, events, live, agents, layout, on
 
   const logCloseable = status != null && LOG_CLOSEABLE.has(status)
   const openKinds = new Set(layout.panes.flatMap((p) => p.tabs.map((t) => t.kind)))
-  const selectedPath = activeFilePath(layout)
-
-  const onOpenFile = (path: string) => onLayoutChange(openFile(layout, path))
 
   function content(tab: WsTab): ReactNode {
     switch (tab.kind) {
@@ -96,8 +82,6 @@ export function WorkspaceTabs({ taskId, status, events, live, agents, layout, on
         return <Viewer taskId={taskId} path={tab.path ?? null} />
       case 'log':
         return <WorkerLogPanel events={events} live={live} status={status} onMessage={onMessage} />
-      case 'notes':
-        return <Notes taskId={taskId} selectedPath={selectedPath} onOpen={onOpenFile} />
       case 'chat':
         return <Chat taskId={taskId} agents={agents} />
     }
@@ -210,15 +194,6 @@ export function WorkspaceTabs({ taskId, status, events, live, agents, layout, on
             onClick={() => onLayoutChange(openPanel(layout, 'log'))}
           >
             Worker Log
-          </button>
-        )}
-        {!openKinds.has('notes') && (
-          <button
-            type="button"
-            className={styles.reopen}
-            onClick={() => onLayoutChange(openPanel(layout, 'notes'))}
-          >
-            Notes
           </button>
         )}
         {agents.length > 0 && !openKinds.has('chat') && (
