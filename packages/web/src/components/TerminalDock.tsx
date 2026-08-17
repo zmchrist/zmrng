@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import styles from './TerminalDock.module.css'
 import { Terminal } from './Terminal'
 import { ChatPane } from './ChatPane'
-import { addChat, addTab, addTerminal, closeTerminal, emptyDock, setActive } from '../terminalDock'
+import { addChat, addTab, addTerminal, closeTerminal, emptyDock, focusKind, setActive } from '../terminalDock'
 import type { DockState, DockTab } from '../terminalDock'
 import { loadChatOrder, removeChatThread, saveChatOrder } from '../chatPersistence'
 import { usePanelMount } from '../usePanelMount'
@@ -122,6 +122,26 @@ export function TerminalDock({
 
   const activeTab = dock.tabs.find((t) => t.id === dock.activeId) ?? null
   const chatActive = open && activeTab?.kind === 'chat'
+  const terminalActive = open && activeTab?.kind === 'terminal'
+
+  // Shared nav-bar click behavior for the Terminal/Chat pane toggles: if the
+  // dock is open and already focused on a tab of this kind, minimize it. If
+  // the dock is open on a different kind, just switch focus (dock stays
+  // open). Otherwise open the dock focused on the last-active existing tab
+  // of this kind, spawning a fresh one only if none exists yet.
+  const focusOrToggleKind = useCallback(
+    (kind: 'terminal' | 'chat') => {
+      if (open && activeTab?.kind === kind) {
+        onOpenChange(false)
+        return
+      }
+      const prefix = kind === 'chat' ? 'chat' : 'term'
+      setDock((d) => focusKind(d, kind, `${prefix}-${seed}`))
+      setSeed((s) => s + 1)
+      if (!open) onOpenChange(true)
+    },
+    [open, activeTab, seed, onOpenChange],
+  )
 
   // Persist the chat tab order + focused id on every dock change, so a
   // reload can auto-reopen them (`hydrateDock` above).
@@ -261,10 +281,10 @@ export function TerminalDock({
       <div className={styles.navBar} role="toolbar" aria-label="Panes">
         <button
           type="button"
-          className={`${styles.navBtn} ${open ? styles.navBtnActive : ''}`}
-          aria-pressed={open}
-          aria-label={open ? 'Hide terminal' : 'Show terminal'}
-          onClick={() => onOpenChange(!open)}
+          className={`${styles.navBtn} ${terminalActive ? styles.navBtnActive : ''}`}
+          aria-pressed={terminalActive}
+          aria-label={terminalActive ? 'Hide terminal' : 'Show terminal'}
+          onClick={() => focusOrToggleKind('terminal')}
         >
           <span className={styles.glyph} aria-hidden="true">
             {'>_'}
@@ -275,8 +295,8 @@ export function TerminalDock({
           type="button"
           className={`${styles.navBtn} ${chatActive ? styles.navBtnActive : ''}`}
           aria-pressed={chatActive}
-          aria-label="New chat"
-          onClick={spawnChat}
+          aria-label={chatActive ? 'Hide chat' : 'Show chat'}
+          onClick={() => focusOrToggleKind('chat')}
         >
           <span className={styles.glyph} aria-hidden="true">
             💬
