@@ -332,7 +332,9 @@ export interface ServerConfig {
   authMode: string
   /** Machine-readable form of the same setting. */
   authModeKind: AuthMode
-  /** True under `npm run dev` (tsx watch) — gates the dev-only restart button. */
+  /** True under `npm run dev` (tsx watch) — the Settings reboot button is
+   *  always shown, but the server-side restart step (after git pull + build)
+   *  only fires when this is true; a built deploy has no supervisor to restart. */
   dev: boolean
 }
 
