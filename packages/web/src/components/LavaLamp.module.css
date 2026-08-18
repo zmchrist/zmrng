@@ -1,0 +1,96 @@
+.lamp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.lamp circle {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  transition: stroke var(--transition), opacity var(--transition);
+}
+
+.lampOn circle {
+  opacity: 1;
+}
+
+.lampOff circle {
+  opacity: 0.32;
+}
+
+.lampOff .blob1,
+.lampOff .blob2,
+.lampOff .blob3 {
+  animation-play-state: paused;
+}
+
+.blob1 {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lamp-flow-1 4.6s ease-in-out infinite;
+}
+
+.blob2 {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lamp-flow-2 5.3s ease-in-out infinite;
+}
+
+.blob3 {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lamp-flow-3 3.9s ease-in-out infinite;
+}
+
+@keyframes lamp-flow-1 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(1.6px, -2.2px) scale(1.1);
+  }
+  50% {
+    transform: translate(-1.2px, 1.6px) scale(0.9);
+  }
+  75% {
+    transform: translate(-2px, -0.8px) scale(1.05);
+  }
+}
+
+@keyframes lamp-flow-2 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  30% {
+    transform: translate(-1.8px, 1.4px) scale(0.92);
+  }
+  60% {
+    transform: translate(1.4px, 2px) scale(1.12);
+  }
+  85% {
+    transform: translate(0.6px, -1.4px) scale(0.98);
+  }
+}
+
+@keyframes lamp-flow-3 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  20% {
+    transform: translate(2px, 1.2px) scale(1.08);
+  }
+  55% {
+    transform: translate(-1.6px, -1.8px) scale(0.88);
+  }
+  80% {
+    transform: translate(1px, 2px) scale(1.04);
+  }
+}

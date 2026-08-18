@@ -72,10 +72,10 @@
 }
 
 .brand {
-  font-family: var(--font-display);
+  font-family: var(--font-brand);
   font-size: 17px;
   font-weight: 400;
-  font-style: italic;
+  font-style: normal;
   letter-spacing: 0.02em;
   text-transform: uppercase;
   background: linear-gradient(120deg, var(--text) 28%, var(--accent-bright));
@@ -83,20 +83,6 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: var(--text);
-}
-
-/* Static connection indicator — a small neutral dot that softly brightens to
-   silver when the socket is live. */
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-faint);
-  transition: background var(--transition), box-shadow var(--transition);
-}
-.dotOn {
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* ---- Tasks mode: the classic 2-column layout -------------------------- */
