@@ -65,7 +65,7 @@ zmrng/
 │   │       ├── runner.ts       — spawn + parse the claude child (stream-json), strip API key; `buildUserMessage(text, attachments?)` builds the multimodal stream-json user turn (image/document blocks before the text block), `sanitizeAttachments(raw)` is the tolerant allow-list/size/count guard shared by the REST routes and `/ws/chat`
 │   │       ├── terminal.ts     — TerminalManager: spawns node-pty shells for the Workspace bottom-dock terminal (GET /ws/terminal), strips API key under oauth
 │   │       ├── chatAgent.ts    — ChatManager: owns live standalone-chat `claude` Runners (GET /ws/chat) via the same RunnerFactory seam as TaskManager; chatSystemPrompt() (conversational, non-worker prompt) + parseChatClientMsg() (tolerantly accepts an `attachments` field on `input` frames, via `sanitizeAttachments`)
-│   │       ├── phases.ts       — phase state machine + system/kickoff prompts + lane queue; holds new-task-box attachments in a `pendingAttachments` Map, consumed once at the first clarify send in `start()`
+│   │       ├── phases.ts       — phase state machine + system/kickoff prompts + lane queue; holds new-task-box attachments in a `pendingAttachments` Map, consumed once at the first clarify send in `start()`; `executeKickoff` carries a conditional UI-screenshot step (UI-touching diffs → capture the changed view(s) via Playwright MCP, commit PNG(s) under `.github/pr-screenshots/<branch-slug>/`, post a separate `gh pr comment` before the final PR-URL line; best-effort, skipped not blocked when the browser tools are absent)
 │   │       ├── worktree.ts     — git worktree create/remove per task
 │   │       └── ws.ts           — WebSocket broadcast hub
 │   └── web/
@@ -188,7 +188,12 @@ See `.claude/docs/services-reference.md` for full method signatures and behavior
   held in a `pendingAttachments` Map and consumed once — at the first clarify send inside
   `start()` — so a re-start after a fail never double-injects them. `message(taskId, text,
   attachments?)` also takes an optional `attachments?: Attachment[]`, forwarded to
-  `runner.send()` and logged with a `[n attachment(s)]` suffix.
+  `runner.send()` and logged with a `[n attachment(s)]` suffix. `executeKickoff` (plan
+  flow only, not `directKickoff`) also instructs a conditional final-state UI screenshot:
+  UI-touching diffs capture the changed view(s) with the Playwright MCP browser tools,
+  commit the PNG(s) under `.github/pr-screenshots/<branch-slug>/`, and post them as a
+  separate `gh pr comment` before printing the PR URL — best-effort (skipped and noted
+  under Testing, never `ZMRNG_BLOCKED`, when the browser tools are unavailable).
 - **Db** (`packages/server/src/db.ts`) — SQLite (WAL), `tasks` + `events` schema,
   prepared statements, idempotent `ensureColumns()` migration, atomic `addUsage()`.
 - **Config** (`packages/server/src/config.ts`) — env + repo registry: explicit

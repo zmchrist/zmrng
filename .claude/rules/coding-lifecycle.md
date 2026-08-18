@@ -29,7 +29,14 @@ those prompts must say the same thing. **If you change one, change the other**
 5. **Validate + Sync Docs** — `npm run typecheck && npm run lint && npm test &&
    npm run build`, all green, then run the `sync-docs` skill and stage whatever
    docs it updates. **Stage the plan file too** — the PR checklist links it, so
-   an uncommitted plan is a dead link.
+   an uncommitted plan is a dead link. **UI-touching changes attach a
+   final-state screenshot to the PR** — capture the changed view(s) with the
+   Playwright MCP browser tools (best-effort; skip and note it under Testing if
+   they are unavailable — never `ZMRNG_BLOCKED`), commit the PNG(s) under
+   `.github/pr-screenshots/<branch-slug>/`, and post them as a separate PR
+   comment. Backend-only changes skip this. (This is a declared contract with
+   `executeKickoff` in `packages/server/src/phases.ts`, pinned by
+   `prompts.test.ts` — change one, change the other.)
 
 ## Branch-only (hard rule)
 
