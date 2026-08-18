@@ -190,3 +190,24 @@ non-obvious root cause, or is likely to recur. Template in
 - **Solution:** Keep drivable target repos **out of** the TCC-protected folders. Move them to `~/Developer` (Apple-blessed, never protected), `~/Projects`, `~/Code`, etc., and repath the registry (`<dataDir>/config/repos.json`, e.g. `~/Library/Application Support/zmrng/config/repos.json`). `npm run dev` is unaffected (the server inherits the Terminal's own Documents grant), so dev mode is a valid interim. FDA on the app is *not* a reliable fix while the app is ad-hoc-signed.
 - **Files:** none (environment/packaging constraint, not a code bug). Touches `<dataDir>/config/repos.json` and `ZMRNG_PROJECTS_DIR` for auto-scan.
 - **Date Found:** 2026-06-20
+
+### Ctrl+C on `npm run dev` prints a raw EPIPE stack + nonzero exit codes
+- **Error:** Killing `npm run dev` (Ctrl+C) prints Vite's `[vite] ws proxy socket error: Error:
+  write EPIPE` with a raw Node stack trace, then `zsh: terminated npm run dev`, then
+  `npm error Lifecycle script 'dev' failed with error: npm error code 15` (server) and
+  `npm error code 143` (web) — noisy failure output for what was just a manual shutdown.
+- **Cause:** The root `dev` script was `npm run dev:server & npm run dev:web & wait`, a
+  plain shell job-control one-liner with no signal trap. Ctrl+C sends SIGINT to the whole
+  foreground process group, so both backgrounded `npm run` children die at once with no
+  ordering guarantee; when `dev:server` (tsx watch) dies before `dev:web` (Vite), Vite's
+  `/ws` proxy loses its upstream mid-flight and logs the raw socket error. Separately, npm
+  itself treats a script that exits via signal as a lifecycle failure and prints its own
+  `npm error` stack per workspace — that part is cosmetic, not a real crash.
+  This is a distinct spot from the child-stdin EPIPE fixed at 6d87b50 (that one was the
+  `claude` runner's own stdin write failing after the child had already exited).
+- **Solution:** Replace the raw `&`/`wait` composition with `concurrently`, which runs both
+  workspace scripts under one foreground process, forwards SIGINT/SIGTERM to both children
+  together, and exits cleanly instead of leaving npm to report a lifecycle failure per
+  workspace. Applied the same fix to `test:watch` (same `&`/`wait` pattern).
+- **Files:** `package.json` (`dev`, `test:watch` scripts; added `concurrently` devDependency)
+- **Date Found:** 2026-08-17
