@@ -92,6 +92,10 @@
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   /* display face for the brand: flowy 70s-hippie script, all caps + italic */
   --font-display: 'Lobster', cursive;
+  /* dedicated face for the "zmrng" brand span only — groovy rounded display,
+     non-italic (Bagel Fat One). Kept separate from --font-display so other
+     --font-display consumers are untouched. */
+  --font-brand: 'Bagel Fat One', cursive;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --tracking-wide: 0.16em;
   --tracking-tight: -0.012em;
