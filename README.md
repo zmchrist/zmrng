@@ -1,10 +1,15 @@
-# zmrng
+# zmrng — an autonomous coding agent
 
 [![CI](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml/badge.svg)](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml)
 
-Autonomous task orchestrator GUI. Drop in a task, answer a few clarifying
-questions, then watch a Claude Code worker **plan → implement → validate → open a
-PR** fully autonomously. One GUI replaces babysitting five terminals.
+**Drop in a task → it plans, implements, validates, and opens its own pull
+request. Fully autonomous, in isolated git worktrees, no babysitting.** One
+GUI replaces watching five terminals.
+
+> ▶️ **2-minute demo:** [Loom link — TODO] — watch a task go from prompt to
+> merged-ready PR without a human touching the code.
+
+<!-- ![demo](docs/demo.gif) — TODO: record before making this repo public -->
 
 zmrng drives a **registry of target repos** — each task picks which repo it
 operates on from a configured list (`config/repos.json`), merged with every git
@@ -13,6 +18,58 @@ itself, so it is drivable out of the box with no config file present.
 
 > **Note:** each task's git worktree is created inside its target repo's own
 > `worktrees/` folder, so add `worktrees/` to that repo's `.gitignore`.
+
+## Why it's interesting (the engineering)
+
+- **Multi-phase, fresh-session-per-phase orchestration.** Clarify runs as one
+  long-lived native session (`claude --input-format stream-json` on stdin);
+  planning and execution each spawn a *fresh* session seeded with the prior
+  transcript. Separating planning from execution keeps context from rotting
+  and lets each phase pick its own model and effort.
+- **Sentinel-driven state machine.** Phase transitions are driven by sentinels
+  the workers emit (`ZMRNG_READY`, `ZMRNG_PLAN_READY`, `ZMRNG_VALIDATING`,
+  `ZMRNG_BLOCKED`), parsed out of the child process stream — a clean,
+  debuggable contract between orchestrator and agent.
+- **Isolation by construction.** Every task gets its own git worktree; workers
+  operate there and never touch `main`. The target repo's own
+  `security_guard.py` hook still blocks `.env` access, force-push to main, and
+  recursive deletes — defense in depth even under
+  `--dangerously-skip-permissions`.
+- **Self-validation gate.** Before opening a PR the executor runs
+  `typecheck && lint && test && build` plus a QA / code-review / docs-update
+  chain; only a green gate commits, pushes, and opens the PR.
+- **Bounded concurrency.** A lane cap (`ZMRNG_MAX_LANES`) bounds concurrent
+  autonomous tasks; extra READY tasks queue — respecting subscription rate
+  limits instead of stampeding them.
+- **Ships as a real app.** Fastify + WebSocket + SQLite server, React + Vite
+  UI, and a Tauri desktop shell that bundles the Node server as a sidecar into
+  a native macOS `.app`.
+
+## Stack
+
+`TypeScript` · `Fastify` · `WebSocket` · `SQLite` · `React` + `Vite` ·
+`Tauri` (Rust shell) · headless `claude` workers via `stream-json`
+
+## Run
+
+```bash
+git clone https://github.com/zmchrist/zmrng.git && cd zmrng && ./setup.sh
+```
+
+That's it — `setup.sh` checks your Node version, installs deps, creates `.env`
+from the template, reports whether `claude`/`gh` are set up, then starts the
+app at http://localhost:5174. It's a plain committed script (no `curl | bash`,
+no `sudo`) — read it before running it if you want, it's ~70 lines.
+
+Prefer to run the steps yourself? Same steps, manually:
+
+```bash
+npm install
+npm run dev          # server :4500 + web :5174 → open http://localhost:5174
+```
+
+<details>
+<summary>Full docs: how it works, the harness, safety, desktop app, self-host, config, validate</summary>
 
 ## How it works
 
@@ -81,7 +138,7 @@ zmrng holds itself to the same lifecycle: see
 - **Lane cap.** `ZMRNG_MAX_LANES` (default 2) bounds concurrent autonomous (plan→PR)
   tasks to respect the Max weekly cap; extra READY tasks queue.
 
-## Run
+### Run (full)
 
 ```bash
 npm install
@@ -203,7 +260,7 @@ pm2 startup                   # follow the printed command to survive reboots
 ## Validate
 
 ```bash
-npm run typecheck && npm run lint && npm run build
+npm run typecheck && npm run lint && npm test && npm run build
 ```
 
 ## Layout
@@ -215,3 +272,12 @@ packages/desktop/ Tauri shell (Rust) + sidecar bundle pipeline (the .app)
 worktrees/        per-task git worktrees (gitignored)
 plans/            standalone copy of the implementation plan
 ```
+
+</details>
+
+---
+
+*Built solo by [Zachary Christ](https://github.com/zmchrist). I build
+autonomous agent systems and the reliability infra to run them in production —
+available for remote contract / part-time AI-engineering work. Contact:
+TioVida@pm.me*
