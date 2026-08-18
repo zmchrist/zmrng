@@ -9,7 +9,7 @@
     "packages/desktop"
   ],
   "scripts": {
-    "dev": "npm run dev:server & npm run dev:web & wait",
+    "dev": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "npm run dev -w packages/server",
     "dev:web": "npm run dev -w packages/web",
     "build": "npm run build --workspaces --if-present",
@@ -18,7 +18,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "test:watch": "npm run test:watch -w @zmrng/server & npm run test:watch -w @zmrng/web & wait",
+    "test:watch": "concurrently -n server,web -c blue,green \"npm run test:watch -w @zmrng/server\" \"npm run test:watch -w @zmrng/web\"",
     "start": "npm run start -w packages/server",
     "bundle:sidecar": "npm run bundle:sidecar -w @zmrng/desktop",
     "desktop:dev": "npm run tauri -w @zmrng/desktop -- dev",
@@ -26,5 +26,8 @@
   },
   "engines": {
     "node": ">=20.11.0 <23"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
   }
 }
