@@ -74,7 +74,8 @@
 .brand {
   font-family: var(--font-display);
   font-size: 17px;
-  font-weight: 800;
+  font-weight: 400;
+  font-style: italic;
   letter-spacing: 0.02em;
   text-transform: uppercase;
   background: linear-gradient(120deg, var(--text) 28%, var(--accent-bright));

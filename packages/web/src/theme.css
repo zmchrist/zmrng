@@ -88,10 +88,10 @@
   --scrollbar-thumb: rgba(245, 245, 245, 0.25);
   --scrollbar-thumb-hover: rgba(245, 245, 245, 0.4);
 
-  /* ---- typography — uppercase serif display, clean sans body ------------- */
+  /* ---- typography — uppercase groovy display, clean sans body ------------ */
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  /* display face for the brand + headings: uppercase brutalist serif */
-  --font-display: 'Times New Roman', Georgia, serif;
+  /* display face for the brand: flowy 70s-hippie script, all caps + italic */
+  --font-display: 'Lobster', cursive;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --tracking-wide: 0.16em;
   --tracking-tight: -0.012em;
