@@ -211,3 +211,19 @@ non-obvious root cause, or is likely to recur. Template in
   workspace. Applied the same fix to `test:watch` (same `&`/`wait` pattern).
 - **Files:** `package.json` (`dev`, `test:watch` scripts; added `concurrently` devDependency)
 - **Date Found:** 2026-08-17
+
+### Dev server still randomly dies (`npm error code 143` for web) after the EPIPE stdin fix
+- **Error:** Same symptom as the entry above — `npm run dev` cascades into `dev:web`
+  exiting with code 143 — but recurs even with the `runner.ts` stdin `'error'` listener
+  (6d87b50) in place, with no visible cause in the tail of the log (server logs a normal
+  200 response, then web dies).
+- **Cause:** That fix only guarded one specific write path. The server had **no**
+  process-level `uncaughtException`/`unhandledRejection` handler, so *any* unguarded async
+  error anywhere (a future WS handler, a rejected promise, another dead-pipe write) still
+  kills the whole Fastify process — which tears down `dev:web`'s Vite proxy the same way.
+- **Solution:** Register `process.on('uncaughtException', ...)` and
+  `process.on('unhandledRejection', ...)` near the top of `index.ts` to log via
+  `app.log.error` and keep the process alive, instead of relying on guarding every write
+  site individually.
+- **Files:** `packages/server/src/index.ts` (top-level, right after `Fastify(...)`)
+- **Date Found:** 2026-08-18
