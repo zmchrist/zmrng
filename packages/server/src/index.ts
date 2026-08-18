@@ -68,6 +68,20 @@ const IS_DEV = import.meta.url.endsWith('.ts')
 // task-create and steer routes easily exceed it (a small image is already ~1 MB
 // encoded). 32 MB comfortably covers the 8 MB-per-file × 10 attachment cap.
 const app = Fastify({ logger: true, bodyLimit: 32 * 1024 * 1024 })
+
+// Last-resort safety net: an unguarded async error anywhere (a stray socket
+// EPIPE, a rejected promise in a WS handler, etc.) would otherwise crash the
+// whole process — which then tears down the sibling `dev:web` (Vite) script
+// too, since both run under one `concurrently` parent. Log and keep serving
+// instead of dying; see .claude/errors.md "Dev server randomly dies with ws
+// proxy error: EPIPE" for the specific case this generalizes.
+process.on('uncaughtException', (err) => {
+  app.log.error({ err }, 'uncaughtException — process kept alive')
+})
+process.on('unhandledRejection', (reason) => {
+  app.log.error({ err: reason }, 'unhandledRejection — process kept alive')
+})
+
 const db = new Db(config.dbPath)
 const hub = new WsHub()
 const manager = new TaskManager(db, (e: WsEvent) => hub.broadcast(e))
