@@ -117,7 +117,14 @@ The phase state machine and orchestration.
 - `planKickoff` → run `/core_piv_loop:plan-feature`, QA the plan, emit `ZMRNG_PLAN_READY`.
   `executeKickoff(branch, defaultBranch, planPath)` → `/core_piv_loop:execute` →
   `ZMRNG_VALIDATING` → qa/code-reviewer/doc-updater chain → commit → push →
-  `gh pr create --base <defaultBranch>` → print PR URL.
+  `gh pr create --base <defaultBranch>` → print PR URL. A conditional UI-screenshot
+  step sits inside this sequence: for a UI-touching diff the worker captures the changed
+  view(s) with the Playwright MCP browser tools, commits the PNG(s) under
+  `.github/pr-screenshots/<branch-slug>/`, and posts them as a separate `gh pr comment`
+  **after** `gh pr create` but **before** the final PR-URL line (that line ends the
+  session). Best-effort — skipped and noted under Testing, never `ZMRNG_BLOCKED`, when the
+  browser tools are absent; backend-only diffs skip it entirely. `directKickoff` has no
+  screenshot step.
 
 ## Terminal — `packages/server/src/terminal.ts`
 
