@@ -73,7 +73,8 @@
 
 .brand {
   font-family: var(--font-brand);
-  font-size: 17px;
+  font-size: 22px;
+  line-height: 30px;
   font-weight: 400;
   font-style: normal;
   letter-spacing: 0.02em;

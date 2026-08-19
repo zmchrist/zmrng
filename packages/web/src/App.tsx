@@ -19,7 +19,6 @@ import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
 import { Board } from './components/Board'
 import { SettingsModal } from './components/SettingsModal'
-import { LavaLamp } from './components/LavaLamp'
 import { useUiState } from './uiState'
 
 // The former standalone Tasks pane is merged into Workspace; only Workspace and
@@ -205,7 +204,6 @@ export default function App() {
     <div className={styles.app}>
       <div className={styles.topbar} data-tauri-drag-region>
         <span className={styles.topbarLeft}>
-          <LavaLamp connected={connected} />
           <span className={styles.brand}>zmrng</span>
           <nav className={styles.modeTabs} aria-label="Workspace mode">
             {MODES.map((m) => (
