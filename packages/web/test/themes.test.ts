@@ -28,6 +28,14 @@ describe('THEMES catalog', () => {
       expect(theme.light.accent2).toMatch(/^#[0-9a-f]{6}$/i)
     }
   })
+
+  it('every theme has a well-formed bg field and optional gradTo stops', () => {
+    for (const theme of THEMES) {
+      expect(theme.bg).toMatch(/^#[0-9a-f]{6}$/i)
+      if (theme.dark.gradTo !== undefined) expect(theme.dark.gradTo).toMatch(/^#[0-9a-f]{6}$/i)
+      if (theme.light.gradTo !== undefined) expect(theme.light.gradTo).toMatch(/^#[0-9a-f]{6}$/i)
+    }
+  })
 })
 
 describe('getTheme', () => {
@@ -47,16 +55,16 @@ describe('hexToRgba', () => {
 })
 
 describe('buildThemeVars', () => {
-  it('reproduces the exact legacy tokens for orange/dark (unchanged default)', () => {
+  it('wires every accent token from the refined orange/dark pair + bg', () => {
     const vars = buildThemeVars(getTheme('orange'), 'dark')
-    expect(vars['--bg']).toBe('#ff4d00')
-    expect(vars['--accent']).toBe('#edff45')
-    expect(vars['--accent-2']).toBe('#edff45')
-    expect(vars['--accent-bright']).toBe('#edff45')
-    expect(vars['--accent-soft']).toBe('rgba(237, 255, 69, 0.16)')
-    expect(vars['--accent-line']).toBe('rgba(237, 255, 69, 0.7)')
-    expect(vars['--accent-grad']).toBe('linear-gradient(135deg, #edff45 0%, #d4e800 100%)')
-    expect(vars['--accent-ink']).toBe('#ff4d00')
+    expect(vars['--bg']).toBe('#ff5a1f')
+    expect(vars['--accent']).toBe('#f2ff4d')
+    expect(vars['--accent-2']).toBe('#ffd23d')
+    expect(vars['--accent-bright']).toBe('#ffd23d')
+    expect(vars['--accent-soft']).toBe('rgba(242, 255, 77, 0.16)')
+    expect(vars['--accent-line']).toBe('rgba(242, 255, 77, 0.7)')
+    expect(vars['--accent-grad']).toBe('linear-gradient(135deg, #f2ff4d 0%, #c8e000 100%)')
+    expect(vars['--accent-ink']).toBe('#ff5a1f')
   })
 
   it('swaps to the brighter accent pair for light mode', () => {
@@ -68,7 +76,7 @@ describe('buildThemeVars', () => {
 
   it('builds a two-stop gradient from accent to accent2 when no gradTo is set', () => {
     const vars = buildThemeVars(getTheme('red'), 'dark')
-    expect(vars['--accent-grad']).toBe('linear-gradient(135deg, #ffd23f 0%, #ff8c42 100%)')
+    expect(vars['--accent-grad']).toBe('linear-gradient(135deg, #ffcf4d 0%, #ff7a3d 100%)')
   })
 })
 
