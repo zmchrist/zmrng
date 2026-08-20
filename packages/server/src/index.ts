@@ -624,12 +624,21 @@ if (existsSync(config.webDist)) {
 
 // ---- lifecycle ----
 
+let shuttingDown = false
 function shutdown(signal: string): void {
+  // Guard re-entry: a second SIGTERM (tsx-watch is impatient) must not restart
+  // the teardown or cancel the forced-exit timer.
+  if (shuttingDown) return
+  shuttingDown = true
   app.log.info({ signal }, 'shutting down — killing live claude workers')
   manager.shutdown()
   terminals.killAll()
   chats.killAll()
-  app.close().finally(() => {
+
+  let exited = false
+  const finish = (code: number): void => {
+    if (exited) return
+    exited = true
     // Checkpoint the WAL into the durable .db before exit so tasks survive the
     // restart — tsx-watch/SIGTERM otherwise kill us before any clean close.
     try {
@@ -637,7 +646,22 @@ function shutdown(signal: string): void {
     } catch (err) {
       app.log.error({ err }, 'failed to checkpoint/close db on shutdown')
     }
-    process.exit(0)
+    process.exit(code)
+  }
+
+  // Force-exit fallback: `app.close()` drains open connections before it
+  // resolves, and long-lived browser WebSockets on `/ws` never close on their
+  // own — so without this timer the process hangs forever holding :4500, and
+  // the next tsx-watch restart dies with EADDRINUSE. Always release the port.
+  const forceTimer = setTimeout(() => {
+    app.log.warn('shutdown timed out — forcing exit to release the port')
+    finish(0)
+  }, 2000)
+  forceTimer.unref()
+
+  app.close().finally(() => {
+    clearTimeout(forceTimer)
+    finish(0)
   })
 }
 process.on('SIGINT', () => shutdown('SIGINT'))
