@@ -22,8 +22,9 @@ interface Props {
 
 /**
  * Focused settings overlay: a blurred backdrop that dims everything behind it
- * and a small centered panel. Content: a theme swatch grid plus a sun/moon
- * toggle for dark/light mode (persisted to localStorage), and a reboot
+ * and a small centered panel. Content: a theme dropdown selector paired with a
+ * live preview swatch plus a sun/moon toggle for dark/light mode (persisted to
+ * localStorage), and a reboot
  * control that pulls zmrng's own repo to origin/main, rebuilds, and restarts
  * the dev server so fresh code takes effect. Closes on the × button, a
  * backdrop click, or Escape. Stays mounted a beat past `open` going false so
@@ -92,6 +93,10 @@ export function SettingsModal({ open, onClose, connected }: Props) {
     saveStoredTheme({ themeId, mode: next })
   }
 
+  // Live preview swatch — recomputed from the current theme/mode so it tracks
+  // both the dropdown and the dark/light toggle.
+  const previewVars = buildThemeVars(getTheme(themeId), mode)
+
   if (!mounted) return null
 
   return (
@@ -135,33 +140,30 @@ export function SettingsModal({ open, onClose, connected }: Props) {
                 {mode === 'dark' ? '☽' : '☀'}
               </button>
             </div>
-            <div className={styles.swatchGrid} role="radiogroup" aria-label="Theme color">
-              {THEMES.map((theme) => {
-                const vars = buildThemeVars(theme, mode)
-                const active = theme.id === themeId
-                return (
-                  <button
-                    key={theme.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    aria-label={theme.label}
-                    title={theme.label}
-                    className={active ? `${styles.swatch} ${styles.swatchActive}` : styles.swatch}
-                    onClick={() => selectTheme(theme.id)}
-                    style={{
-                      background: theme.bg,
-                    }}
-                  >
-                    <span
-                      className={styles.swatchAccent}
-                      style={{ background: vars['--accent-grad'] }}
-                    />
-                  </button>
-                )
-              })}
+            <div className={styles.themeRow}>
+              <span
+                className={styles.swatchPreview}
+                aria-hidden="true"
+                style={{ background: previewVars['--bg'] }}
+              >
+                <span
+                  className={styles.swatchAccent}
+                  style={{ background: previewVars['--accent-grad'] }}
+                />
+              </span>
+              <select
+                className={styles.themeSelect}
+                aria-label="Theme"
+                value={themeId}
+                onChange={(e) => selectTheme(e.target.value)}
+              >
+                {THEMES.map((theme) => (
+                  <option key={theme.id} value={theme.id}>
+                    {theme.label}
+                  </option>
+                ))}
+              </select>
             </div>
-            <p className={styles.swatchLabel}>{getTheme(themeId).label}</p>
           </div>
 
           <div className={styles.section}>
