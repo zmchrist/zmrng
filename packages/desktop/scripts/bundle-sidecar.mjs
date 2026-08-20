@@ -25,9 +25,13 @@ const webDistDst = path.join(srcTauri, 'web-dist')
 const serverEntry = path.join(repoRoot, 'packages', 'server', 'dist', 'index.js')
 const webDistSrc = path.join(repoRoot, 'packages', 'web', 'dist')
 
-// better-sqlite3 is a native addon → external. These three packages are its full
-// runtime require() closure (better-sqlite3 → bindings → file-uri-to-path).
-const VENDORED = ['better-sqlite3', 'bindings', 'file-uri-to-path']
+// Native addons must stay external — esbuild can't inline a `.node` binary, and
+// node-pty resolves its prebuilt binary relative to its own package dir, so it
+// must live under sidecar/node_modules, not be flattened into server.mjs.
+//   better-sqlite3 → bindings → file-uri-to-path  is better-sqlite3's runtime closure.
+//   node-pty ships an N-API prebuild (prebuilds/<triple>/pty.node + spawn-helper);
+//   its only dep, node-addon-api, is header-only and not needed at runtime.
+const VENDORED = ['better-sqlite3', 'bindings', 'file-uri-to-path', 'node-pty']
 
 /** Tauri externalBin target triple for the host (solo/arm64 mac, but derived). */
 function hostTriple() {
