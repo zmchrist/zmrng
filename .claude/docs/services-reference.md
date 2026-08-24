@@ -451,3 +451,21 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   still-open streaming bubble), `resetThread()` (discards the whole thread — used on a
   config change). Every function takes a state and returns a new one; nothing mutates its
   input.
+- **gridLayout.ts** — pure, React-free reducer + DOM-free geometry for the Workspace
+  **12-column card grid**. `COLS = 12`; `CARD_IDS`/`defaultCards()` seed the 11-card roster
+  (pipeline, concurrency, reviewqueue, newtask, activetask, workerlog, tasklist, files,
+  viewers, chat, terminal) as a non-overlapping arrangement. `collide(a, b)` /
+  `compact(cards, pinnedId?)` are the overlap + gravity primitives; `applyMove(state, id,
+  x, y)` / `applyResize(state, id, w, h)` reflow the grid under one of three interaction
+  modes (`reflow` | `swap` | `free`). `hideCard`/`showCard`/`toggleMinimize` toggle a card's
+  visibility/minimized flags. `normalizeGrid`/`hydrateGrid(stored?)` do a tolerant merge of a
+  persisted `GridState` against the current roster (missing cards seeded, unknown dropped).
+  `cellSize(gridW, density)` / `cardRectPx(item, cell)` / `contentHeightPx(cards, cell)` are
+  the DOM-free geometry helpers — grid units are 12-col CELL units (screen-width-independent),
+  turned into px only at render. Mirrors the pure-reducer style of `workspaceLayout.ts` /
+  `terminalDock.ts`; unit-tested in `packages/web/test/gridLayout.test.ts`.
+- **dashboardData.ts** — pure derivations feeding the 3 data cards: `pipelineCounts(tasks)`
+  (per-phase counts), `concurrency(tasks, maxLanes)` (lane occupancy), `reviewQueue(tasks)`
+  (tasks awaiting review). Unit-tested in `packages/web/test/dashboardData.test.ts`.
+- **cardMeta.ts** — `CARD_TITLES` + `CARD_ACCENTS` (per-card `var(--*)` accent token)
+  `Record<GridCardId, string>` maps, shared by `WorkspaceGrid` and `BottomNav`.

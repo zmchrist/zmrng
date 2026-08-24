@@ -144,6 +144,56 @@ export interface TaskComment {
 /** Top-level workspace shell mode (UI-only; mirrored for type-parity). */
 export type WorkspaceMode = 'tasks' | 'board' | 'workspace'
 
+// ---- workspace dashboard grid (customizable card grid) ---------------------
+
+/** The stable id of every card in the Workspace dashboard grid roster. */
+export type GridCardId =
+  | 'pipeline'
+  | 'concurrency'
+  | 'reviewqueue'
+  | 'newtask'
+  | 'activetask'
+  | 'workerlog'
+  | 'tasklist'
+  | 'files'
+  | 'viewers'
+  | 'chat'
+  | 'terminal'
+
+/** Row-height / gap density of the grid. */
+export type GridDensity = 'comfortable' | 'compact' | 'spacious'
+/** Card chrome variant (maps to a token-based CSS class). */
+export type GridCardStyle = 'accent' | 'flat' | 'outline' | 'elevated'
+/** Drag/resize collision behavior: push aside, swap positions, or free overlap. */
+export type GridInteraction = 'reflow' | 'swap' | 'free'
+
+/**
+ * One card's geometry in the 12-column grid. `x/y/w/h` are in CELL units (never
+ * pixels) so the layout is screen-width-independent and persists cleanly.
+ * `minW/minH` clamp resize. `hidden` cards are not rendered (their geometry is
+ * kept so re-showing restores position); `minimized` cards render header-only.
+ */
+export interface GridCardGeo {
+  id: GridCardId
+  x: number
+  y: number
+  w: number
+  h: number
+  minW: number
+  minH: number
+  hidden?: boolean
+  minimized?: boolean
+}
+
+/** The whole dashboard-grid state (persisted in `GlobalUiState.grid`). The
+ *  server only round-trips this — it never validates individual fields. */
+export interface GridState {
+  cards: GridCardGeo[]
+  density: GridDensity
+  cardStyle: GridCardStyle
+  interaction: GridInteraction
+}
+
 // ---- workspace persistence (U5) ----
 
 /**
@@ -182,6 +232,13 @@ export interface GlobalUiState {
    * until the selected task changes again.
    */
   notesTaskId?: string | null
+  /**
+   * The Workspace dashboard-grid state: every card's cell geometry, visibility,
+   * and minimized flag, plus the density / card-style / interaction options.
+   * GLOBAL (describes the shell, not a task). Absent on older docs — the client
+   * hydrates a default layout in that case.
+   */
+  grid?: GridState
 }
 
 // ---- workspace tab-pane layout (Zed-style collapsible tabs) ----
