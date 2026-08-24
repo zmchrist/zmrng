@@ -1,0 +1,219 @@
+/* The scrollable grid host. Cards are absolutely positioned inside and
+   translated into place; a height spacer gives the scroll container its extent.
+   All colors/edges/motion come from theme tokens — no hard-coded values. */
+.grid {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.spacer {
+  width: 1px;
+  pointer-events: none;
+}
+
+/* ---- card base + the four style variants ------------------------------- */
+.card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform var(--spring), width var(--spring), height var(--spring);
+}
+
+.accent {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+}
+.flat {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.outline {
+  background: var(--surface);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+.elevated {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+}
+
+.dragging {
+  z-index: 60;
+  box-shadow: var(--glow-accent-strong);
+  filter: brightness(1.05);
+}
+
+/* ---- header (drag handle) ---------------------------------------------- */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.header:active {
+  cursor: grabbing;
+}
+
+.handle {
+  color: var(--text-faint);
+  font-size: 12px;
+  letter-spacing: 2px;
+  line-height: 1;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.headerBtn {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 1;
+  font-size: 14px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.headerBtn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+/* ---- body -------------------------------------------------------------- */
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A minimized card collapses to just its header; the body stays mounted but
+   hidden (display:none, applied inline) so a live PTY / chat session survives. */
+.minimized {
+  /* height is driven inline to the header height; nothing extra needed here */
+}
+
+/* ---- corner resize handle ---------------------------------------------- */
+.resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(
+    135deg,
+    transparent 45%,
+    var(--border-strong) 45%,
+    var(--border-strong) 55%,
+    transparent 55%,
+    transparent 72%,
+    var(--border-strong) 72%,
+    var(--border-strong) 82%,
+    transparent 82%
+  );
+  opacity: 0.55;
+}
+.resize:hover {
+  opacity: 1;
+}
+
+/* ---- drag ghost (snapped target slot) ---------------------------------- */
+.ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1.5px dashed var(--accent-line);
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  transition: transform 200ms var(--panel-ease), width 200ms, height 200ms;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* An empty-state note for a card with no content (e.g. no task selected). */
+.cardEmpty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 12px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
+  letter-spacing: var(--tracking-tight);
+}
+
+/* ---- files card body --------------------------------------------------- */
+.filesToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.filesLabel {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.refresh {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+  font-size: 13px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.refresh:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.filesTree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 4px;
+}
