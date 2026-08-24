@@ -14,12 +14,14 @@ import type {
   RepoTarget,
   WorkspaceMode,
   Attachment,
+  GridState,
 } from './types'
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
 import { Board } from './components/Board'
 import { SettingsModal } from './components/SettingsModal'
 import { useUiState } from './uiState'
+import { hydrateGrid } from './gridLayout'
 
 // The former standalone Tasks pane is merged into Workspace; only Workspace and
 // Board remain as top-level modes. The legacy `'tasks'` value is still accepted
@@ -37,58 +39,14 @@ export default function App() {
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
   const [repos, setRepos] = useState<RepoTarget[]>([])
   const ui = useUiState()
-  const railCollapsed = ui.state.global.railCollapsed ?? false
   // Workspace is the default home; migrate the retired `'tasks'` mode to it.
   const storedMode = ui.state.global.mode ?? 'workspace'
   const mode: WorkspaceMode = storedMode === 'tasks' ? 'workspace' : storedMode
-  const setRailCollapsed = useCallback(
-    (v: boolean) => ui.patchGlobal({ railCollapsed: v }),
-    [ui],
-  )
   const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
-  // Bottom-dock terminal chrome (only open/height persist; shells are ephemeral).
-  const dockOpen = ui.state.global.terminalDock?.open ?? false
-  const dockHeight = ui.state.global.terminalDock?.height ?? 300
-  const setDockOpen = useCallback(
-    (v: boolean) => ui.patchGlobal({ terminalDock: { ...ui.state.global.terminalDock, open: v } }),
-    [ui],
-  )
-  const setDockHeight = useCallback(
-    (h: number) => ui.patchGlobal({ terminalDock: { ...ui.state.global.terminalDock, height: h } }),
-    [ui],
-  )
-  // Bottom-nav pane visibility: Tasks rail + Workspace center pane persist
-  // globally (both default closed → a fresh load shows only the Files tree).
-  // The Files sidebar defaults OPEN, preserving its prior locked-left behavior.
-  const tasksOpen = ui.state.global.panes?.tasks ?? false
-  const workspaceOpen = ui.state.global.panes?.workspace ?? false
-  const filesOpen = ui.state.global.panes?.files ?? true
-  const notesOpen = ui.state.global.panes?.notes ?? false
-  const setTasksOpen = useCallback(
-    (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, tasks: v } }),
-    [ui],
-  )
-  const setWorkspaceOpen = useCallback(
-    (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, workspace: v } }),
-    [ui],
-  )
-  const setFilesOpen = useCallback(
-    (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, files: v } }),
-    [ui],
-  )
-  const setNotesOpen = useCallback(
-    (v: boolean) => ui.patchGlobal({ panes: { ...ui.state.global.panes, notes: v } }),
-    [ui],
-  )
-  // The Notes panel's own worktree/task choice — independent of `selectedId`.
-  const notesTaskId = ui.state.global.notesTaskId ?? null
-  const setNotesTaskId = useCallback((id: string) => ui.patchGlobal({ notesTaskId: id }), [ui])
-  const filesNotesSplit = ui.state.global.splitSizes?.filesNotesSplit ?? 0.5
-  const setFilesNotesSplit = useCallback(
-    (ratio: number) =>
-      ui.patchGlobal({ splitSizes: { ...ui.state.global.splitSizes, filesNotesSplit: ratio } }),
-    [ui],
-  )
+  // The Workspace dashboard-grid state. Hydrated (seeded on first load / repaired
+  // if malformed) from the persisted GlobalUiState.grid, round-tripped on change.
+  const grid = useMemo(() => hydrateGrid(ui.state.global.grid), [ui.state.global.grid])
+  const setGrid = useCallback((next: GridState) => ui.patchGlobal({ grid: next }), [ui])
   // Settings is an ephemeral modal overlay — never persisted.
   const [settingsOpen, setSettingsOpen] = useState(false)
   const selectedIdRef = useRef<string | null>(null)
@@ -242,26 +200,11 @@ export default function App() {
           repos={repos}
           config={cfg}
           selectedId={selectedId}
-          railCollapsed={railCollapsed}
-          onRailCollapsedChange={setRailCollapsed}
-          dockOpen={dockOpen}
-          dockHeight={dockHeight}
-          onDockOpenChange={setDockOpen}
-          onDockHeightChange={setDockHeight}
-          tasksOpen={tasksOpen}
-          workspaceOpen={workspaceOpen}
-          filesOpen={filesOpen}
-          notesOpen={notesOpen}
-          onTasksOpenChange={setTasksOpen}
-          onWorkspaceOpenChange={setWorkspaceOpen}
-          onFilesOpenChange={setFilesOpen}
-          onNotesOpenChange={setNotesOpen}
-          notesTaskId={notesTaskId}
-          onNotesTaskIdChange={setNotesTaskId}
-          filesNotesSplit={filesNotesSplit}
-          onFilesNotesSplitChange={setFilesNotesSplit}
+          grid={grid}
+          onGridChange={setGrid}
           settingsOpen={settingsOpen}
           onSettingsToggle={() => setSettingsOpen((v) => !v)}
+          connected={connected}
           onSelect={select}
           onCreate={onCreate}
           onStart={() => (selected ? api.start(selected.id) : Promise.resolve())}
