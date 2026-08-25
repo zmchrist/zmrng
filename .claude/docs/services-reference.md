@@ -523,6 +523,34 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
   so REST scrollback and live frames merge cleanly), `teamConfig.ts` (localStorage handle/URL +
   socket-URL resolution). `TeamView` component owns the socket (glue, like `Terminal.tsx`);
   Settings holds the VPS workspace-URL field.
+- **Repo-scoped channels + handoff (T3)**: `POST /api/channels` creates a channel via
+  `Db.createChannel(name, repoId|null, now)` then broadcasts `{type:'channels', channels}` to
+  the `workspace` room (blank → 400, duplicate name → existing row, never a 500). A channel's
+  nullable `repo_id` ties it to a target repo; repo-tied channels render distinguishably (rail
+  accent dot + header badge). Web-only pure module `teamHandoff.ts`:
+  `buildHandoffPrefill(channel, message)` (title from the first message line + body with a
+  `From team channel #<name> (message #<id>)` provenance line), `resolveSuggestedRepoId(id,
+  repos)` — keeps a channel's suggested repoId ONLY if it exists in the teammate's LOCAL
+  registry, so no VPS-supplied repoId is auto-bound (D6). "Send to my zmrng" lifts a
+  `HandoffPrefill` to `App`, switches to Workspace, and seeds `NewTaskForm` (one-shot `prefill`
+  prop + `onPrefillConsumed` so the prefill is dropped after seeding); the task is created via
+  the existing LOCAL `POST /api/tasks` → backlog, no auto-start.
+- **@mention team agent (T4)** — `agentResponder.ts`: the ONE shared team agent, constructed
+  once alongside `ChannelManager`. Pure seams `detectMention(body, botHandle)` (word-boundary
+  anchored — `@agent` matches, `@agentsmith`/`foo@agent.com` do not), `botAuthorFromHandle`,
+  `buildAgentMessages` (last-N scrollback → agent chat turns), `parseAgentReply` (tolerant
+  `reply`/`content`/`text`/`message`), `resolveBotAgent` (`''` → first configured agent). The
+  injectable `AgentResponder.handleMention(channelId)` best-effort `git pull --ff-only`s a
+  read-only reference checkout (skipped when unset, never throws), gathers the last N messages,
+  relays them to the bot `AgentTarget` via the U4 `fetch(agent.url)` adapter bounded by an
+  `AbortController` timeout (default 60s), and posts the reply back as a server-controlled
+  `kind='agent'` message — never a worktree, never code execution (D1/D8). Fired async
+  fire-and-forget from the `/ws/workspace` message handler AFTER the human message persists as
+  `kind='human'`; every failure path is logged with no agent post. Config keys (server-only):
+  `workspaceRepoPath`/`workspaceBotAgentId`/`workspaceBotHandle` (`@agent`)/`workspaceScrollback`
+  (20)/`workspaceAgentTimeoutMs` (60000). No agents configured → responder disabled, mentions a
+  graceful no-op. Live checkout path + bot agent id are orchestrator/operator-owned deployment
+  config.
 - **POC security precondition** (doc-only, no app code): the VPS workspace port is
   **Tailscale-only** — the tailnet is the perimeter and the access control. Self-asserted
   handle, no verification. Public exposure is gated on GitHub OAuth + org/repo allowlist +

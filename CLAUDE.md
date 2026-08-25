@@ -329,6 +329,25 @@ cannot forge an `agent` message; the `agent` kind is server-controlled (the futu
 T4 @mention agent posts server-side). Open membership — every workspace member is
 implicitly in every channel, no per-channel join/invite/ACL.
 
+**Repo-scoped channels + the planning→execution handoff** (T3): `POST /api/channels`
+creates a channel (optionally repo-tied via nullable `repo_id`) and broadcasts the
+new list. A per-message **"Send to my zmrng"** button opens the teammate's LOCAL
+new-task box pre-filled (title/body + a `From team channel #<name> (message #<id>)`
+provenance line) and — for a repo-tied channel — a *suggested* repo, resolved ONLY
+against the teammate's OWN local registry (`resolveSuggestedRepoId`), so **no
+VPS-supplied repoId is auto-bound** (D6). The task is created via the existing local
+`POST /api/tasks` → **backlog**, human clicks Start; no git round-trip, no auto-start.
+
+**@mention shared team agent** (T4): a teammate `@agent`s the bot in a channel; the
+server (one shared `AgentResponder` instance, D8/D4) `git pull`s a read-only reference
+checkout, relays the mention + last-N scrollback to the configured bot `AgentTarget`
+via the U4 `fetch(agent.url)` adapter (bounded by an abort timeout), and posts the
+reply back as a server-controlled `kind='agent'` message. The agent **talks and plans
+only — never executes code** (D1): no worktrees, no runners. Unmentioned messages do
+nothing (no always-listening). The live checkout path + which `AgentTarget` is the bot
+are operator-owned deployment config (`ZMRNG_WORKSPACE_REPO_PATH`/`_BOT_AGENT`/
+`_BOT_HANDLE`/`_SCROLLBACK`/`_AGENT_TIMEOUT_MS`).
+
 > **POC exposure precondition (Tailscale is the perimeter):** the VPS
 > workspace port MUST be reachable **only over Tailscale** — firewall it to the
 > tailnet interface, or bind the server to the Tailscale IP. **Never expose it
@@ -354,6 +373,23 @@ implicitly in every channel, no per-channel join/invite/ACL.
   replay. Open membership (no per-channel ACL). A client `message` frame carries no `kind` —
   socket posts are always `human`; the `agent` kind is server-controlled (T4). Deferred to #86:
   reconnect scrollback gap >1 page + backward-pagination UI.
+- Team workspace (T3): repo-scoped channels + the planning→execution handoff (D6). `POST
+  /api/channels` (create + broadcast the list; dup name → existing row, never 500). "Send to my
+  zmrng" pre-fills the LOCAL new-task box (title/body + `From team channel #<name> (message
+  #<id>)` provenance) and a *suggested* repo resolved ONLY against the teammate's own registry
+  (`teamHandoff.ts`/`resolveSuggestedRepoId`) — no VPS repoId auto-bound; task → backlog, human
+  Starts. `NewTaskForm` gained a one-shot `prefill` + `onPrefillConsumed` (dropped after seed so
+  a card hide/show can't re-seed). No new shared type (`Channel.repoId` pre-existed).
+- Team workspace (T4): the ONE shared @mention team agent (D8/D4), server-only. `agentResponder.ts`
+  (`detectMention` word-boundary, `buildAgentMessages`, `parseAgentReply`, `resolveBotAgent`, the
+  injectable `AgentResponder`) is wired once by `index.ts`; a mention fires `handleMention` async
+  from the `/ws/workspace` handler AFTER the human post — `git pull --ff-only`s a read-only
+  reference checkout (best-effort), relays last-N scrollback to the bot `AgentTarget` via the U4
+  `fetch(agent.url)` adapter (AbortController timeout), posts the reply as server-controlled
+  `kind='agent'`. Talks/plans only, never executes code (D1). Config keys `workspaceRepoPath`/
+  `workspaceBotAgentId`/`workspaceBotHandle`(`@agent`)/`workspaceScrollback`(20)/
+  `workspaceAgentTimeoutMs`(60000); no agents → graceful no-op. Live checkout path + bot id are
+  operator-owned. Deferred to #92: bound @mention concurrency.
 - Max OAuth only — `ANTHROPIC_API_KEY` stripped from worker env.
 - No shared package — server↔web types are a manual mirror.
 - Frosted-glass theme; Vitest across both workspaces (typecheck+lint+test+build is validation).
