@@ -25,7 +25,6 @@ import { WorkspaceTabs } from './WorkspaceTabs'
 import { NewTaskForm } from './NewTaskForm'
 import { TaskList } from './TaskList'
 import { TaskControls } from './TaskControls'
-import { WorkerLogPanel } from './WorkerLogPanel'
 import { ChatPane } from './ChatPane'
 import { Terminal } from './Terminal'
 import { PipelineCard } from './PipelineCard'
@@ -268,14 +267,6 @@ export function WorkspaceView({
       />
     ) : (
       <div className={gridStyles.cardEmpty}>No task selected.</div>
-    ),
-    workerlog: (
-      <WorkerLogPanel
-        events={events}
-        live={live}
-        status={task?.status ?? null}
-        onMessage={task ? onMessage : undefined}
-      />
     ),
     tasklist: <TaskList tasks={tasks} repos={repos} selectedId={selectedId} onSelect={onSelect} />,
     files: filesBody,

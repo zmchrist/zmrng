@@ -6,22 +6,15 @@
   height: 100%;
 }
 
-/* ---- panel re-open button bar ----------------------------------------- */
+/* ---- panel re-open button bar ------------------------------------------
+   Transparent — the card's own translucent surface (set once by GridCard)
+   shows through; a second opaque layer here would stack and read as flat. */
 .buttonBar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-strong);
-}
-
-.barLabel {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--text-faint);
 }
 
 .reopen {
@@ -55,7 +48,6 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
   overflow: hidden;
 }
 .paneActive {
@@ -69,7 +61,6 @@
   min-height: 34px;
   overflow-x: auto;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-strong);
 }
 
 .tab {
@@ -125,7 +116,6 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
 }
 
 /* ---- minimized log strip (click to expand) ---------------------------- */
