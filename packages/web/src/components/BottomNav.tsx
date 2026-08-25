@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import styles from './BottomNav.module.css'
 import { CARD_TITLES } from '../cardMeta'
 import { CARD_IDS, hideCard, showCard } from '../gridLayout'
@@ -29,15 +30,29 @@ const INTERACTIONS: readonly GridInteraction[] = ['reflow', 'swap', 'free']
  */
 export function BottomNav({ grid, onGridChange, settingsOpen, onSettingsToggle, connected }: Props) {
   const [cardsOpen, setCardsOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ left: number; bottom: number } | null>(null)
+  const anchorRef = useRef<HTMLDivElement | null>(null)
   const hiddenCount = grid.cards.filter((c) => c.hidden).length
 
   const toggleCard = (id: (typeof CARD_IDS)[number], hidden: boolean) =>
     onGridChange(hidden ? showCard(grid, id) : hideCard(grid, id))
 
+  // .bar has backdrop-filter, which makes it the containing block for any
+  // position:fixed descendant — a scrim/menu nested inside it would be
+  // clipped to the bar's own bounds instead of the viewport, so outside
+  // clicks above the bar would never reach the scrim. Portal both to <body>,
+  // positioning the menu from the anchor's on-open rect.
+  useLayoutEffect(() => {
+    if (!cardsOpen) return
+    const rect = anchorRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setMenuPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 })
+  }, [cardsOpen])
+
   return (
     <div className={styles.bar}>
       <div className={styles.cluster}>
-        <div className={styles.cardsMenu}>
+        <div className={styles.cardsMenu} ref={anchorRef}>
           <button
             type="button"
             className={`${styles.navBtn} ${cardsOpen ? styles.navBtnActive : ''}`}
@@ -47,28 +62,35 @@ export function BottomNav({ grid, onGridChange, settingsOpen, onSettingsToggle, 
           >
             Cards{hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ''}
           </button>
-          {cardsOpen && (
-            <>
-              <button
-                type="button"
-                className={styles.scrim}
-                aria-label="Close cards menu"
-                onClick={() => setCardsOpen(false)}
-              />
-              <div className={styles.menu} role="menu">
-                {grid.cards.map((c) => (
-                  <label key={c.id} className={styles.menuRow}>
-                    <input
-                      type="checkbox"
-                      checked={!c.hidden}
-                      onChange={() => toggleCard(c.id, !!c.hidden)}
-                    />
-                    <span>{CARD_TITLES[c.id]}</span>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
+          {cardsOpen &&
+            menuPos &&
+            createPortal(
+              <>
+                <button
+                  type="button"
+                  className={styles.scrim}
+                  aria-label="Close cards menu"
+                  onClick={() => setCardsOpen(false)}
+                />
+                <div
+                  className={styles.menu}
+                  role="menu"
+                  style={{ position: 'fixed', left: menuPos.left, bottom: menuPos.bottom }}
+                >
+                  {grid.cards.map((c) => (
+                    <label key={c.id} className={styles.menuRow}>
+                      <input
+                        type="checkbox"
+                        checked={!c.hidden}
+                        onChange={() => toggleCard(c.id, !!c.hidden)}
+                      />
+                      <span>{CARD_TITLES[c.id]}</span>
+                    </label>
+                  ))}
+                </div>
+              </>,
+              document.body,
+            )}
         </div>
       </div>
 
