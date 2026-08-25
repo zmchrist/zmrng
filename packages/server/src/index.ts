@@ -12,6 +12,7 @@ import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { TerminalManager, parseClientMsg } from './terminal.js'
 import { ChatManager, parseChatClientMsg } from './chatAgent.js'
+import { WorkspaceManager, parseWorkspaceClientMsg } from './workspace.js'
 import { sanitizeAttachments } from './runner.js'
 import { listWorktreeFiles, selfUpdate } from './worktree.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
@@ -29,6 +30,7 @@ import type {
   UiState,
   TermServerMsg,
   ChatServerMsg,
+  WsWorkspaceServerMsg,
 } from './types.js'
 
 function errMsg(e: unknown): string {
@@ -87,6 +89,11 @@ const hub = new WsHub()
 const manager = new TaskManager(db, (e: WsEvent) => hub.broadcast(e))
 const terminals = new TerminalManager()
 const chats = new ChatManager()
+// Team-workspace presence: every join/leave re-broadcasts the full roster to the
+// 'workspace' room. The broadcast sink mirrors TaskManager's hub injection.
+const workspace = new WorkspaceManager(db, (frame: WsWorkspaceServerMsg) =>
+  hub.broadcastRoom('workspace', JSON.stringify(frame)),
+)
 
 await app.register(websocket)
 
@@ -97,6 +104,9 @@ app.get('/api/config', () => ({
   maxLanes: config.maxLanes,
   targetRepo: config.targetRepo,
   defaultRepoId: config.defaultRepoId,
+  // Optional server-side default VPS workspace-server URL for the Team tab. The
+  // per-teammate localStorage value (client-side) wins over this when set.
+  workspaceUrl: config.workspaceUrl,
   authMode:
     config.authMode === 'apikey'
       ? 'API key (ANTHROPIC_API_KEY billed per task)'
@@ -602,6 +612,77 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
   })
   socket.on('close', () => session?.kill())
   socket.on('error', () => session?.kill())
+})
+
+// ONE multiplexed team-workspace socket per teammate. Frames are channel-tagged
+// by `type` (never one socket per resource): `hello` self-asserts a display name
+// (stored as a members row) and marks the teammate online; `ping` is answered
+// with `pong`. Presence is connection-based plus a heartbeat: a member is online
+// while they hold a live socket, and a periodic ws-level ping/pong evicts a dead
+// socket so they drop off the roster. The socket joins the 'workspace' room so it
+// receives every roster re-broadcast. NO history replay.
+const WORKSPACE_HEARTBEAT_MS = 30000
+app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
+  hub.join('workspace', socket)
+  let joined = false
+
+  const send = (msg: WsWorkspaceServerMsg): void => {
+    try {
+      socket.send(JSON.stringify(msg))
+    } catch {
+      // socket closed mid-send
+    }
+  }
+
+  // ws-level heartbeat: mark the socket dead if it misses a pong between ticks,
+  // terminate it, and let the close handler drop the member off the roster.
+  let alive = true
+  socket.on('pong', () => {
+    alive = true
+  })
+  const heartbeat = setInterval(() => {
+    if (!alive) {
+      socket.terminate()
+      return
+    }
+    alive = false
+    try {
+      socket.ping()
+    } catch {
+      // socket already gone
+    }
+  }, WORKSPACE_HEARTBEAT_MS)
+
+  const cleanup = (): void => {
+    clearInterval(heartbeat)
+    hub.leaveAll(socket)
+    if (joined) {
+      workspace.leave(socket)
+      joined = false
+    }
+  }
+
+  socket.on('message', (raw) => {
+    try {
+      const msg = parseWorkspaceClientMsg(String(raw))
+      if (!msg) return
+      if (msg.type === 'hello') {
+        workspace.join(socket, msg.displayName)
+        joined = true
+      } else if (msg.type === 'ping') {
+        send({ type: 'pong' })
+      }
+    } catch (err) {
+      app.log.error({ err }, 'workspace message handler failed')
+      socket.close()
+    }
+  })
+  socket.on('close', cleanup)
+  socket.on('error', cleanup)
+
+  // Seed the fresh socket with the current roster before it says hello, so a
+  // late joiner immediately sees who is already present.
+  send({ type: 'roster', members: workspace.roster() })
 })
 
 // ---- static (production) ----

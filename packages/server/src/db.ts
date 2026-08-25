@@ -12,6 +12,7 @@ import type {
   TaskUsage,
   TaskComment,
   ChatMessage,
+  Member,
 } from './types.js'
 
 const SCHEMA = `
@@ -66,6 +67,11 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_task ON chat_messages(task_id, agent_id, id);
+CREATE TABLE IF NOT EXISTS members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  display_name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `
 
 interface TaskRow {
@@ -117,6 +123,12 @@ interface ChatMessageRow {
   agent_id: string
   role: string
   content: string
+  created_at: string
+}
+
+interface MemberRow {
+  id: number
+  display_name: string
   created_at: string
 }
 
@@ -180,6 +192,14 @@ function rowToChatMessage(r: ChatMessageRow): ChatMessage {
     agentId: r.agent_id,
     role: r.role as ChatMessage['role'],
     content: r.content,
+    createdAt: r.created_at,
+  }
+}
+
+function rowToMember(r: MemberRow): Member {
+  return {
+    id: r.id,
+    displayName: r.display_name,
     createdAt: r.created_at,
   }
 }
@@ -423,6 +443,36 @@ export class Db {
       )
       .all(taskId, agentId) as ChatMessageRow[]
     return rows.map(rowToChatMessage)
+  }
+
+  /**
+   * Insert a workspace member by self-asserted display name, or return the
+   * existing row if that name is already taken. Identity is the free-text
+   * display name (no verification) — a re-join with the same name reuses the
+   * original row and its `created_at`, so the members table never grows on
+   * reconnect. Follows the `task_comments` prepared-statement pattern.
+   */
+  upsertMember(displayName: string, now: string): Member {
+    const existing = this.db
+      .prepare('SELECT * FROM members WHERE display_name = ? ORDER BY id ASC LIMIT 1')
+      .get(displayName) as MemberRow | undefined
+    if (existing) return rowToMember(existing)
+    const info = this.db
+      .prepare('INSERT INTO members (display_name, created_at) VALUES (?, ?)')
+      .run(displayName, now)
+    return {
+      id: Number(info.lastInsertRowid),
+      displayName,
+      createdAt: now,
+    }
+  }
+
+  /** Every distinct member, in insertion order (stable roster ordering). */
+  listMembers(): Member[] {
+    const rows = this.db
+      .prepare('SELECT * FROM members ORDER BY id ASC')
+      .all() as MemberRow[]
+    return rows.map(rowToMember)
   }
 
   /** Hard-delete a task and all its rows (events, comments, chat messages). */

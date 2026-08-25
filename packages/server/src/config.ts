@@ -113,6 +113,13 @@ export interface Config {
   projectsDir: string
   /** Login shell for the workspace terminal (SHELL env, else a sane default). */
   shell: string
+  /**
+   * Optional server-side default URL of the VPS team-workspace server, surfaced
+   * through `GET /api/config` so a machine can pre-seed the Team tab's default.
+   * Empty when `ZMRNG_WORKSPACE_URL` is unset; the per-teammate localStorage
+   * value wins over this when present.
+   */
+  workspaceUrl: string
 }
 
 export type AuthMode = 'oauth' | 'apikey'
@@ -514,6 +521,7 @@ function buildConfig(): Config {
     authMode: resolveAuthMode(process.env),
     projectsDir: PROJECTS_DIR,
     shell: process.env.SHELL?.trim() || '/bin/sh',
+    workspaceUrl: process.env.ZMRNG_WORKSPACE_URL?.trim() || '',
   }
 }
 
