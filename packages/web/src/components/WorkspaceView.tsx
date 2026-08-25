@@ -34,6 +34,7 @@ import { BottomNav } from './BottomNav'
 import { LIVE_STATUSES } from '../status'
 import { hydrateLayout, openFile, pruneFileTabs } from '../workspaceLayout'
 import { showCard } from '../gridLayout'
+import type { HandoffPrefill } from '../teamHandoff'
 
 interface Props {
   task: Task | undefined
@@ -65,6 +66,10 @@ interface Props {
     },
     attachments?: Attachment[],
   ) => Promise<void>
+  /** One-shot "Send to my zmrng" pre-fill for the new-task box (T3). */
+  prefill?: HandoffPrefill | null
+  /** Fired once the new-task box has seeded from `prefill` (clears it upstream). */
+  onPrefillConsumed?: () => void
   onStart: () => Promise<unknown>
   onMessage: (text: string, attachments?: Attachment[]) => Promise<unknown>
   onResume: () => Promise<unknown>
@@ -119,6 +124,8 @@ export function WorkspaceView({
   connected,
   onSelect,
   onCreate,
+  prefill,
+  onPrefillConsumed,
   onStart,
   onMessage,
   onResume,
@@ -250,7 +257,13 @@ export function WorkspaceView({
     concurrency: <ConcurrencyCard tasks={tasks} maxLanes={config?.maxLanes ?? 0} />,
     reviewqueue: <ReviewQueueCard tasks={tasks} repos={repos} onSelect={onSelect} />,
     newtask: (
-      <NewTaskForm repos={repos} defaultRepoId={config?.defaultRepoId ?? ''} onCreate={onCreate} />
+      <NewTaskForm
+        repos={repos}
+        defaultRepoId={config?.defaultRepoId ?? ''}
+        onCreate={onCreate}
+        prefill={prefill}
+        onPrefillConsumed={onPrefillConsumed}
+      />
     ),
     tasklist: (
       <TaskList

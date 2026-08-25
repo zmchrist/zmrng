@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import styles from './NewTaskForm.module.css'
 import { useAttachments } from '../useAttachments'
 import { AttachmentTray } from './AttachmentTray'
+import { resolveSuggestedRepoId, type HandoffPrefill } from '../teamHandoff'
 import {
   DEFAULT_EFFORT,
   DEFAULT_FLOW,
@@ -30,6 +31,21 @@ interface Props {
     },
     attachments?: Attachment[],
   ) => Promise<void>
+  /**
+   * A one-shot pre-fill from the Team tab's "Send to my zmrng" handoff (T3).
+   * Each send passes a fresh object; when its identity changes the form opens
+   * and seeds its title/body and a SUGGESTED repo. The suggestion only sets the
+   * initial dropdown value if it matches a repo in the LOCAL registry — the
+   * human still confirms/changes it (no VPS repo id is auto-bound). Otherwise
+   * it falls back to the default (decision D6).
+   */
+  prefill?: HandoffPrefill | null
+  /**
+   * Fired after this form has seeded from a fresh `prefill`, so the parent can
+   * drop it. Without this, a later remount of the form (hide/show of the card)
+   * resets the local seeded marker and would re-seed the already-sent handoff.
+   */
+  onPrefillConsumed?: () => void
 }
 
 const MODEL_OPTIONS: ModelAlias[] = ['opus', 'sonnet']
@@ -50,7 +66,7 @@ const FLOW_DEFAULTS: Record<FlowMode, { model: ModelAlias; effort: EffortLevel }
   plan: { model: DEFAULT_MODEL, effort: DEFAULT_EFFORT },
 }
 
-export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
+export function NewTaskForm({ repos, defaultRepoId, onCreate, prefill, onPrefillConsumed }: Props) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
@@ -58,6 +74,11 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
   const [model, setModel] = useState<ModelAlias>(FLOW_DEFAULTS[DEFAULT_FLOW].model)
   const [effort, setEffort] = useState<EffortLevel>(FLOW_DEFAULTS[DEFAULT_FLOW].effort)
   const [style, setStyle] = useState<CaveStyle>(DEFAULT_STYLE)
+  // Last handoff pre-fill we seeded from. A fresh `prefill` object identity (one
+  // per "Send to my zmrng" click) re-seeds the form in render — the established
+  // "adjust state on a prop change" pattern (see WorkspaceView), avoiding an
+  // effect. The suggested repo is resolved against the LOCAL registry only.
+  const [seededPrefill, setSeededPrefill] = useState<HandoffPrefill | null>(null)
 
   // Switching flow snaps model/effort to that flow's snappy defaults; the
   // operator can still override afterward.
@@ -70,6 +91,23 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate }: Props) {
   const [repoId, setRepoId] = useState('')
   const [busy, setBusy] = useState(false)
   const files = useAttachments()
+
+  // Seed from a new "Send to my zmrng" handoff pre-fill (T3). Guarded by object
+  // identity so it runs once per send; the human can freely edit afterward.
+  if (prefill && prefill !== seededPrefill) {
+    setSeededPrefill(prefill)
+    setOpen(true)
+    setTitle(prefill.title)
+    setBody(prefill.body)
+    setRepoId(resolveSuggestedRepoId(prefill.suggestedRepoId, repos))
+  }
+
+  // Once seeded (render committed), tell the parent to drop the one-shot prefill.
+  // Runs after the render-phase seed above; clearing it upstream stops a later
+  // remount of this form from re-seeding the same already-sent handoff.
+  useEffect(() => {
+    if (prefill) onPrefillConsumed?.()
+  }, [prefill, onPrefillConsumed])
 
   const effectiveRepoId = repoId || defaultRepoId
   // A title is always required; an image-only description (no body text) is valid.
