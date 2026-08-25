@@ -317,7 +317,8 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
 
 > The `App.tsx`/`components/` bullets below predate the Workspace/Board merge (see the
 > root `CLAUDE.md` project-structure tree for the current `App.tsx`/`WorkspaceView`
-> shape — `TaskDetail` no longer exists, replaced by `TaskControls` + `WorkspaceTabs`).
+> shape — `TaskDetail` no longer exists, replaced by `TaskList`'s expand-in-place
+> row controls + `WorkspaceTabs`).
 > Left as-is rather than speculatively rewritten in this change; the terminal-dock /
 > chat bullets at the end of this section are current as of 2026-08-17.
 
@@ -452,10 +453,11 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   config change). Every function takes a state and returns a new one; nothing mutates its
   input.
 - **gridLayout.ts** — pure, React-free reducer + DOM-free geometry for the Workspace
-  **12-column card grid**. `COLS = 12`; `CARD_IDS`/`defaultCards()` seed the 10-card roster
-  (pipeline, concurrency, reviewqueue, newtask, activetask, tasklist, files, viewers, chat,
-  terminal — the Worker Log has no standalone card, it lives only in the Viewers card's
-  `log` tab) as a non-overlapping arrangement. `collide(a, b)` /
+  **12-column card grid**. `COLS = 12`; `CARD_IDS`/`defaultCards()` seed the 9-card roster
+  (pipeline, concurrency, reviewqueue, newtask, tasklist, files, viewers, chat, terminal —
+  the Worker Log has no standalone card, it lives only in the Viewers card's `log` tab, and
+  the active-task controls live inline in the selected TaskList row rather than a standalone
+  card) as a non-overlapping arrangement. `collide(a, b)` /
   `compact(cards, pinnedId?)` are the overlap + gravity primitives; `applyMove(state, id,
   x, y)` / `applyResize(state, id, w, h)` reflow the grid under one of three interaction
   modes (`reflow` | `swap` | `free`). `hideCard`/`showCard`/`toggleMinimize` toggle a card's
