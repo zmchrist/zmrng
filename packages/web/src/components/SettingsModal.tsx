@@ -11,6 +11,7 @@ import {
   applyTheme,
   type ThemeMode,
 } from '../themes'
+import { loadStoredWorkspaceUrl, saveStoredWorkspaceUrl } from '../teamConfig'
 
 interface Props {
   open: boolean
@@ -34,6 +35,14 @@ export function SettingsModal({ open, onClose, connected }: Props) {
   const mounted = usePanelMount(open)
   const [themeId, setThemeId] = useState(() => loadStoredTheme().themeId)
   const [mode, setMode] = useState<ThemeMode>(() => loadStoredTheme().mode)
+  // Per-teammate VPS team-workspace URL (localStorage; wins over the server
+  // default surfaced via ServerConfig.workspaceUrl). Persisted on every edit.
+  const [workspaceUrl, setWorkspaceUrl] = useState(() => loadStoredWorkspaceUrl())
+
+  const onWorkspaceUrlChange = (value: string) => {
+    setWorkspaceUrl(value)
+    saveStoredWorkspaceUrl(value)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -164,6 +173,24 @@ export function SettingsModal({ open, onClose, connected }: Props) {
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className={styles.section}>
+            <div className={styles.sectionHead}>
+              <span className={styles.sectionTitle}>Team workspace</span>
+            </div>
+            <p className={styles.rebootHint}>
+              VPS team-workspace server URL for the <strong>Team</strong> tab (e.g.{' '}
+              <code>wss://host.tailnet.ts.net:4500</code>). Reachable over Tailscale only.
+            </p>
+            <input
+              type="text"
+              className={styles.workspaceInput}
+              aria-label="Team workspace VPS URL"
+              placeholder="wss://host.tailnet.ts.net:4500"
+              value={workspaceUrl}
+              onChange={(e) => onWorkspaceUrlChange(e.target.value)}
+            />
           </div>
 
           <div className={styles.section}>

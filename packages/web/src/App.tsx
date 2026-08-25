@@ -19,6 +19,7 @@ import type {
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
 import { Board } from './components/Board'
+import { TeamView } from './components/TeamView'
 import { SettingsModal } from './components/SettingsModal'
 import { useUiState } from './uiState'
 import { hydrateGrid } from './gridLayout'
@@ -29,6 +30,7 @@ import { hydrateGrid } from './gridLayout'
 const MODES: ReadonlyArray<{ id: WorkspaceMode; label: string }> = [
   { id: 'workspace', label: 'Workspace' },
   { id: 'board', label: 'Board' },
+  { id: 'team', label: 'Team' },
 ]
 
 export default function App() {
@@ -187,6 +189,10 @@ export default function App() {
           onSelectTask={onBoardSelectTask}
           onArchive={onBoardArchive}
         />
+      </div>
+
+      <div style={{ display: mode === 'team' ? 'contents' : 'none' }}>
+        <TeamView workspaceUrl={cfg?.workspaceUrl ?? ''} />
       </div>
 
       <div style={{ display: mode === 'workspace' ? 'contents' : 'none' }}>
