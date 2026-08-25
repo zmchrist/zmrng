@@ -452,9 +452,10 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   config change). Every function takes a state and returns a new one; nothing mutates its
   input.
 - **gridLayout.ts** — pure, React-free reducer + DOM-free geometry for the Workspace
-  **12-column card grid**. `COLS = 12`; `CARD_IDS`/`defaultCards()` seed the 11-card roster
-  (pipeline, concurrency, reviewqueue, newtask, activetask, workerlog, tasklist, files,
-  viewers, chat, terminal) as a non-overlapping arrangement. `collide(a, b)` /
+  **12-column card grid**. `COLS = 12`; `CARD_IDS`/`defaultCards()` seed the 10-card roster
+  (pipeline, concurrency, reviewqueue, newtask, activetask, tasklist, files, viewers, chat,
+  terminal — the Worker Log has no standalone card, it lives only in the Viewers card's
+  `log` tab) as a non-overlapping arrangement. `collide(a, b)` /
   `compact(cards, pinnedId?)` are the overlap + gravity primitives; `applyMove(state, id,
   x, y)` / `applyResize(state, id, w, h)` reflow the grid under one of three interaction
   modes (`reflow` | `swap` | `free`). `hideCard`/`showCard`/`toggleMinimize` toggle a card's

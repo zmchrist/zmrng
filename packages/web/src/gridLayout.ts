@@ -27,7 +27,6 @@ export const CARD_IDS: readonly GridCardId[] = [
   'reviewqueue',
   'newtask',
   'activetask',
-  'workerlog',
   'tasklist',
   'files',
   'viewers',
@@ -47,7 +46,7 @@ const DENSITY_DIMS: Record<GridDensity, { rowH: number; gap: number }> = {
 }
 
 /**
- * The seed layout for the 11-card roster: a sensible non-overlapping arrangement
+ * The seed layout for the 10-card roster: a sensible non-overlapping arrangement
  * across the 12-column grid. Pure — returns a fresh array each call.
  */
 export function defaultCards(): GridCardGeo[] {
@@ -56,8 +55,7 @@ export function defaultCards(): GridCardGeo[] {
     { id: 'concurrency', x: 6, y: 0, w: 3, h: 2, minW: 3, minH: 2 },
     { id: 'reviewqueue', x: 9, y: 0, w: 3, h: 2, minW: 3, minH: 2 },
     { id: 'files', x: 0, y: 2, w: 3, h: 6, minW: 2, minH: 3 },
-    { id: 'viewers', x: 3, y: 2, w: 6, h: 6, minW: 4, minH: 3 },
-    { id: 'workerlog', x: 9, y: 2, w: 3, h: 6, minW: 3, minH: 3 },
+    { id: 'viewers', x: 3, y: 2, w: 9, h: 6, minW: 4, minH: 3 },
     { id: 'newtask', x: 0, y: 8, w: 4, h: 3, minW: 3, minH: 2 },
     { id: 'activetask', x: 4, y: 8, w: 4, h: 3, minW: 3, minH: 2 },
     { id: 'tasklist', x: 8, y: 8, w: 4, h: 6, minW: 3, minH: 3 },
