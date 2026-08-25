@@ -160,7 +160,7 @@ export interface TaskComment {
 }
 
 /** Top-level workspace shell mode (UI-only; mirrored for type-parity). */
-export type WorkspaceMode = 'tasks' | 'board' | 'workspace'
+export type WorkspaceMode = 'tasks' | 'board' | 'workspace' | 'team'
 
 // ---- workspace dashboard grid (customizable card grid) ---------------------
 
@@ -430,6 +430,54 @@ export type ChatServerMsg =
   | { type: 'result'; isError: boolean }
   | { type: 'exit'; code: number | null }
   | { type: 'error'; text: string }
+
+// ---- team workspace (multiplexed presence socket, GET /ws/workspace) -------
+
+/**
+ * One persisted workspace member. Identity is a self-asserted, free-text
+ * display name (no password, no verification — Tailscale is the perimeter).
+ */
+export interface Member {
+  id: number
+  displayName: string
+  createdAt: string
+}
+
+/** A member's presence view in the workspace-wide roster. */
+export interface WorkspaceMember {
+  id: number
+  displayName: string
+  /** True while the member holds at least one live workspace socket. */
+  online: boolean
+}
+
+/**
+ * client -> server frames over the ONE multiplexed workspace socket
+ * (GET /ws/workspace). `hello` self-asserts a display name on first connect;
+ * `ping` is the client heartbeat (the server answers with `pong`). The socket
+ * is multiplexed by design — frames are channel-tagged by `type`, never one
+ * socket per resource.
+ */
+export type WsWorkspaceClientMsg =
+  | { type: 'hello'; displayName: string }
+  | { type: 'ping' }
+
+/**
+ * server -> client frames over the workspace socket. `roster` is a full
+ * presence-roster snapshot, re-sent on every join/leave; `pong` answers a
+ * client `ping`.
+ */
+export type WsWorkspaceServerMsg =
+  | { type: 'roster'; members: WorkspaceMember[] }
+  | { type: 'pong' }
+
+/**
+ * Max length of a self-asserted display-name handle, measured after trimming.
+ * A `hello` frame whose trimmed name exceeds this is rejected server-side so a
+ * client can never store an unbounded handle into `members` (which would then
+ * ride every roster snapshot). Mirrored in `packages/web/src/types.ts`.
+ */
+export const MAX_DISPLAY_NAME_LEN = 64
 
 // ---- preflight (advisory auth presence probe) ----
 

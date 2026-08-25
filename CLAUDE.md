@@ -307,8 +307,33 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
   `implementation-history.md`. Plus `.claude/files/` (PROJECT_CONTEXT, FUTURE_IDEAS) and
   `.claude/errors.md` (known gotchas — check before debugging).
 
+## Team workspace (POC) — exposure precondition
+The optional **Team** mode tab connects to a VPS-hosted team-workspace server (the
+same server binary, run on a VPS) over ONE multiplexed WebSocket at
+`GET /ws/workspace`. Teammates self-assert a free-text display-name handle (no
+password, no verification — stored as a `members` row) and appear in a live,
+workspace-wide presence roster driven by connection lifecycle plus a periodic
+ping/pong heartbeat. The VPS URL is a per-teammate client setting in Settings
+(localStorage `zmrng-workspace-url`), with an optional server default via
+`ZMRNG_WORKSPACE_URL` surfaced through `GET /api/config` (`workspaceUrl`).
+
+> **POC exposure precondition (Tailscale is the perimeter):** the VPS
+> workspace port MUST be reachable **only over Tailscale** — firewall it to the
+> tailnet interface, or bind the server to the Tailscale IP. **Never expose it
+> publicly.** Because the handle is self-asserted with no verification, the
+> tailnet membership *is* the access control. This is an operational
+> precondition documented here **only** — there is deliberately **no app-code
+> gate, no server bind change, and no auth** in the T1 scope.
+
 ## Resolved (don't re-ask)
 - Engine is the real `claude` binary via `child_process` (ToS-compliant; never proxy the token).
+- Team workspace (T1): workspace data lives in the SAME server's SQLite (no new package). The
+  `members` table + `/ws/workspace` route + presence live in `packages/server`; the Team tab +
+  VPS-URL config + roster in `packages/web`. Local task execution (tasks/worktrees/runner/phases,
+  `/ws`, `/ws/terminal`, `/ws/chat`) is UNTOUCHED. ONE multiplexed socket per user carries
+  channel-tagged frames (`hello`/`ping` client, `roster`/`pong` server); `WsHub` gained a room
+  routing dimension (`join`/`leaveAll`/`broadcastRoom`) rather than a rewrite. Presence is
+  connection-based + heartbeat (online while holding a live socket; ping/pong evicts a dead one).
 - Max OAuth only — `ANTHROPIC_API_KEY` stripped from worker env.
 - No shared package — server↔web types are a manual mirror.
 - Frosted-glass theme; Vitest across both workspaces (typecheck+lint+test+build is validation).
