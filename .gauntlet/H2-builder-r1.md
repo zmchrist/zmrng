@@ -1,9 +1,9 @@
 # Builder task — zmrng ticket H2: `seedHarness()` copies the harness into a worktree
 
 You are a senior TypeScript engineer working inside the git worktree at
-`/Users/tiofeliz/Developer/Projects/wt-H2` (a checkout of branch `gauntlet/H2`, cut off
+`~/Developer/Projects/wt-H2` (a checkout of branch `gauntlet/H2`, cut off
 the integration branch which already carries ticket H1 = the `harness/` payload tree).
-**Write ONLY files inside this worktree.** Do not touch `/Users/tiofeliz/Developer/Projects/zmrng`.
+**Write ONLY files inside this worktree.** Do not touch `~/Developer/Projects/zmrng`.
 
 ## Repo rules (from CLAUDE.md — obey strictly)
 - Monorepo, npm workspaces: `packages/server` + `packages/web`. NO shared package.
