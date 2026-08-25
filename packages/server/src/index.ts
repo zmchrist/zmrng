@@ -13,6 +13,7 @@ import { TaskManager } from './phases.js'
 import { TerminalManager, parseClientMsg } from './terminal.js'
 import { ChatManager, parseChatClientMsg } from './chatAgent.js'
 import { WorkspaceManager, ChannelManager, parseWorkspaceClientMsg } from './workspace.js'
+import { AgentResponder, resolveBotAgent } from './agentResponder.js'
 import { sanitizeAttachments } from './runner.js'
 import { listWorktreeFiles, selfUpdate } from './worktree.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
@@ -108,6 +109,27 @@ const channels = new ChannelManager<WebSocket>(db, (socket, frame) => {
     // socket closed mid-send; its close handler drops the subscription
   }
 })
+// The ONE shared @mention team agent (D8/D4): constructed once, serving every
+// channel's mentions — never one instance per channel. It relays a mention plus
+// that channel's recent scrollback to the configured bot AgentTarget (U4) and
+// posts the reply back as a server-controlled `kind='agent'` message. Disabled
+// (undefined) when no agents are configured — mentions are then a graceful
+// no-op. Which live agent is the bot and the reference-checkout path are
+// orchestrator-owned deployment config (ZMRNG_WORKSPACE_BOT_AGENT /
+// ZMRNG_WORKSPACE_REPO_PATH).
+const botAgent = resolveBotAgent(config.agents, config.workspaceBotAgentId)
+const agentResponder = botAgent
+  ? new AgentResponder({
+      botAgent,
+      botHandle: config.workspaceBotHandle,
+      scrollback: config.workspaceScrollback,
+      checkoutPath: config.workspaceRepoPath,
+      timeoutMs: config.workspaceAgentTimeoutMs,
+      listMessages: (channelId, before, limit) => db.listMessages(channelId, before, limit),
+      post: (channelId, author, body, kind) => channels.post(channelId, author, body, kind),
+      log: app.log,
+    })
+  : undefined
 
 await app.register(websocket)
 
@@ -715,8 +737,23 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
       } else if (msg.type === 'message') {
         // Persist + fan out live to subscribed sockets only (no history replay).
         // A socket post is always `human` — the `agent` kind is server-controlled
-        // (set by the future T4 agent path), never trusted from a client frame.
-        channels.post(msg.channelId, msg.author, msg.body, 'human')
+        // (set by the T4 agent path below), never trusted from a client frame.
+        const stored = channels.post(msg.channelId, msg.author, msg.body, 'human')
+        // T4: an @mention of the bot handle triggers the ONE shared team agent
+        // asynchronously — the socket handler never blocks on (or crashes from)
+        // the agent path. `handleMention` is best-effort and never throws; the
+        // extra `.catch` is belt-and-braces. Unmentioned messages do nothing
+        // (no always-listening). A missing channel (`stored === undefined`) is a
+        // no-op.
+        if (stored && agentResponder && agentResponder.mentions(msg.body)) {
+          app.log.info(
+            { channelId: msg.channelId, messageId: stored.id },
+            'team-agent mention triggered',
+          )
+          void agentResponder.handleMention(msg.channelId).catch((err) => {
+            app.log.error({ err, channelId: msg.channelId }, 'team-agent handleMention crashed')
+          })
+        }
       }
     } catch (err) {
       app.log.error({ err }, 'workspace message handler failed')
