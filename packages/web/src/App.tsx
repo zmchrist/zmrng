@@ -23,6 +23,7 @@ import { TeamView } from './components/TeamView'
 import { SettingsModal } from './components/SettingsModal'
 import { useUiState } from './uiState'
 import { hydrateGrid } from './gridLayout'
+import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState, type TerminalTabState } from './windowTabs'
 import type { HandoffPrefill } from './teamHandoff'
 
 // The former standalone Tasks pane is merged into Workspace; only Workspace and
@@ -50,6 +51,18 @@ export default function App() {
   // if malformed) from the persisted GlobalUiState.grid, round-tripped on change.
   const grid = useMemo(() => hydrateGrid(ui.state.global.grid), [ui.state.global.grid])
   const setGrid = useCallback((next: GridState) => ui.patchGlobal({ grid: next }), [ui])
+  // Per-card tab-strip state for the Chat and Terminal cards, hydrated/persisted
+  // the same way as `grid` — the live sessions themselves stay ephemeral.
+  const chatTabs = useMemo(() => hydrateChatTabs(ui.state.global.chatTabs), [ui.state.global.chatTabs])
+  const setChatTabs = useCallback((next: TabsState<ChatTabState>) => ui.patchGlobal({ chatTabs: next }), [ui])
+  const terminalTabs = useMemo(
+    () => hydrateTerminalTabs(ui.state.global.terminalTabs),
+    [ui.state.global.terminalTabs],
+  )
+  const setTerminalTabs = useCallback(
+    (next: TabsState<TerminalTabState>) => ui.patchGlobal({ terminalTabs: next }),
+    [ui],
+  )
   // Settings is an ephemeral modal overlay — never persisted.
   const [settingsOpen, setSettingsOpen] = useState(false)
   // One-shot "Send to my zmrng" pre-fill from the Team tab (T3). A fresh object
@@ -231,6 +244,10 @@ export default function App() {
           selectedId={selectedId}
           grid={grid}
           onGridChange={setGrid}
+          chatTabs={chatTabs}
+          onChatTabsChange={setChatTabs}
+          terminalTabs={terminalTabs}
+          onTerminalTabsChange={setTerminalTabs}
           settingsOpen={settingsOpen}
           onSettingsToggle={() => setSettingsOpen((v) => !v)}
           connected={connected}

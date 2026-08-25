@@ -1,0 +1,155 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.tabStrip {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  min-height: 30px;
+  flex: 0 0 auto;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-strong);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 10px;
+  border-right: 1px solid var(--border);
+  background: var(--well);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.tab:hover {
+  color: var(--text);
+}
+.tabActive {
+  color: var(--text);
+  font-weight: 600;
+  background: var(--surface);
+}
+
+.tabLabel {
+  padding: 7px 0;
+}
+
+.tabClose {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+.tabClose:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.tabAdd {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 30px;
+  padding: 0;
+  font-size: 15px;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  transition: var(--transition);
+}
+.tabAdd:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.tabBody {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ---- chat-tab launch picker -------------------------------------------- */
+.launch {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+}
+
+.launchLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide, 0.04em);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.launchRow {
+  display: flex;
+  gap: 8px;
+}
+
+.select {
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--well);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.launchBtn {
+  padding: 8px 22px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.launchBtn:hover {
+  background: var(--accent);
+  color: var(--surface);
+}
