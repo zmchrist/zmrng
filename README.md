@@ -1,7 +1,5 @@
 # zmrng — an autonomous coding agent
 
-[![CI](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml/badge.svg)](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml)
-
 **Drop in a task → it plans, implements, validates, and opens its own pull
 request. Fully autonomous, in isolated git worktrees, no babysitting.** One
 GUI replaces watching five terminals.

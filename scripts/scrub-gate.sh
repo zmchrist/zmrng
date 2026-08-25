@@ -6,8 +6,8 @@
 # substring match, so innocent tokens that merely CONTAIN a forbidden name —
 # e.g. "ephemeral" contains "pheme" — do not trip the gate. Case-insensitive.
 #
-# Run it: `bash scripts/scrub-gate.sh` (also runs in CI, so it is enforced, not
-# remembered). Exit 0 = clean, exit 1 = forbidden name found.
+# Run it: `bash scripts/scrub-gate.sh` before making the repo public or merging
+# any docs/config change. Exit 0 = clean, exit 1 = forbidden name found.
 set -euo pipefail
 
 # Former project name | former client repo name.
