@@ -137,6 +137,8 @@ export interface Config {
   workspaceBotHandle: string
   /** How many recent channel messages are sent to the team agent as context. */
   workspaceScrollback: number
+  /** Per-request timeout (ms) for the team-agent fetch; caps a hung upstream. */
+  workspaceAgentTimeoutMs: number
 }
 
 export type AuthMode = 'oauth' | 'apikey'
@@ -543,6 +545,7 @@ function buildConfig(): Config {
     workspaceBotAgentId: process.env.ZMRNG_WORKSPACE_BOT_AGENT?.trim() || '',
     workspaceBotHandle: process.env.ZMRNG_WORKSPACE_BOT_HANDLE?.trim() || '@agent',
     workspaceScrollback: Number(process.env.ZMRNG_WORKSPACE_SCROLLBACK ?? 20),
+    workspaceAgentTimeoutMs: Number(process.env.ZMRNG_WORKSPACE_AGENT_TIMEOUT_MS ?? 60000),
   }
 }
 

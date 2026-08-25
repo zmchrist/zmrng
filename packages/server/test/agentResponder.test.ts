@@ -222,6 +222,39 @@ describe('AgentResponder.handleMention', () => {
     expect(log.warn).toHaveBeenCalled()
   })
 
+  it('passes an abort signal and aborts a hung fetch after the timeout (no post)', async () => {
+    const post = vi.fn()
+    const log = fakeLog()
+    // A fetch that never resolves on its own — it only settles when the
+    // injected abort signal fires, mirroring a hung upstream.
+    const fetchFn = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init.signal as AbortSignal
+          signal.addEventListener('abort', () =>
+            reject(new DOMException('aborted', 'AbortError')),
+          )
+        }),
+    )
+    const responder = new AgentResponder({
+      botAgent: BOT,
+      botHandle: '@agent',
+      scrollback: 5,
+      checkoutPath: '',
+      timeoutMs: 10,
+      listMessages: () => [msg({ body: '@agent hi' })],
+      post,
+      log,
+      fetchFn: fetchFn as unknown as typeof fetch,
+      pullFn: async () => {},
+    })
+    await expect(responder.handleMention(7)).resolves.toBeUndefined()
+    const [, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+    expect(post).not.toHaveBeenCalled()
+    expect(log.error).toHaveBeenCalled()
+  })
+
   it('skips the pull gracefully when the checkout path is unset', async () => {
     const pullFn = vi.fn(async () => {})
     const fetchFn = vi.fn(async () => okResponse(JSON.stringify({ reply: 'ok' })))

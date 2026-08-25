@@ -124,6 +124,7 @@ const agentResponder = botAgent
       botHandle: config.workspaceBotHandle,
       scrollback: config.workspaceScrollback,
       checkoutPath: config.workspaceRepoPath,
+      timeoutMs: config.workspaceAgentTimeoutMs,
       listMessages: (channelId, before, limit) => db.listMessages(channelId, before, limit),
       post: (channelId, author, body, kind) => channels.post(channelId, author, body, kind),
       log: app.log,

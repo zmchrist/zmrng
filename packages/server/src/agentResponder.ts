@@ -4,6 +4,14 @@ import type { AgentTarget, Message, MessageKind } from './types.js'
 
 const exec = promisify(execFile)
 
+/**
+ * Default upper bound on one agent HTTP round-trip. The team-agent fetch is
+ * fired fire-and-forget from the socket handler, so without a deadline a hung
+ * upstream would leak a pending request per mention indefinitely. The timeout
+ * aborts the fetch; the abort surfaces as a caught error (logged, no post).
+ */
+export const DEFAULT_AGENT_TIMEOUT_MS = 60_000
+
 /** The narrow structured-logging surface the responder needs (Pino-compatible). */
 export interface ResponderLog {
   info(obj: object, msg: string): void
@@ -140,6 +148,8 @@ export interface AgentResponderDeps {
   fetchFn?: typeof fetch
   /** Injected pull seam (defaults to `git -C <path> pull --ff-only`). */
   pullFn?: PullFn
+  /** Per-request fetch timeout in ms (defaults to `DEFAULT_AGENT_TIMEOUT_MS`). */
+  timeoutMs?: number
 }
 
 /**
@@ -158,10 +168,15 @@ export interface AgentResponderDeps {
 export class AgentResponder {
   private readonly fetchFn: typeof fetch
   private readonly pullFn: PullFn
+  private readonly timeoutMs: number
 
   constructor(private readonly deps: AgentResponderDeps) {
     this.fetchFn = deps.fetchFn ?? fetch
     this.pullFn = deps.pullFn ?? defaultPull
+    this.timeoutMs =
+      deps.timeoutMs !== undefined && deps.timeoutMs > 0
+        ? deps.timeoutMs
+        : DEFAULT_AGENT_TIMEOUT_MS
   }
 
   /** True when `body` mentions this bot's handle. */
@@ -182,6 +197,8 @@ export class AgentResponder {
     const history = this.deps.listMessages(channelId, null, this.deps.scrollback)
     const messages = buildAgentMessages(history)
     const url = this.deps.botAgent.url
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs)
     try {
       const res = await this.fetchFn(url, {
         method: 'POST',
@@ -190,6 +207,7 @@ export class AgentResponder {
           messages,
           context: { channelId, checkoutPath: this.deps.checkoutPath },
         }),
+        signal: controller.signal,
       })
       if (!res.ok) {
         this.deps.log.error(
@@ -213,6 +231,8 @@ export class AgentResponder {
         { err, channelId, agentId: this.deps.botAgent.id },
         'team-agent fetch failed',
       )
+    } finally {
+      clearTimeout(timer)
     }
   }
 
