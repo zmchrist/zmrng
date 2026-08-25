@@ -25,8 +25,8 @@ import { WorkspaceTabs } from './WorkspaceTabs'
 import { NewTaskForm } from './NewTaskForm'
 import { TaskList } from './TaskList'
 import { TaskControls } from './TaskControls'
-import { ChatPane } from './ChatPane'
-import { Terminal } from './Terminal'
+import { ChatCard } from './ChatCard'
+import { TerminalCard } from './TerminalCard'
 import { PipelineCard } from './PipelineCard'
 import { ConcurrencyCard } from './ConcurrencyCard'
 import { ReviewQueueCard } from './ReviewQueueCard'
@@ -35,6 +35,7 @@ import { BottomNav } from './BottomNav'
 import { LIVE_STATUSES } from '../status'
 import { hydrateLayout, openFile, pruneFileTabs } from '../workspaceLayout'
 import { showCard } from '../gridLayout'
+import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
 
 interface Props {
   task: Task | undefined
@@ -50,6 +51,12 @@ interface Props {
   /** The Workspace dashboard-grid state + its persistence sink (global UI state). */
   grid: GridState
   onGridChange: (next: GridState) => void
+  /** Per-card tab-strip state for the Chat and Terminal cards + their
+   *  persistence sinks (global UI state, like `grid`). */
+  chatTabs: TabsState<ChatTabState>
+  onChatTabsChange: (next: TabsState<ChatTabState>) => void
+  terminalTabs: TabsState<TerminalTabState>
+  onTerminalTabsChange: (next: TabsState<TerminalTabState>) => void
   settingsOpen: boolean
   onSettingsToggle: () => void
   connected: boolean
@@ -115,6 +122,10 @@ export function WorkspaceView({
   selectedId,
   grid,
   onGridChange,
+  chatTabs,
+  onChatTabsChange,
+  terminalTabs,
+  onTerminalTabsChange,
   settingsOpen,
   onSettingsToggle,
   connected,
@@ -285,8 +296,8 @@ export function WorkspaceView({
         onSelectTask={onSelect}
       />
     ),
-    chat: <ChatPane id="workspace-chat" />,
-    terminal: <Terminal id="workspace-terminal" />,
+    chat: <ChatCard tabs={chatTabs} onTabsChange={onChatTabsChange} />,
+    terminal: <TerminalCard tabs={terminalTabs} onTabsChange={onTerminalTabsChange} />,
   }
 
   return (
