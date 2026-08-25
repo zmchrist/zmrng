@@ -247,7 +247,6 @@ export function WorkspaceTabs({
   return (
     <div className={styles.tabArea}>
       <div className={styles.buttonBar}>
-        <span className={styles.barLabel}>Panels</span>
         {!openKinds.has('log') && (
           <button
             type="button"

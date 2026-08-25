@@ -171,7 +171,6 @@ export type GridCardId =
   | 'reviewqueue'
   | 'newtask'
   | 'activetask'
-  | 'workerlog'
   | 'tasklist'
   | 'files'
   | 'viewers'

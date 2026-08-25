@@ -191,9 +191,9 @@ describe('hideCard / showCard / toggleMinimize', () => {
 })
 
 describe('defaultCards', () => {
-  it('seeds all 11 roster cards with no overlaps', () => {
+  it('seeds all 10 roster cards with no overlaps', () => {
     const cards = defaultCards()
-    expect(cards).toHaveLength(11)
+    expect(cards).toHaveLength(10)
     for (let i = 0; i < cards.length; i++) {
       for (let j = i + 1; j < cards.length; j++) {
         expect(collide(cards[i], cards[j])).toBe(false)
@@ -208,7 +208,7 @@ describe('defaultCards', () => {
 describe('hydrateGrid / normalizeGrid', () => {
   it('seeds defaults when given undefined', () => {
     const s = hydrateGrid(undefined)
-    expect(s.cards).toHaveLength(11)
+    expect(s.cards).toHaveLength(10)
     expect(s.density).toBe('comfortable')
     expect(s.cardStyle).toBe('accent')
     expect(s.interaction).toBe('reflow')
@@ -225,8 +225,8 @@ describe('hydrateGrid / normalizeGrid', () => {
       interaction: 'swap',
     } as unknown as GridState
     const s = hydrateGrid(stored)
-    // all 11 roster ids present, no unknown id
-    expect(s.cards).toHaveLength(11)
+    // all 10 roster ids present, no unknown id
+    expect(s.cards).toHaveLength(10)
     expect(s.cards.some((c) => c.id === 'bogus' as GridCardGeo['id'])).toBe(false)
     expect(s.cards.some((c) => c.id === 'viewers')).toBe(true)
     // the stored files geometry is honored
@@ -250,7 +250,7 @@ describe('hydrateGrid / normalizeGrid', () => {
 
   it('tolerates a malformed / non-array cards value without throwing', () => {
     const s = normalizeGrid({ cards: 'nope', density: 'x', cardStyle: 'y', interaction: 'z' } as unknown as GridState)
-    expect(s.cards).toHaveLength(11)
+    expect(s.cards).toHaveLength(10)
     expect(s.density).toBe('comfortable')
     expect(s.cardStyle).toBe('accent')
     expect(s.interaction).toBe('reflow')
