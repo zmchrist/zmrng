@@ -172,6 +172,10 @@ export default function App() {
     },
     [setMode],
   )
+  // Drop the one-shot prefill once NewTaskForm has seeded from it, so a later
+  // hide/show of the new-task card (which remounts the form and resets its local
+  // seeded marker) can't re-seed an already-sent handoff.
+  const onPrefillConsumed = useCallback(() => setHandoffPrefill(null), [])
 
   const selected = selectedId ? tasks[selectedId] : undefined
 
@@ -233,6 +237,7 @@ export default function App() {
           onSelect={select}
           onCreate={onCreate}
           prefill={handoffPrefill}
+          onPrefillConsumed={onPrefillConsumed}
           onStart={() => (selected ? api.start(selected.id) : Promise.resolve())}
           onMessage={(text, attachments) =>
             selected ? api.message(selected.id, text, attachments) : Promise.resolve()

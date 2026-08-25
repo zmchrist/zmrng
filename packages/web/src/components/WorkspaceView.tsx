@@ -68,6 +68,8 @@ interface Props {
   ) => Promise<void>
   /** One-shot "Send to my zmrng" pre-fill for the new-task box (T3). */
   prefill?: HandoffPrefill | null
+  /** Fired once the new-task box has seeded from `prefill` (clears it upstream). */
+  onPrefillConsumed?: () => void
   onStart: () => Promise<unknown>
   onMessage: (text: string, attachments?: Attachment[]) => Promise<unknown>
   onResume: () => Promise<unknown>
@@ -123,6 +125,7 @@ export function WorkspaceView({
   onSelect,
   onCreate,
   prefill,
+  onPrefillConsumed,
   onStart,
   onMessage,
   onResume,
@@ -259,6 +262,7 @@ export function WorkspaceView({
         defaultRepoId={config?.defaultRepoId ?? ''}
         onCreate={onCreate}
         prefill={prefill}
+        onPrefillConsumed={onPrefillConsumed}
       />
     ),
     tasklist: (

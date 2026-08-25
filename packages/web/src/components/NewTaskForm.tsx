@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import styles from './NewTaskForm.module.css'
 import { useAttachments } from '../useAttachments'
 import { AttachmentTray } from './AttachmentTray'
@@ -40,6 +40,12 @@ interface Props {
    * it falls back to the default (decision D6).
    */
   prefill?: HandoffPrefill | null
+  /**
+   * Fired after this form has seeded from a fresh `prefill`, so the parent can
+   * drop it. Without this, a later remount of the form (hide/show of the card)
+   * resets the local seeded marker and would re-seed the already-sent handoff.
+   */
+  onPrefillConsumed?: () => void
 }
 
 const MODEL_OPTIONS: ModelAlias[] = ['opus', 'sonnet']
@@ -60,7 +66,7 @@ const FLOW_DEFAULTS: Record<FlowMode, { model: ModelAlias; effort: EffortLevel }
   plan: { model: DEFAULT_MODEL, effort: DEFAULT_EFFORT },
 }
 
-export function NewTaskForm({ repos, defaultRepoId, onCreate, prefill }: Props) {
+export function NewTaskForm({ repos, defaultRepoId, onCreate, prefill, onPrefillConsumed }: Props) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
@@ -95,6 +101,13 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate, prefill }: Props) 
     setBody(prefill.body)
     setRepoId(resolveSuggestedRepoId(prefill.suggestedRepoId, repos))
   }
+
+  // Once seeded (render committed), tell the parent to drop the one-shot prefill.
+  // Runs after the render-phase seed above; clearing it upstream stops a later
+  // remount of this form from re-seeding the same already-sent handoff.
+  useEffect(() => {
+    if (prefill) onPrefillConsumed?.()
+  }, [prefill, onPrefillConsumed])
 
   const effectiveRepoId = repoId || defaultRepoId
   // A title is always required; an image-only description (no body text) is valid.
