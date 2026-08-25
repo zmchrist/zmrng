@@ -305,6 +305,30 @@ app.get('/api/tasks/:id/events', (req) => {
 // Team-workspace channel list (box 2). Always 200; #general is seeded by default.
 app.get('/api/channels', (): Channel[] => db.listChannels())
 
+// Create a channel (T3). Optionally repo-scoped via a nullable `repoId` — the
+// repo id is stored as a free-text tag (a suggestion for the "Send to my zmrng"
+// handoff); it is NOT validated against the local registry here. Tolerant: a
+// blank name is a 400, never a 500; a duplicate name reuses the existing row
+// (db.createChannel is idempotent by name). On success the updated channel list
+// is broadcast to the 'workspace' room so every connected teammate's rail
+// refreshes live (the client handles the `channels` frame already).
+app.post('/api/channels', (req, reply) => {
+  const body = req.body as { name?: string; repoId?: string | null } | undefined
+  const name = body?.name?.trim()
+  if (!name) {
+    return reply.code(400).send({ error: 'name is required' })
+  }
+  const rawRepoId = typeof body?.repoId === 'string' ? body.repoId.trim() : ''
+  const repoId = rawRepoId.length > 0 ? rawRepoId : null
+  const channel = db.createChannel(name, repoId, new Date().toISOString())
+  hub.broadcastRoom(
+    'workspace',
+    JSON.stringify({ type: 'channels', channels: db.listChannels() } as WsWorkspaceServerMsg),
+  )
+  app.log.info({ channelId: channel.id }, 'channel created')
+  return channel
+})
+
 // Paginated scrollback for one channel (box 4). Mirrors the events/WS split: REST
 // serves history, the workspace socket delivers only NEW messages. `before` (an
 // oldest-loaded message id) walks backwards; `limit` is clamped to a hard cap.

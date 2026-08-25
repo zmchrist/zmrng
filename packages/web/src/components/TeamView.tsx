@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import styles from './TeamView.module.css'
-import type { Channel, Message, WorkspaceMember } from '../types'
+import type { Channel, Message, RepoTarget, WorkspaceMember } from '../types'
 import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from '../types'
 import {
   encodeHello,
@@ -13,6 +13,7 @@ import {
 import { emptyRoster, applyWorkspaceMsg } from '../roster'
 import { emptyThread, appendMessage, loadScrollback } from '../channelThread'
 import { api } from '../api'
+import { buildHandoffPrefill, type HandoffPrefill } from '../teamHandoff'
 import {
   loadStoredHandle,
   saveStoredHandle,
@@ -24,6 +25,12 @@ interface Props {
   /** Optional server-side default VPS URL (ServerConfig.workspaceUrl). The
    *  per-teammate localStorage value wins over this when set. */
   workspaceUrl: string
+  /** The teammate's OWN local repo registry (GET /api/repos), used to populate
+   *  the create-channel repo select — a channel repo id is a free-text tag. */
+  repos: RepoTarget[]
+  /** Lift a "Send to my zmrng" handoff up to App: switch to Workspace and seed
+   *  the local new-task box with this brief (T3, decision D6). */
+  onSendToZmrng: (prefill: HandoffPrefill) => void
 }
 
 const PING_MS = 25000
@@ -46,7 +53,7 @@ function channelLabel(name: string): string {
  * channel-thread reducers, and config resolution it composes are each
  * unit-tested in isolation.
  */
-export function TeamView({ workspaceUrl }: Props) {
+export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
   const socketUrl = workspaceSocketUrl(resolveWorkspaceUrl(workspaceUrl))
   const [handle, setHandle] = useState<string>(() => loadStoredHandle())
   const [draft, setDraft] = useState('')
@@ -56,6 +63,13 @@ export function TeamView({ workspaceUrl }: Props) {
   const [openId, setOpenId] = useState<number | null>(null)
   const [thread, setThread] = useState<Message[]>(emptyThread)
   const [composer, setComposer] = useState('')
+  // Create-channel affordance state (T3). The list itself refreshes via the
+  // server's `channels` broadcast over the shared socket.
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newRepo, setNewRepo] = useState('')
+  const [createBusy, setCreateBusy] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   // Latest open-channel id, readable inside the stable socket onmessage closure.
   const openIdRef = useRef<number | null>(null)
@@ -200,6 +214,37 @@ export function TeamView({ workspaceUrl }: Props) {
     setComposer('')
   }
 
+  // Create a channel over REST (T3). The server broadcasts the refreshed list to
+  // the workspace room, so every connected teammate's rail (including this one)
+  // updates via the `channels` socket frame — no manual setChannels needed here.
+  const onCreateChannel = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const name = newName.trim()
+    if (!name || createBusy) return
+    setCreateBusy(true)
+    setCreateError(null)
+    try {
+      const created = await api.createChannel(name, newRepo || null)
+      setNewName('')
+      setNewRepo('')
+      setCreating(false)
+      // Open the freshly created channel (the broadcast populates the rail).
+      setChannels((prev) =>
+        prev.some((c) => c.id === created.id) ? prev : [...prev, created],
+      )
+      openChannelId(created.id)
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create channel')
+    } finally {
+      setCreateBusy(false)
+    }
+  }
+
+  /** Hand a channel message off to the local zmrng new-task box (T3). */
+  const sendMessageToZmrng = (channel: Channel, message: Message): void => {
+    onSendToZmrng(buildHandoffPrefill(channel, message))
+  }
+
   if (!socketUrl) {
     return (
       <div className={styles.team}>
@@ -266,7 +311,51 @@ export function TeamView({ workspaceUrl }: Props) {
         <div className={styles.rail}>
           <div className={styles.sectionHead}>
             <span className={styles.sectionTitle}>Channels</span>
+            <button
+              type="button"
+              className={styles.addBtn}
+              onClick={() => {
+                setCreating((v) => !v)
+                setCreateError(null)
+              }}
+              title={creating ? 'Cancel' : 'New channel'}
+            >
+              {creating ? '×' : '+ new'}
+            </button>
           </div>
+          {creating && (
+            <form className={styles.createForm} onSubmit={onCreateChannel}>
+              <input
+                className={styles.input}
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="channel-name"
+                maxLength={MAX_DISPLAY_NAME_LEN}
+                autoFocus
+              />
+              <select
+                className={styles.select}
+                value={newRepo}
+                onChange={(e) => setNewRepo(e.target.value)}
+              >
+                <option value="">No repo (like #general)</option>
+                {repos.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+              {createError && <span className={styles.createError}>{createError}</span>}
+              <button
+                type="submit"
+                className={styles.joinBtn}
+                disabled={!newName.trim() || createBusy}
+              >
+                {createBusy ? 'Creating…' : 'Create channel'}
+              </button>
+            </form>
+          )}
           <ul className={styles.channels}>
             {channels.length === 0 && <li className={styles.railEmpty}>No channels yet.</li>}
             {channels.map((c) => (
@@ -277,6 +366,7 @@ export function TeamView({ workspaceUrl }: Props) {
                   onClick={() => openChannelId(c.id)}
                 >
                   {channelLabel(c.name)}
+                  {c.repoId && <span className={styles.channelRepoDot} title={c.repoId} />}
                 </button>
               </li>
             ))}
@@ -323,6 +413,14 @@ export function TeamView({ workspaceUrl }: Props) {
                     <span className={styles.messageAuthor}>
                       {m.author}
                       {m.kind === 'agent' && <span className={styles.agentTag}>agent</span>}
+                      <button
+                        type="button"
+                        className={styles.sendZmrng}
+                        onClick={() => sendMessageToZmrng(openChannel, m)}
+                        title="Create a local zmrng task from this message"
+                      >
+                        Send to my zmrng
+                      </button>
                     </span>
                     <span className={styles.messageBody}>{m.body}</span>
                   </li>
