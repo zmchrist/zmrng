@@ -53,9 +53,6 @@
   cursor: default;
 }
 .menu {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
   z-index: 41;
   min-width: 180px;
   max-height: 320px;
