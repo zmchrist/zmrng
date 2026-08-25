@@ -312,6 +312,56 @@ describe('deleteTask', () => {
   })
 })
 
+describe('members (team workspace T1)', () => {
+  it('creates the members table', () => {
+    new Db(dbPath)
+    const raw = new Database(dbPath)
+    const tables = new Set(
+      (
+        raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+          name: string
+        }[]
+      ).map((t) => t.name),
+    )
+    raw.close()
+    expect(tables.has('members')).toBe(true)
+  })
+
+  it('upsertMember inserts a new member and returns it', () => {
+    const db = new Db(dbPath)
+    const m = db.upsertMember('Ada', '2026-08-24T00:00:00.000Z')
+    expect(m.displayName).toBe('Ada')
+    expect(m.createdAt).toBe('2026-08-24T00:00:00.000Z')
+    expect(typeof m.id).toBe('number')
+    expect(db.listMembers()).toHaveLength(1)
+  })
+
+  it('upsertMember is idempotent by display name (re-join reuses the same row)', () => {
+    const db = new Db(dbPath)
+    const first = db.upsertMember('Ada', '2026-08-24T00:00:00.000Z')
+    const again = db.upsertMember('Ada', '2026-08-24T00:05:00.000Z')
+    expect(again.id).toBe(first.id)
+    expect(again.createdAt).toBe(first.createdAt) // original creation time preserved
+    expect(db.listMembers()).toHaveLength(1)
+  })
+
+  it('listMembers returns every distinct member in insertion order', () => {
+    const db = new Db(dbPath)
+    db.upsertMember('Ada', '2026-08-24T00:00:00.000Z')
+    db.upsertMember('Bo', '2026-08-24T00:00:01.000Z')
+    db.upsertMember('Ada', '2026-08-24T00:00:02.000Z')
+    const listed = db.listMembers()
+    expect(listed.map((m) => m.displayName)).toEqual(['Ada', 'Bo'])
+  })
+
+  it('persists members across reopen', () => {
+    const db1 = new Db(dbPath)
+    db1.upsertMember('Ada', '2026-08-24T00:00:00.000Z')
+    const db2 = new Db(dbPath)
+    expect(db2.listMembers().map((m) => m.displayName)).toEqual(['Ada'])
+  })
+})
+
 describe('addUsage', () => {
   const mk = (): Db => {
     const db = new Db(dbPath)
