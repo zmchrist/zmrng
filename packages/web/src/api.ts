@@ -205,6 +205,17 @@ export const api = {
   /** Team-workspace channel list (box 2). */
   listChannels: () => req<Channel[]>('/api/channels'),
   /**
+   * Create a channel (T3). Pass a `repoId` to repo-scope it (a free-text
+   * suggestion tag for the "Send to my zmrng" handoff); omit/null for an
+   * untied channel like #general. The server broadcasts the refreshed list to
+   * every connected teammate over the workspace socket.
+   */
+  createChannel: (name: string, repoId?: string | null) =>
+    req<Channel>('/api/channels', {
+      method: 'POST',
+      body: JSON.stringify({ name, repoId: repoId ?? null }),
+    }),
+  /**
    * Paginated scrollback for one channel (box 4). Pass the oldest loaded
    * message id as `before` to page backwards; the socket delivers newer live
    * messages separately (no history replay over the socket).
