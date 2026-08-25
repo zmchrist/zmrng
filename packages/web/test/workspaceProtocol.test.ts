@@ -35,23 +35,14 @@ describe('client encoders', () => {
     expect(JSON.parse(encodeUnsubscribe(9))).toEqual({ type: 'unsubscribe', channelId: 9 })
   })
 
-  it('encodeMessage produces a message frame with author/body/kind', () => {
-    expect(JSON.parse(encodeMessage(1, 'Ada', 'hi', 'human'))).toEqual({
-      type: 'message',
-      channelId: 1,
-      author: 'Ada',
-      body: 'hi',
-      kind: 'human',
-    })
-  })
-
-  it('encodeMessage defaults the kind to human when omitted', () => {
+  it('encodeMessage produces a message frame with author/body and NO kind', () => {
+    // A client never asserts `kind` — a socket post is always `human`
+    // server-side; the `agent` kind is server-controlled (future T4).
     expect(JSON.parse(encodeMessage(1, 'Ada', 'hi'))).toEqual({
       type: 'message',
       channelId: 1,
       author: 'Ada',
       body: 'hi',
-      kind: 'human',
     })
   })
 

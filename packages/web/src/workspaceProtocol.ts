@@ -5,13 +5,7 @@
 // guard over the server -> client frames (mirrors `chatProtocol.ts`).
 
 import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from './types'
-import type {
-  Channel,
-  Message,
-  MessageKind,
-  WorkspaceMember,
-  WsWorkspaceServerMsg,
-} from './types'
+import type { Channel, Message, WorkspaceMember, WsWorkspaceServerMsg } from './types'
 
 /**
  * Encode a client `hello` frame — self-assert a display name on first connect.
@@ -43,21 +37,16 @@ export function encodeUnsubscribe(channelId: number): string {
 
 /**
  * Encode a `message` frame — post to a channel. The body is trimmed and clamped
- * to `MAX_MESSAGE_BODY_LEN` (the client mirror of the server's guard); `kind`
- * defaults to `human` (the composer only ever posts human messages in T2).
+ * to `MAX_MESSAGE_BODY_LEN` (the client mirror of the server's guard). No `kind`
+ * is sent — a socket post is always persisted as `human` server-side; the
+ * `agent` kind is server-controlled and can never be asserted by a client.
  */
-export function encodeMessage(
-  channelId: number,
-  author: string,
-  body: string,
-  kind: MessageKind = 'human',
-): string {
+export function encodeMessage(channelId: number, author: string, body: string): string {
   return JSON.stringify({
     type: 'message',
     channelId,
     author: author.trim().slice(0, MAX_DISPLAY_NAME_LEN),
     body: body.trim().slice(0, MAX_MESSAGE_BODY_LEN),
-    kind,
   })
 }
 

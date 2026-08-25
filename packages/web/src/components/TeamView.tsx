@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import styles from './TeamView.module.css'
 import type { Channel, Message, WorkspaceMember } from '../types'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from '../types'
 import {
   encodeHello,
   encodePing,
@@ -195,7 +196,7 @@ export function TeamView({ workspaceUrl }: Props) {
     if (!body || openId === null) return
     // Posted human message returns via the channel fan-out (we are subscribed),
     // so it appears in the thread through the live socket — no optimistic append.
-    sendFrame(encodeMessage(openId, handle, body, 'human'))
+    sendFrame(encodeMessage(openId, handle, body))
     setComposer('')
   }
 
@@ -230,7 +231,7 @@ export function TeamView({ workspaceUrl }: Props) {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder="e.g. Ada"
-              maxLength={64}
+              maxLength={MAX_DISPLAY_NAME_LEN}
               autoFocus
             />
             <button type="submit" className={styles.joinBtn} disabled={!draft.trim()}>
@@ -334,7 +335,7 @@ export function TeamView({ workspaceUrl }: Props) {
                   value={composer}
                   onChange={(e) => setComposer(e.target.value)}
                   placeholder={`Message ${channelLabel(openChannel.name)}`}
-                  maxLength={4000}
+                  maxLength={MAX_MESSAGE_BODY_LEN}
                   disabled={!connected}
                 />
                 <button

@@ -14,11 +14,6 @@ function isChannelId(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v)
 }
 
-/** Narrow an untyped `kind` field to a `MessageKind`, defaulting to `human`. */
-function asMessageKind(v: unknown): MessageKind {
-  return v === 'agent' ? 'agent' : 'human'
-}
-
 // ---- tolerant client-frame parsing -----------------------------------------
 
 function asRecord(v: unknown): Record<string, unknown> | undefined {
@@ -66,12 +61,15 @@ export function parseWorkspaceClientMsg(raw: string): WsWorkspaceClientMsg | und
     const body = obj.body.trim()
     if (author.length === 0 || author.length > MAX_DISPLAY_NAME_LEN) return undefined
     if (body.length === 0 || body.length > MAX_MESSAGE_BODY_LEN) return undefined
+    // A client `message` frame carries no `kind`: an inbound socket post is
+    // always `human`. Any client-supplied `kind` is ignored here so a human
+    // cannot forge an `agent`-authored message (the `agent` kind is set
+    // server-side by the future T4 agent path, never over this socket).
     return {
       type: 'message',
       channelId: obj.channelId,
       author,
       body,
-      kind: asMessageKind(obj.kind),
     }
   }
   return undefined

@@ -464,7 +464,10 @@ export interface Message {
  * (GET /ws/workspace). `hello` self-asserts a display name on first connect;
  * `ping` is the client heartbeat (the server answers with `pong`). `subscribe`/
  * `unsubscribe` register interest in a channel's live fan-out as the client
- * opens/closes it; `message` posts to a channel. The socket is multiplexed by
+ * opens/closes it; `message` posts to a channel. A client `message` frame
+ * carries NO `kind` — a socket post is always persisted as `human`; the `agent`
+ * kind is server-controlled (a future T4 agent posts server-side), so a human
+ * client can never forge an agent-authored message. The socket is multiplexed by
  * design — frames are channel-tagged by `type`, never one socket per resource.
  */
 export type WsWorkspaceClientMsg =
@@ -472,7 +475,7 @@ export type WsWorkspaceClientMsg =
   | { type: 'ping' }
   | { type: 'subscribe'; channelId: number }
   | { type: 'unsubscribe'; channelId: number }
-  | { type: 'message'; channelId: number; author: string; body: string; kind: MessageKind }
+  | { type: 'message'; channelId: number; author: string; body: string }
 
 /**
  * server -> client frames over the workspace socket. `roster` is a full

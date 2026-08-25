@@ -76,33 +76,33 @@ describe('parseWorkspaceClientMsg — channel frames (T2)', () => {
     ).toBeUndefined()
   })
 
-  it('parses a well-formed message frame and trims the body', () => {
+  it('parses a well-formed message frame and trims the body (no client kind)', () => {
     expect(
       parseWorkspaceClientMsg(
-        JSON.stringify({ type: 'message', channelId: 1, author: 'Ada', body: '  hi  ', kind: 'human' }),
+        JSON.stringify({ type: 'message', channelId: 1, author: 'Ada', body: '  hi  ' }),
       ),
-    ).toEqual({ type: 'message', channelId: 1, author: 'Ada', body: 'hi', kind: 'human' })
+    ).toEqual({ type: 'message', channelId: 1, author: 'Ada', body: 'hi' })
   })
 
-  it('defaults an absent or unknown message kind to human', () => {
-    expect(
-      parseWorkspaceClientMsg(
-        JSON.stringify({ type: 'message', channelId: 1, author: 'Ada', body: 'hi' }),
-      ),
-    ).toEqual({ type: 'message', channelId: 1, author: 'Ada', body: 'hi', kind: 'human' })
-    expect(
-      parseWorkspaceClientMsg(
-        JSON.stringify({ type: 'message', channelId: 1, author: 'Ada', body: 'hi', kind: 'bogus' }),
-      ),
-    ).toEqual({ type: 'message', channelId: 1, author: 'Ada', body: 'hi', kind: 'human' })
-  })
-
-  it('accepts an explicit agent kind (for later agent posting)', () => {
+  it('ignores any client-supplied kind — a socket post is never client-authored as agent', () => {
+    // A human client cannot forge an `agent` message: the parser drops `kind`
+    // entirely, and the route always posts `human` (index.ts). The `agent` kind
+    // is server-controlled (the future T4 agent path).
     expect(
       parseWorkspaceClientMsg(
         JSON.stringify({ type: 'message', channelId: 1, author: 'planner', body: 'go', kind: 'agent' }),
       ),
-    ).toEqual({ type: 'message', channelId: 1, author: 'planner', body: 'go', kind: 'agent' })
+    ).toEqual({ type: 'message', channelId: 1, author: 'planner', body: 'go' })
+    expect(
+      parseWorkspaceClientMsg(
+        JSON.stringify({ type: 'message', channelId: 1, author: 'Ada', body: 'hi', kind: 'bogus' }),
+      ),
+    ).toEqual({ type: 'message', channelId: 1, author: 'Ada', body: 'hi' })
+    expect(
+      parseWorkspaceClientMsg(
+        JSON.stringify({ type: 'message', channelId: 1, author: 'Ada', body: 'hi' }),
+      ),
+    ).toEqual({ type: 'message', channelId: 1, author: 'Ada', body: 'hi' })
   })
 
   it('rejects a message frame with a blank body, blank author, or bad channelId, and never throws', () => {

@@ -714,7 +714,9 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
         channels.unsubscribe(socket, msg.channelId)
       } else if (msg.type === 'message') {
         // Persist + fan out live to subscribed sockets only (no history replay).
-        channels.post(msg.channelId, msg.author, msg.body, msg.kind)
+        // A socket post is always `human` — the `agent` kind is server-controlled
+        // (set by the future T4 agent path), never trusted from a client frame.
+        channels.post(msg.channelId, msg.author, msg.body, 'human')
       }
     } catch (err) {
       app.log.error({ err }, 'workspace message handler failed')
