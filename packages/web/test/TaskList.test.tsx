@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { TaskList } from '../src/components/TaskList'
 import type { RepoTarget, Task, TaskStatus } from '../src/types'
 
@@ -71,5 +71,58 @@ describe('<TaskList>', () => {
     )
     screen.getByText('Clickable').click()
     expect(onSelect).toHaveBeenCalledWith('zzz')
+  })
+
+  it('does not show action buttons for an unselected row', () => {
+    render(
+      <TaskList
+        tasks={[makeTask({ id: 'a', status: 'backlog' })]}
+        repos={repos}
+        selectedId={null}
+        onSelect={() => {}}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument()
+  })
+
+  it('expands the selected row to show its action buttons', () => {
+    render(
+      <TaskList
+        tasks={[makeTask({ id: 'a', status: 'backlog' })]}
+        repos={repos}
+        selectedId="a"
+        onSelect={() => {}}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument()
+  })
+
+  it('fires the matching action callback from the expanded row', async () => {
+    const onStart = vi.fn().mockResolvedValue(undefined)
+    render(
+      <TaskList
+        tasks={[makeTask({ id: 'a', status: 'backlog' })]}
+        repos={repos}
+        selectedId="a"
+        onSelect={() => {}}
+        onStart={onStart}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(onStart).toHaveBeenCalled())
+  })
+
+  it('reveals the metadata dropdown on demand for the selected row', () => {
+    render(
+      <TaskList
+        tasks={[makeTask({ id: 'a', status: 'executing', flow: 'plan' })]}
+        repos={repos}
+        selectedId="a"
+        onSelect={() => {}}
+      />,
+    )
+    expect(screen.queryByText('flow: plan')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /details/i }))
+    expect(screen.getByText('flow: plan')).toBeInTheDocument()
   })
 })
