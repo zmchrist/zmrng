@@ -29,7 +29,7 @@ later want more, that's a separate conversation, not a default.
    grinding ticket **H3** (`wt-H3` on branch `gauntlet/H3`, branched off integ tip
    `4218d68`). NEVER rewire the driver mid-flight. Confirm the tick is done first:
    ```bash
-   cd /Users/tiofeliz/Developer/Projects/zmrng
+   cd ~/Developer/Projects/zmrng
    ls -la .gauntlet/driver.lock 2>/dev/null   # gone = no tick running
    git worktree list                          # no wt-H3 = tick cleaned up
    git fetch origin --quiet && git ls-remote --heads origin gauntlet/integ  # tip advanced past 4218d68 = H3 folded
@@ -48,7 +48,7 @@ later want more, that's a separate conversation, not a default.
 
 ## Current state (as of this handoff)
 
-- **Repo:** `/Users/tiofeliz/Developer/Projects/zmrng` (npm workspaces:
+- **Repo:** `~/Developer/Projects/zmrng` (npm workspaces:
   `packages/server` + `packages/web`). Read its `CLAUDE.md`.
 - **Map / MAP_PATH:** `.agents/plans/zmrng-stage1-gauntlet.md` — 13 tickets
   (H1–H4, U1–U6, DB, S1, S2, A1). Each has Status / Blocked-by / Bar / Measurable half /

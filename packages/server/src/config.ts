@@ -113,6 +113,32 @@ export interface Config {
   projectsDir: string
   /** Login shell for the workspace terminal (SHELL env, else a sane default). */
   shell: string
+  /**
+   * Optional server-side default URL of the VPS team-workspace server, surfaced
+   * through `GET /api/config` so a machine can pre-seed the Team tab's default.
+   * Empty when `ZMRNG_WORKSPACE_URL` is unset; the per-teammate localStorage
+   * value wins over this when present.
+   */
+  workspaceUrl: string
+  /**
+   * Absolute path to the shared read-only reference checkout the team @mention
+   * agent `git pull`s before answering (D8). Empty when `ZMRNG_WORKSPACE_REPO_PATH`
+   * is unset — the pull is then skipped gracefully. The live path is
+   * orchestrator/operator-owned deployment config.
+   */
+  workspaceRepoPath: string
+  /**
+   * id of the configured `AgentTarget` (U4) that acts as the shared team bot
+   * (D4). Empty selects the first configured agent. Which live agent is the bot
+   * is orchestrator/operator-owned deployment config.
+   */
+  workspaceBotAgentId: string
+  /** The @mention handle that triggers the team agent (default `@agent`). */
+  workspaceBotHandle: string
+  /** How many recent channel messages are sent to the team agent as context. */
+  workspaceScrollback: number
+  /** Per-request timeout (ms) for the team-agent fetch; caps a hung upstream. */
+  workspaceAgentTimeoutMs: number
 }
 
 export type AuthMode = 'oauth' | 'apikey'
@@ -514,6 +540,12 @@ function buildConfig(): Config {
     authMode: resolveAuthMode(process.env),
     projectsDir: PROJECTS_DIR,
     shell: process.env.SHELL?.trim() || '/bin/sh',
+    workspaceUrl: process.env.ZMRNG_WORKSPACE_URL?.trim() || '',
+    workspaceRepoPath: process.env.ZMRNG_WORKSPACE_REPO_PATH?.trim() || '',
+    workspaceBotAgentId: process.env.ZMRNG_WORKSPACE_BOT_AGENT?.trim() || '',
+    workspaceBotHandle: process.env.ZMRNG_WORKSPACE_BOT_HANDLE?.trim() || '@agent',
+    workspaceScrollback: Number(process.env.ZMRNG_WORKSPACE_SCROLLBACK ?? 20),
+    workspaceAgentTimeoutMs: Number(process.env.ZMRNG_WORKSPACE_AGENT_TIMEOUT_MS ?? 60000),
   }
 }
 

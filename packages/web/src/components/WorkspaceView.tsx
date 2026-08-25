@@ -24,7 +24,6 @@ import { FileTree } from './FileTree'
 import { WorkspaceTabs } from './WorkspaceTabs'
 import { NewTaskForm } from './NewTaskForm'
 import { TaskList } from './TaskList'
-import { TaskControls } from './TaskControls'
 import { ChatCard } from './ChatCard'
 import { TerminalCard } from './TerminalCard'
 import { PipelineCard } from './PipelineCard'
@@ -36,6 +35,7 @@ import { LIVE_STATUSES } from '../status'
 import { hydrateLayout, openFile, pruneFileTabs } from '../workspaceLayout'
 import { showCard } from '../gridLayout'
 import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
+import type { HandoffPrefill } from '../teamHandoff'
 
 interface Props {
   task: Task | undefined
@@ -73,6 +73,10 @@ interface Props {
     },
     attachments?: Attachment[],
   ) => Promise<void>
+  /** One-shot "Send to my zmrng" pre-fill for the new-task box (T3). */
+  prefill?: HandoffPrefill | null
+  /** Fired once the new-task box has seeded from `prefill` (clears it upstream). */
+  onPrefillConsumed?: () => void
   onStart: () => Promise<unknown>
   onMessage: (text: string, attachments?: Attachment[]) => Promise<unknown>
   onResume: () => Promise<unknown>
@@ -131,6 +135,8 @@ export function WorkspaceView({
   connected,
   onSelect,
   onCreate,
+  prefill,
+  onPrefillConsumed,
   onStart,
   onMessage,
   onResume,
@@ -262,13 +268,21 @@ export function WorkspaceView({
     concurrency: <ConcurrencyCard tasks={tasks} maxLanes={config?.maxLanes ?? 0} />,
     reviewqueue: <ReviewQueueCard tasks={tasks} repos={repos} onSelect={onSelect} />,
     newtask: (
-      <NewTaskForm repos={repos} defaultRepoId={config?.defaultRepoId ?? ''} onCreate={onCreate} />
-    ),
-    activetask: task ? (
-      <TaskControls
-        task={task}
-        config={config}
+      <NewTaskForm
         repos={repos}
+        defaultRepoId={config?.defaultRepoId ?? ''}
+        onCreate={onCreate}
+        prefill={prefill}
+        onPrefillConsumed={onPrefillConsumed}
+      />
+    ),
+    tasklist: (
+      <TaskList
+        tasks={tasks}
+        repos={repos}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        config={config}
         onStart={onStart}
         onResume={onResume}
         onInterrupt={onInterrupt}
@@ -276,10 +290,7 @@ export function WorkspaceView({
         onCancel={onCancel}
         onDelete={onDelete}
       />
-    ) : (
-      <div className={gridStyles.cardEmpty}>No task selected.</div>
     ),
-    tasklist: <TaskList tasks={tasks} repos={repos} selectedId={selectedId} onSelect={onSelect} />,
     files: filesBody,
     viewers: (
       <WorkspaceTabs

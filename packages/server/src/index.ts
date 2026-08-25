@@ -12,12 +12,15 @@ import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { TerminalManager, parseClientMsg } from './terminal.js'
 import { ChatManager, parseChatClientMsg } from './chatAgent.js'
+import { WorkspaceManager, ChannelManager, parseWorkspaceClientMsg } from './workspace.js'
+import { AgentResponder, resolveBotAgent } from './agentResponder.js'
 import { sanitizeAttachments } from './runner.js'
 import { listWorktreeFiles, selfUpdate } from './worktree.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
 import { parseStreamedText } from './chat.js'
 import { readUiState, writeUiState } from './uiState.js'
+import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE } from './types.js'
 import type {
   WsEvent,
   EffortLevel,
@@ -26,9 +29,12 @@ import type {
   WorktreeFileTree,
   AgentSummary,
   ChatMessage,
+  Channel,
+  Message,
   UiState,
   TermServerMsg,
   ChatServerMsg,
+  WsWorkspaceServerMsg,
 } from './types.js'
 
 function errMsg(e: unknown): string {
@@ -87,6 +93,43 @@ const hub = new WsHub()
 const manager = new TaskManager(db, (e: WsEvent) => hub.broadcast(e))
 const terminals = new TerminalManager()
 const chats = new ChatManager()
+// Team-workspace presence: every join/leave re-broadcasts the full roster to the
+// 'workspace' room. The broadcast sink mirrors TaskManager's hub injection.
+const workspace = new WorkspaceManager(db, (frame: WsWorkspaceServerMsg) =>
+  hub.broadcastRoom('workspace', JSON.stringify(frame)),
+)
+// Channel messaging: a dedicated Map<channel_id, Set<socket>> subscription
+// registry fans a posted message out ONLY to the sockets that subscribed to that
+// channel. The per-socket send sink writes directly to the target ws socket (no
+// history replay — scrollback is the REST route below).
+const channels = new ChannelManager<WebSocket>(db, (socket, frame) => {
+  try {
+    socket.send(JSON.stringify(frame))
+  } catch {
+    // socket closed mid-send; its close handler drops the subscription
+  }
+})
+// The ONE shared @mention team agent (D8/D4): constructed once, serving every
+// channel's mentions — never one instance per channel. It relays a mention plus
+// that channel's recent scrollback to the configured bot AgentTarget (U4) and
+// posts the reply back as a server-controlled `kind='agent'` message. Disabled
+// (undefined) when no agents are configured — mentions are then a graceful
+// no-op. Which live agent is the bot and the reference-checkout path are
+// orchestrator-owned deployment config (ZMRNG_WORKSPACE_BOT_AGENT /
+// ZMRNG_WORKSPACE_REPO_PATH).
+const botAgent = resolveBotAgent(config.agents, config.workspaceBotAgentId)
+const agentResponder = botAgent
+  ? new AgentResponder({
+      botAgent,
+      botHandle: config.workspaceBotHandle,
+      scrollback: config.workspaceScrollback,
+      checkoutPath: config.workspaceRepoPath,
+      timeoutMs: config.workspaceAgentTimeoutMs,
+      listMessages: (channelId, before, limit) => db.listMessages(channelId, before, limit),
+      post: (channelId, author, body, kind) => channels.post(channelId, author, body, kind),
+      log: app.log,
+    })
+  : undefined
 
 await app.register(websocket)
 
@@ -97,6 +140,9 @@ app.get('/api/config', () => ({
   maxLanes: config.maxLanes,
   targetRepo: config.targetRepo,
   defaultRepoId: config.defaultRepoId,
+  // Optional server-side default VPS workspace-server URL for the Team tab. The
+  // per-teammate localStorage value (client-side) wins over this when set.
+  workspaceUrl: config.workspaceUrl,
   authMode:
     config.authMode === 'apikey'
       ? 'API key (ANTHROPIC_API_KEY billed per task)'
@@ -254,6 +300,52 @@ app.post('/api/tasks', (req, reply) => {
 app.get('/api/tasks/:id/events', (req) => {
   const { id } = req.params as { id: string }
   return db.getEvents(id)
+})
+
+// Team-workspace channel list (box 2). Always 200; #general is seeded by default.
+app.get('/api/channels', (): Channel[] => db.listChannels())
+
+// Create a channel (T3). Optionally repo-scoped via a nullable `repoId` — the
+// repo id is stored as a free-text tag (a suggestion for the "Send to my zmrng"
+// handoff); it is NOT validated against the local registry here. Tolerant: a
+// blank name is a 400, never a 500; a duplicate name reuses the existing row
+// (db.createChannel is idempotent by name). On success the updated channel list
+// is broadcast to the 'workspace' room so every connected teammate's rail
+// refreshes live (the client handles the `channels` frame already).
+app.post('/api/channels', (req, reply) => {
+  const body = req.body as { name?: string; repoId?: string | null } | undefined
+  const name = body?.name?.trim()
+  if (!name) {
+    return reply.code(400).send({ error: 'name is required' })
+  }
+  const rawRepoId = typeof body?.repoId === 'string' ? body.repoId.trim() : ''
+  const repoId = rawRepoId.length > 0 ? rawRepoId : null
+  const channel = db.createChannel(name, repoId, new Date().toISOString())
+  hub.broadcastRoom(
+    'workspace',
+    JSON.stringify({ type: 'channels', channels: db.listChannels() } as WsWorkspaceServerMsg),
+  )
+  app.log.info({ channelId: channel.id }, 'channel created')
+  return channel
+})
+
+// Paginated scrollback for one channel (box 4). Mirrors the events/WS split: REST
+// serves history, the workspace socket delivers only NEW messages. `before` (an
+// oldest-loaded message id) walks backwards; `limit` is clamped to a hard cap.
+// Always 200: a bad id / unknown channel yields an empty page, never a 500.
+app.get('/api/channels/:id/messages', (req): Message[] => {
+  const { id } = req.params as { id: string }
+  const { before, limit } = req.query as { before?: string; limit?: string }
+  const channelId = Number(id)
+  if (!Number.isInteger(channelId)) return []
+  const beforeId = before !== undefined && before !== '' ? Number(before) : NaN
+  const cursor = Number.isInteger(beforeId) ? beforeId : null
+  const requested = limit !== undefined ? Number(limit) : DEFAULT_MESSAGE_PAGE
+  const page =
+    Number.isInteger(requested) && requested > 0
+      ? Math.min(requested, MAX_MESSAGE_PAGE)
+      : DEFAULT_MESSAGE_PAGE
+  return db.listMessages(channelId, cursor, page)
 })
 
 // Directory listing (not contents) of a task's worktree, for the Workspace file
@@ -602,6 +694,102 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
   })
   socket.on('close', () => session?.kill())
   socket.on('error', () => session?.kill())
+})
+
+// ONE multiplexed team-workspace socket per teammate. Frames are channel-tagged
+// by `type` (never one socket per resource): `hello` self-asserts a display name
+// (stored as a members row) and marks the teammate online; `ping` is answered
+// with `pong`. Presence is connection-based plus a heartbeat: a member is online
+// while they hold a live socket, and a periodic ws-level ping/pong evicts a dead
+// socket so they drop off the roster. The socket joins the 'workspace' room so it
+// receives every roster re-broadcast. NO history replay.
+const WORKSPACE_HEARTBEAT_MS = 30000
+app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
+  hub.join('workspace', socket)
+  let joined = false
+
+  const send = (msg: WsWorkspaceServerMsg): void => {
+    try {
+      socket.send(JSON.stringify(msg))
+    } catch {
+      // socket closed mid-send
+    }
+  }
+
+  // ws-level heartbeat: mark the socket dead if it misses a pong between ticks,
+  // terminate it, and let the close handler drop the member off the roster.
+  let alive = true
+  socket.on('pong', () => {
+    alive = true
+  })
+  const heartbeat = setInterval(() => {
+    if (!alive) {
+      socket.terminate()
+      return
+    }
+    alive = false
+    try {
+      socket.ping()
+    } catch {
+      // socket already gone
+    }
+  }, WORKSPACE_HEARTBEAT_MS)
+
+  const cleanup = (): void => {
+    clearInterval(heartbeat)
+    hub.leaveAll(socket)
+    channels.unsubscribeAll(socket)
+    if (joined) {
+      workspace.leave(socket)
+      joined = false
+    }
+  }
+
+  socket.on('message', (raw) => {
+    try {
+      const msg = parseWorkspaceClientMsg(String(raw))
+      if (!msg) return
+      if (msg.type === 'hello') {
+        workspace.join(socket, msg.displayName)
+        joined = true
+      } else if (msg.type === 'ping') {
+        send({ type: 'pong' })
+      } else if (msg.type === 'subscribe') {
+        channels.subscribe(socket, msg.channelId)
+      } else if (msg.type === 'unsubscribe') {
+        channels.unsubscribe(socket, msg.channelId)
+      } else if (msg.type === 'message') {
+        // Persist + fan out live to subscribed sockets only (no history replay).
+        // A socket post is always `human` — the `agent` kind is server-controlled
+        // (set by the T4 agent path below), never trusted from a client frame.
+        const stored = channels.post(msg.channelId, msg.author, msg.body, 'human')
+        // T4: an @mention of the bot handle triggers the ONE shared team agent
+        // asynchronously — the socket handler never blocks on (or crashes from)
+        // the agent path. `handleMention` is best-effort and never throws; the
+        // extra `.catch` is belt-and-braces. Unmentioned messages do nothing
+        // (no always-listening). A missing channel (`stored === undefined`) is a
+        // no-op.
+        if (stored && agentResponder && agentResponder.mentions(msg.body)) {
+          app.log.info(
+            { channelId: msg.channelId, messageId: stored.id },
+            'team-agent mention triggered',
+          )
+          void agentResponder.handleMention(msg.channelId).catch((err) => {
+            app.log.error({ err, channelId: msg.channelId }, 'team-agent handleMention crashed')
+          })
+        }
+      }
+    } catch (err) {
+      app.log.error({ err }, 'workspace message handler failed')
+      socket.close()
+    }
+  })
+  socket.on('close', cleanup)
+  socket.on('error', cleanup)
+
+  // Seed the fresh socket with the current roster before it says hello, so a
+  // late joiner immediately sees who is already present.
+  send({ type: 'roster', members: workspace.roster() })
 })
 
 // ---- static (production) ----

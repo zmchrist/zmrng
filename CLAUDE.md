@@ -78,7 +78,7 @@ zmrng/
 │           ├── types.ts        — MANUAL MIRROR of server/src/types.ts (incl. GridCardId/GridDensity/GridCardStyle/GridInteraction/GridCardGeo/GridState + the `grid?: GridState` field on GlobalUiState — server round-trips it, never validates; also ChatTabMeta/TerminalTabMeta + the `chatTabs?`/`terminalTabs?` fields on GlobalUiState for the Chat/Terminal cards' per-card tab strips — same round-trip-only pattern)
 │           ├── status.ts       — statusColor() + actorColor() helpers (backed by --status-* / --actor-* tokens)
 │           ├── workspaceLayout.ts — pure reducer for the Workspace mode's per-task Zed-style tab-pane layout (emptyLayout/hydrateLayout/openFile/focusTab/closeTab/openPanel/moveTab/splitWith/setLogMinimized/pruneFileTabs/dropIntent); enforces panes.length ∈ {1,2} and a single split axis; still owned by WorkspaceView, now fed into the Viewers card
-│           ├── gridLayout.ts   — pure, React-free 12-column grid reducer + DOM-free geometry for the Workspace card grid (`COLS=12`, `defaultCards`/`CARD_IDS` 10-card seed, `collide`/`compact`, `applyMove`/`applyResize` under reflow|swap|free interaction modes, `hideCard`/`showCard`/`toggleMinimize`, `normalizeGrid`/`hydrateGrid` tolerant merge, `cellSize`/`cardRectPx`/`contentHeightPx`); geometry is in 12-col CELL units (screen-width-independent). Mirrors the pure-reducer style of workspaceLayout.ts / terminalDock.ts
+│           ├── gridLayout.ts   — pure, React-free 12-column grid reducer + DOM-free geometry for the Workspace card grid (`COLS=12`, `defaultCards`/`CARD_IDS` 9-card seed, `collide`/`compact`, `applyMove`/`applyResize` under reflow|swap|free interaction modes, `hideCard`/`showCard`/`toggleMinimize`, `normalizeGrid`/`hydrateGrid` tolerant merge, `cellSize`/`cardRectPx`/`contentHeightPx`); geometry is in 12-col CELL units (screen-width-independent). Mirrors the pure-reducer style of workspaceLayout.ts / terminalDock.ts
 │           ├── dashboardData.ts — pure derivations feeding the 3 data cards: `pipelineCounts(tasks)`, `concurrency(tasks, maxLanes)`, `reviewQueue(tasks)`
 │           ├── cardMeta.ts     — `CARD_TITLES` + `CARD_ACCENTS` (per-card `var(--*)` accent token) string maps, shared by WorkspaceGrid and BottomNav
 │           ├── terminalDock.ts — pure reducer for the bottom-dock terminal's ephemeral tab list (emptyDock/addTerminal/closeTerminal/setActive) — only open/height persist, tabs never do (module retained; TerminalDock.tsx now orphaned, no importer)
@@ -90,7 +90,7 @@ zmrng/
 │           ├── useAttachments.ts — shared attachment state + paste/drop handlers for the three composers (NewTaskForm, ClarifyChat, ChatPane): addFiles (validate + read, capped at MAX_ATTACHMENTS)/remove/clear/error/onPaste/onDrop
 │           ├── usePanelMount.ts — hook that keeps a conditionally-rendered panel mounted for `--panel-duration` past a toggle-to-closed, so its CSS closing (minimize) animation can play before unmount; used by every toggleable "window" (Files sidebar, Workspace center pane, task rail, terminal dock body, Settings modal)
 │           ├── themes.ts       — theme catalog (11 themes: one per color + black/white/grey) + pure helpers (`buildThemeVars`/`applyTheme`/`loadStoredTheme`/`saveStoredTheme`); each theme has a dark + light accent pair, swapped via CSS custom properties set on the document root; persisted to localStorage only (`zmrng-theme` key), no server involvement
-│           └── components/      — TaskList, NewTaskForm (title/body + drop/paste image-PDF attachments via `useAttachments` + `AttachmentTray`; an image-only task is valid — title still required), ClarifyChat (live composer with `placeholder` prop; same drop/paste attachment wiring as NewTaskForm), AttachmentTray (thumbnail strip for pending attachments — inline image previews, a generic PDF chip, per-item remove + a validation-error line; purely presentational, state lives in `useAttachments`), WorkerLog (read-only tool/subagent/subagent_result rows color-coded by actor), WorkerLogPanel (WorkerLog + the ClarifyChat steer composer, shown in live phases — the channel that replaced TaskDetail's inline composer; forwards `attachments` through its `onMessage` to `message()`; its only home is the `log` tab inside WorkspaceTabs — there is no standalone top-level Worker Log card in the grid), TaskControls (compact selected-task card in the Workspace right bar: title + status pill + lifecycle buttons always visible, repo/flow/model/effort/style/description/usage behind a dropdown), WorkspaceView (the merged home, now reduced to composing `<WorkspaceGrid/>` + `<BottomNav/>`; still owns the per-task `WorkspaceLayout` (hydrate/openFile/prune) + the file-tree fetch + the agents fetch, fed into the Files + Viewers cards via a card content map. The old locked-left Files sidebar / center pane / right task rail / Files-Notes split / TerminalDock plumbing was removed from this component), WorkspaceGrid (the card-grid host: a `ResizeObserver` tracks grid width and pointer move/resize handlers call the pure `gridLayout.ts` reducer; renders a drag ghost + scroll spacer and each non-hidden card. Cards that own a live socket/session — terminal, chat, viewers — stay MOUNTED while hidden (`display:none`), never unmounted, so the session survives hide→show. Intentionally NOT unit-tested — pointer/RO glue, same policy as the other drag handlers), GridCard (presentational card chrome: ⠿ drag-handle header + title + minimize/hide buttons + corner resize handle + body; body always mounted, `display:none` when minimized), BottomNav (`BottomNav.module.css`) (the static bottom nav bar: Cards show/hide menu, density/card-style/interaction `<select>`s, Settings toggle, connection dot), PipelineCard / ConcurrencyCard / ReviewQueueCard (`DashboardCards.module.css`) (the 3 data cards, fed by `dashboardData.ts`), WorkspaceTabs (draggable tabs for file Viewers/WorkerLogPanel/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop; now rendered inside the Viewers card; the reopen-buttons bar above the tab strip lost its "Panels" label text — the Worker Log/Chat reopen buttons themselves stay), TerminalDock (`terminalDock.ts`/`NotesPanel` likewise remain in the tree but are now orphaned — no importer — with their tests still passing, kept per the plan), TabStrip (presentational tab strip shared by ChatCard/TerminalCard: click-to-focus tabs + `×` close + a trailing `+` add button; state lives in the caller), ChatCard (wraps the Chat card's `windowTabs.ts` state in a `TabStrip` + per-tab body; a new tab starts unlaunched — shows a model/effort/style picker + Launch button — and only mounts `ChatPane` once Launch is pressed, including the first/default tab; all tabs stay mounted `display:none` when inactive so a launched session survives a tab switch), TerminalCard (wraps the Terminal card's `windowTabs.ts` state in a `TabStrip` + per-tab body; a new tab auto-spawns its PTY immediately on `+`, no gating; same stay-mounted-while-hidden policy as ChatCard), ChatPane (the standalone agent-chat bubble thread rendered inside a ChatCard tab once launched — one WebSocket per instance to `/ws/chat`, mirrors Terminal.tsx not the useWs hub; takes optional `initialModel`/`initialEffort`/`initialStyle` props seeded from the launching tab's picker (defaults sonnet/medium/caveman-full when omitted); a config change respawns the session + resets the thread; Stop button while a turn is in flight; ephemeral, no DB persistence; same drop/paste attachment wiring as NewTaskForm/ClarifyChat, sent via `encodeInput(text, attachments)`), SettingsModal (ephemeral focused overlay with a dimmed backdrop, animates open/close via `usePanelMount`; a theme dropdown selector (native `<select>` of the 11 theme names + a live preview swatch) + sun/moon dark/light toggle backed by `themes.ts` and persisted to localStorage, plus a Reboot control — `POST /api/restart` ff-only `git pull`s zmrng's own repo to `origin/main`, runs `npm run build`, then (dev only) touches the server entry to trigger a tsx-watch respawn; always visible, no `cfg?.dev` gate), Terminal (xterm.js glue rendered inside a TerminalCard tab — one WebSocket per instance to `/ws/terminal`, theme-token colors, ResizeObserver fit)
+│           └── components/      — TaskList (list of all tasks; clicking a row selects it AND expands that row in place to reveal its lifecycle action buttons (Start/Resume/Stop/Cancel/Delete/Mark-done/Open-PR, status-driven visibility), an inline error banner, the autonomous/queued/blocked status text, and a collapsible metadata dropdown (repo/flow/model/effort/style/branch/plan-path/body/token-usage) — folded in from the old standalone `activetask` card; reuses the action-button/details styling from `TaskActions.module.css`), NewTaskForm (title/body + drop/paste image-PDF attachments via `useAttachments` + `AttachmentTray`; an image-only task is valid — title still required), ClarifyChat (live composer with `placeholder` prop; same drop/paste attachment wiring as NewTaskForm), AttachmentTray (thumbnail strip for pending attachments — inline image previews, a generic PDF chip, per-item remove + a validation-error line; purely presentational, state lives in `useAttachments`), WorkerLog (read-only tool/subagent/subagent_result rows color-coded by actor), WorkerLogPanel (WorkerLog + the ClarifyChat steer composer, shown in live phases — the channel that replaced TaskDetail's inline composer; forwards `attachments` through its `onMessage` to `message()`; its only home is the `log` tab inside WorkspaceTabs — there is no standalone top-level Worker Log card in the grid), WorkspaceView (the merged home, now reduced to composing `<WorkspaceGrid/>` + `<BottomNav/>`; still owns the per-task `WorkspaceLayout` (hydrate/openFile/prune) + the file-tree fetch + the agents fetch, fed into the Files + Viewers cards via a card content map. The old locked-left Files sidebar / center pane / right task rail / Files-Notes split / TerminalDock plumbing was removed from this component), WorkspaceGrid (the card-grid host: a `ResizeObserver` tracks grid width and pointer move/resize handlers call the pure `gridLayout.ts` reducer; renders a drag ghost + scroll spacer and each non-hidden card. Cards that own a live socket/session — terminal, chat, viewers — stay MOUNTED while hidden (`display:none`), never unmounted, so the session survives hide→show. Intentionally NOT unit-tested — pointer/RO glue, same policy as the other drag handlers), GridCard (presentational card chrome: ⠿ drag-handle header + title + minimize/hide buttons + corner resize handle + body; body always mounted, `display:none` when minimized), BottomNav (`BottomNav.module.css`) (the static bottom nav bar: Cards show/hide menu, density/card-style/interaction `<select>`s, Settings toggle, connection dot), PipelineCard / ConcurrencyCard / ReviewQueueCard (`DashboardCards.module.css`) (the 3 data cards, fed by `dashboardData.ts`), WorkspaceTabs (draggable tabs for file Viewers/WorkerLogPanel/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop; now rendered inside the Viewers card; the reopen-buttons bar above the tab strip lost its "Panels" label text — the Worker Log/Chat reopen buttons themselves stay), TerminalDock (`terminalDock.ts`/`NotesPanel` likewise remain in the tree but are now orphaned — no importer — with their tests still passing, kept per the plan), TabStrip (presentational tab strip shared by ChatCard/TerminalCard: click-to-focus tabs + `×` close + a trailing `+` add button; state lives in the caller), ChatCard (wraps the Chat card's `windowTabs.ts` state in a `TabStrip` + per-tab body; a new tab starts unlaunched — shows a model/effort/style picker + Launch button — and only mounts `ChatPane` once Launch is pressed, including the first/default tab; all tabs stay mounted `display:none` when inactive so a launched session survives a tab switch), TerminalCard (wraps the Terminal card's `windowTabs.ts` state in a `TabStrip` + per-tab body; a new tab auto-spawns its PTY immediately on `+`, no gating; same stay-mounted-while-hidden policy as ChatCard), ChatPane (the standalone agent-chat bubble thread rendered inside a ChatCard tab once launched — one WebSocket per instance to `/ws/chat`, mirrors Terminal.tsx not the useWs hub; takes optional `initialModel`/`initialEffort`/`initialStyle` props seeded from the launching tab's picker (defaults sonnet/medium/caveman-full when omitted); a config change respawns the session + resets the thread; Stop button while a turn is in flight; ephemeral, no DB persistence; same drop/paste attachment wiring as NewTaskForm/ClarifyChat, sent via `encodeInput(text, attachments)`), SettingsModal (ephemeral focused overlay with a dimmed backdrop, animates open/close via `usePanelMount`; a theme dropdown selector (native `<select>` of the 11 theme names + a live preview swatch) + sun/moon dark/light toggle backed by `themes.ts` and persisted to localStorage, plus a Reboot control — `POST /api/restart` ff-only `git pull`s zmrng's own repo to `origin/main`, runs `npm run build`, then (dev only) touches the server entry to trigger a tsx-watch respawn; always visible, no `cfg?.dev` gate), Terminal (xterm.js glue rendered inside a TerminalCard tab — one WebSocket per instance to `/ws/terminal`, theme-token colors, ResizeObserver fit)
 │   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
 │       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
 │       ├── splash/index.html   — galaxy-warp canvas loader (vanilla JS, no build); click/Enter → warp-dive → white-bloom → navigate to app; two-signal boot handshake: splash emits `splash-ready`, Rust emits `engine-ready {port}` once both sidecar + splash are ready; requires `withGlobalTauri: true` in tauri.conf.json
@@ -308,17 +308,99 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
   `implementation-history.md`. Plus `.claude/files/` (PROJECT_CONTEXT, FUTURE_IDEAS) and
   `.claude/errors.md` (known gotchas — check before debugging).
 
+## Team workspace (POC) — exposure precondition
+The optional **Team** mode tab connects to a VPS-hosted team-workspace server (the
+same server binary, run on a VPS) over ONE multiplexed WebSocket at
+`GET /ws/workspace`. Teammates self-assert a free-text display-name handle (no
+password, no verification — stored as a `members` row) and appear in a live,
+workspace-wide presence roster driven by connection lifecycle plus a periodic
+ping/pong heartbeat. The VPS URL is a per-teammate client setting in Settings
+(localStorage `zmrng-workspace-url`), with an optional server default via
+`ZMRNG_WORKSPACE_URL` surfaced through `GET /api/config` (`workspaceUrl`).
+
+On top of that shell, **channels + live messaging** (T2): `channels` (a fixed
+`#general` plus optional repo-tied ones) and `messages` (`kind ∈ human|agent`)
+live in the same `zmrng.db`. The same multiplexed socket gains `subscribe`/
+`unsubscribe`/`message` frames; a `ChannelManager`'s `Map<channel_id, Set<socket>>`
+fans a posted message out ONLY to sockets subscribed to that channel (no history
+replay). Scrollback loads over the paginated `GET /api/channels/:id/messages`; the
+socket carries only new messages from then on. **A client `message` frame carries
+no `kind`** — a socket post is always persisted as `human`, so a human client
+cannot forge an `agent` message; the `agent` kind is server-controlled (the future
+T4 @mention agent posts server-side). Open membership — every workspace member is
+implicitly in every channel, no per-channel join/invite/ACL.
+
+**Repo-scoped channels + the planning→execution handoff** (T3): `POST /api/channels`
+creates a channel (optionally repo-tied via nullable `repo_id`) and broadcasts the
+new list. A per-message **"Send to my zmrng"** button opens the teammate's LOCAL
+new-task box pre-filled (title/body + a `From team channel #<name> (message #<id>)`
+provenance line) and — for a repo-tied channel — a *suggested* repo, resolved ONLY
+against the teammate's OWN local registry (`resolveSuggestedRepoId`), so **no
+VPS-supplied repoId is auto-bound** (D6). The task is created via the existing local
+`POST /api/tasks` → **backlog**, human clicks Start; no git round-trip, no auto-start.
+
+**@mention shared team agent** (T4): a teammate `@agent`s the bot in a channel; the
+server (one shared `AgentResponder` instance, D8/D4) `git pull`s a read-only reference
+checkout, relays the mention + last-N scrollback to the configured bot `AgentTarget`
+via the U4 `fetch(agent.url)` adapter (bounded by an abort timeout), and posts the
+reply back as a server-controlled `kind='agent'` message. The agent **talks and plans
+only — never executes code** (D1): no worktrees, no runners. Unmentioned messages do
+nothing (no always-listening). The live checkout path + which `AgentTarget` is the bot
+are operator-owned deployment config (`ZMRNG_WORKSPACE_REPO_PATH`/`_BOT_AGENT`/
+`_BOT_HANDLE`/`_SCROLLBACK`/`_AGENT_TIMEOUT_MS`).
+
+> **POC exposure precondition (Tailscale is the perimeter):** the VPS
+> workspace port MUST be reachable **only over Tailscale** — firewall it to the
+> tailnet interface, or bind the server to the Tailscale IP. **Never expose it
+> publicly.** Because the handle is self-asserted with no verification, the
+> tailnet membership *is* the access control. This is an operational
+> precondition documented here **only** — there is deliberately **no app-code
+> gate, no server bind change, and no auth** in the T1 scope.
+
 ## Resolved (don't re-ask)
 - Engine is the real `claude` binary via `child_process` (ToS-compliant; never proxy the token).
+- Team workspace (T1): workspace data lives in the SAME server's SQLite (no new package). The
+  `members` table + `/ws/workspace` route + presence live in `packages/server`; the Team tab +
+  VPS-URL config + roster in `packages/web`. Local task execution (tasks/worktrees/runner/phases,
+  `/ws`, `/ws/terminal`, `/ws/chat`) is UNTOUCHED. ONE multiplexed socket per user carries
+  channel-tagged frames (`hello`/`ping` client, `roster`/`pong` server); `WsHub` gained a room
+  routing dimension (`join`/`leaveAll`/`broadcastRoom`) rather than a rewrite. Presence is
+  connection-based + heartbeat (online while holding a live socket; ping/pong evicts a dead one).
+- Team workspace (T2): channels + live messaging. `channels`/`messages` tables (`kind ∈
+  human|agent`) in the same SQLite; the multiplexed socket gained `subscribe`/`unsubscribe`/
+  `message` frames + a `message`/`channels` server frame; a dedicated `ChannelManager`
+  `Map<channel_id, Set<socket>>` (NOT `WsHub` rooms) does per-channel fan-out. REST scrollback
+  (`GET /api/channels`, `GET /api/channels/:id/messages` paginated) + WS-live split, no history
+  replay. Open membership (no per-channel ACL). A client `message` frame carries no `kind` —
+  socket posts are always `human`; the `agent` kind is server-controlled (T4). Deferred to #86:
+  reconnect scrollback gap >1 page + backward-pagination UI.
+- Team workspace (T3): repo-scoped channels + the planning→execution handoff (D6). `POST
+  /api/channels` (create + broadcast the list; dup name → existing row, never 500). "Send to my
+  zmrng" pre-fills the LOCAL new-task box (title/body + `From team channel #<name> (message
+  #<id>)` provenance) and a *suggested* repo resolved ONLY against the teammate's own registry
+  (`teamHandoff.ts`/`resolveSuggestedRepoId`) — no VPS repoId auto-bound; task → backlog, human
+  Starts. `NewTaskForm` gained a one-shot `prefill` + `onPrefillConsumed` (dropped after seed so
+  a card hide/show can't re-seed). No new shared type (`Channel.repoId` pre-existed).
+- Team workspace (T4): the ONE shared @mention team agent (D8/D4), server-only. `agentResponder.ts`
+  (`detectMention` word-boundary, `buildAgentMessages`, `parseAgentReply`, `resolveBotAgent`, the
+  injectable `AgentResponder`) is wired once by `index.ts`; a mention fires `handleMention` async
+  from the `/ws/workspace` handler AFTER the human post — `git pull --ff-only`s a read-only
+  reference checkout (best-effort), relays last-N scrollback to the bot `AgentTarget` via the U4
+  `fetch(agent.url)` adapter (AbortController timeout), posts the reply as server-controlled
+  `kind='agent'`. Talks/plans only, never executes code (D1). Config keys `workspaceRepoPath`/
+  `workspaceBotAgentId`/`workspaceBotHandle`(`@agent`)/`workspaceScrollback`(20)/
+  `workspaceAgentTimeoutMs`(60000); no agents → graceful no-op. Live checkout path + bot id are
+  operator-owned. Deferred to #92: bound @mention concurrency.
 - Max OAuth only — `ANTHROPIC_API_KEY` stripped from worker env.
 - No shared package — server↔web types are a manual mirror.
 - Frosted-glass theme; Vitest across both workspaces (typecheck+lint+test+build is validation).
 - Worktrees live under the **target repo's own** `worktrees/` dir (e.g. `<repo.path>/worktrees/<shortId>`), not a global dir. That dir should be gitignored in each target repo.
 - Build-lane cap via `ZMRNG_MAX_LANES` (default 2); extra READY tasks queue.
-- Workspace mode is a **customizable 12-column draggable/resizable card grid** (10-card
-  roster: pipeline, concurrency, reviewqueue, newtask, activetask, tasklist, files,
+- Workspace mode is a **customizable 12-column draggable/resizable card grid** (9-card
+  roster: pipeline, concurrency, reviewqueue, newtask, tasklist, files,
   viewers, chat, terminal — the Worker Log lives only inside the Viewers card's `log`
-  tab, not as its own top-level card). Grid geometry is in 12-col CELL units
+  tab, not as its own top-level card, and the active-task controls live inline in the
+  selected TaskList row rather than a standalone card). Grid geometry is in 12-col CELL units
   (screen-width-independent), persisted globally in `GlobalUiState.grid` (server
   round-trips, never validates). The pure reducer + geometry live in
   `packages/web/src/gridLayout.ts`; interaction modes are reflow|swap|free. Terminal + Chat

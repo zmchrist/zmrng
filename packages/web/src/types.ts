@@ -142,7 +142,7 @@ export interface TaskComment {
 }
 
 /** Top-level workspace shell mode (UI-only; mirrored for type-parity). */
-export type WorkspaceMode = 'tasks' | 'board' | 'workspace'
+export type WorkspaceMode = 'tasks' | 'board' | 'workspace' | 'team'
 
 // ---- workspace dashboard grid (customizable card grid) ---------------------
 
@@ -152,7 +152,6 @@ export type GridCardId =
   | 'concurrency'
   | 'reviewqueue'
   | 'newtask'
-  | 'activetask'
   | 'tasklist'
   | 'files'
   | 'viewers'
@@ -433,6 +432,115 @@ export type ChatServerMsg =
   | { type: 'exit'; code: number | null }
   | { type: 'error'; text: string }
 
+// ---- team workspace (multiplexed presence socket, GET /ws/workspace) -------
+
+/**
+ * One persisted workspace member. Identity is a self-asserted, free-text
+ * display name (no password, no verification — Tailscale is the perimeter).
+ */
+export interface Member {
+  id: number
+  displayName: string
+  createdAt: string
+}
+
+/** A member's presence view in the workspace-wide roster. */
+export interface WorkspaceMember {
+  id: number
+  displayName: string
+  /** True while the member holds at least one live workspace socket. */
+  online: boolean
+}
+
+/**
+ * A message's origin, so the UI can render human and agent posts distinguishably
+ * (box 6 of #74). `human` = a teammate typed it; `agent` = an agent posted it
+ * (reserved for #76/T4). Mirror of `packages/server/src/types.ts`.
+ */
+export type MessageKind = 'human' | 'agent'
+
+/**
+ * One team-workspace channel. Channels are FLAT and OPEN — every workspace member
+ * can read/post in any channel; there are no per-channel membership or ACL rows.
+ * `repoId` optionally ties a channel to a target repo; the fixed `#general`
+ * channel carries a null `repoId`. Mirror of `packages/server/src/types.ts`.
+ */
+export interface Channel {
+  id: number
+  name: string
+  repoId: string | null
+  createdAt: string
+}
+
+/**
+ * One persisted channel message. `author` is a self-asserted, free-text member
+ * handle; `kind` distinguishes human vs agent posts. Mirror of
+ * `packages/server/src/types.ts`.
+ */
+export interface Message {
+  id: number
+  channelId: number
+  author: string
+  body: string
+  kind: MessageKind
+  createdAt: string
+}
+
+/**
+ * client -> server frames over the ONE multiplexed workspace socket
+ * (GET /ws/workspace). `hello` self-asserts a display name on first connect;
+ * `ping` is the client heartbeat (the server answers with `pong`). `subscribe`/
+ * `unsubscribe` register interest in a channel's live fan-out as the client
+ * opens/closes it; `message` posts to a channel. A client `message` frame
+ * carries NO `kind` — a socket post is always persisted as `human`; the `agent`
+ * kind is server-controlled (a future T4 agent posts server-side), so a human
+ * client can never forge an agent-authored message. The socket is multiplexed by
+ * design — frames are channel-tagged by `type`, never one socket per resource.
+ */
+export type WsWorkspaceClientMsg =
+  | { type: 'hello'; displayName: string }
+  | { type: 'ping' }
+  | { type: 'subscribe'; channelId: number }
+  | { type: 'unsubscribe'; channelId: number }
+  | { type: 'message'; channelId: number; author: string; body: string }
+
+/**
+ * server -> client frames over the workspace socket. `roster` is a full
+ * presence-roster snapshot; `pong` answers a client `ping`; `message` delivers
+ * ONE newly-posted channel message live to subscribed sockets (never history —
+ * scrollback comes over REST); `channels` is an optional full channel-list
+ * snapshot. Mirror of `packages/server/src/types.ts`.
+ */
+export type WsWorkspaceServerMsg =
+  | { type: 'roster'; members: WorkspaceMember[] }
+  | { type: 'pong' }
+  | { type: 'message'; message: Message }
+  | { type: 'channels'; channels: Channel[] }
+
+/**
+ * Max length of a self-asserted display-name handle, measured after trimming.
+ * The client clamps to this before sending `hello`; the server rejects any
+ * over-cap frame. Mirror of `packages/server/src/types.ts`.
+ */
+export const MAX_DISPLAY_NAME_LEN = 64
+
+/**
+ * Max length of a channel message body, measured after trimming. The client
+ * clamps before sending; the server rejects any over-cap frame. Mirror of
+ * `packages/server/src/types.ts`.
+ */
+export const MAX_MESSAGE_BODY_LEN = 4000
+
+/**
+ * Default page size for the paginated scrollback route and its hard upper bound.
+ * Mirror of `packages/server/src/types.ts`.
+ */
+export const DEFAULT_MESSAGE_PAGE = 50
+export const MAX_MESSAGE_PAGE = 200
+
+/** Name of the fixed channel seeded by default in every workspace. */
+export const GENERAL_CHANNEL_NAME = 'general'
+
 export type AuthMode = 'oauth' | 'apikey'
 
 export interface ServerConfig {
@@ -440,6 +548,10 @@ export interface ServerConfig {
   maxLanes: number
   targetRepo: string
   defaultRepoId: string
+  /** Optional server-side default VPS workspace-server URL (from
+   *  ZMRNG_WORKSPACE_URL). Empty when unset; the per-teammate localStorage
+   *  value wins over this when present. */
+  workspaceUrl: string
   /** Human-readable display string (back-compat with the existing badge). */
   authMode: string
   /** Machine-readable form of the same setting. */

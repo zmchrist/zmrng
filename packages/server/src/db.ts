@@ -12,7 +12,12 @@ import type {
   TaskUsage,
   TaskComment,
   ChatMessage,
+  Member,
+  Channel,
+  Message,
+  MessageKind,
 } from './types.js'
+import { GENERAL_CHANNEL_NAME } from './types.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -66,6 +71,26 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_task ON chat_messages(task_id, agent_id, id);
+CREATE TABLE IF NOT EXISTS members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  display_name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS channels (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  repo_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel_id INTEGER NOT NULL,
+  author TEXT NOT NULL,
+  body TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id);
 `
 
 interface TaskRow {
@@ -117,6 +142,28 @@ interface ChatMessageRow {
   agent_id: string
   role: string
   content: string
+  created_at: string
+}
+
+interface MemberRow {
+  id: number
+  display_name: string
+  created_at: string
+}
+
+interface ChannelRow {
+  id: number
+  name: string
+  repo_id: string | null
+  created_at: string
+}
+
+interface MessageRow {
+  id: number
+  channel_id: number
+  author: string
+  body: string
+  kind: string
   created_at: string
 }
 
@@ -184,6 +231,34 @@ function rowToChatMessage(r: ChatMessageRow): ChatMessage {
   }
 }
 
+function rowToMember(r: MemberRow): Member {
+  return {
+    id: r.id,
+    displayName: r.display_name,
+    createdAt: r.created_at,
+  }
+}
+
+function rowToChannel(r: ChannelRow): Channel {
+  return {
+    id: r.id,
+    name: r.name,
+    repoId: r.repo_id,
+    createdAt: r.created_at,
+  }
+}
+
+function rowToMessage(r: MessageRow): Message {
+  return {
+    id: r.id,
+    channelId: r.channel_id,
+    author: r.author,
+    body: r.body,
+    kind: r.kind as MessageKind,
+    createdAt: r.created_at,
+  }
+}
+
 /** Fields a caller may patch on a task. Usage accumulators are excluded — use `addUsage`. */
 export type TaskPatch = Partial<
   Pick<
@@ -231,6 +306,18 @@ export class Db {
     this.db.pragma('wal_autocheckpoint = 1000')
     this.db.exec(SCHEMA)
     this.ensureColumns()
+    this.seedGeneralChannel()
+  }
+
+  /**
+   * Idempotently seed the fixed `#general` channel (null repo_id). `INSERT OR
+   * IGNORE` on the UNIQUE `name` column makes reopening a populated `zmrng.db`
+   * a no-op — the channel is created exactly once and never duplicated.
+   */
+  private seedGeneralChannel(): void {
+    this.db
+      .prepare('INSERT OR IGNORE INTO channels (name, repo_id, created_at) VALUES (?, NULL, ?)')
+      .run(GENERAL_CHANNEL_NAME, new Date().toISOString())
   }
 
   /**
@@ -423,6 +510,114 @@ export class Db {
       )
       .all(taskId, agentId) as ChatMessageRow[]
     return rows.map(rowToChatMessage)
+  }
+
+  /**
+   * Insert a workspace member by self-asserted display name, or return the
+   * existing row if that name is already taken. Identity is the free-text
+   * display name (no verification) — a re-join with the same name reuses the
+   * original row and its `created_at`, so the members table never grows on
+   * reconnect. Follows the `task_comments` prepared-statement pattern.
+   */
+  upsertMember(displayName: string, now: string): Member {
+    const existing = this.db
+      .prepare('SELECT * FROM members WHERE display_name = ? ORDER BY id ASC LIMIT 1')
+      .get(displayName) as MemberRow | undefined
+    if (existing) return rowToMember(existing)
+    const info = this.db
+      .prepare('INSERT INTO members (display_name, created_at) VALUES (?, ?)')
+      .run(displayName, now)
+    return {
+      id: Number(info.lastInsertRowid),
+      displayName,
+      createdAt: now,
+    }
+  }
+
+  /** Every distinct member, in insertion order (stable roster ordering). */
+  listMembers(): Member[] {
+    const rows = this.db
+      .prepare('SELECT * FROM members ORDER BY id ASC')
+      .all() as MemberRow[]
+    return rows.map(rowToMember)
+  }
+
+  /** Every channel, in insertion order (stable list ordering; #general is first). */
+  listChannels(): Channel[] {
+    const rows = this.db
+      .prepare('SELECT * FROM channels ORDER BY id ASC')
+      .all() as ChannelRow[]
+    return rows.map(rowToChannel)
+  }
+
+  /** One channel by id, or `undefined` if it does not exist. */
+  getChannel(id: number): Channel | undefined {
+    const row = this.db.prepare('SELECT * FROM channels WHERE id = ?').get(id) as
+      | ChannelRow
+      | undefined
+    return row ? rowToChannel(row) : undefined
+  }
+
+  /**
+   * Create a channel by unique name, or return the existing row if that name is
+   * already taken (idempotent, mirroring `upsertMember`). A re-create with the
+   * same name reuses the original row and its `created_at`.
+   */
+  createChannel(name: string, repoId: string | null, now: string): Channel {
+    const existing = this.db.prepare('SELECT * FROM channels WHERE name = ?').get(name) as
+      | ChannelRow
+      | undefined
+    if (existing) return rowToChannel(existing)
+    const info = this.db
+      .prepare('INSERT INTO channels (name, repo_id, created_at) VALUES (?, ?, ?)')
+      .run(name, repoId, now)
+    return { id: Number(info.lastInsertRowid), name, repoId, createdAt: now }
+  }
+
+  /** Persist one channel message. Follows the `task_comments` insert pattern. */
+  addMessage(
+    channelId: number,
+    author: string,
+    body: string,
+    kind: MessageKind,
+    now: string,
+  ): Message {
+    const info = this.db
+      .prepare(
+        'INSERT INTO messages (channel_id, author, body, kind, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(channelId, author, body, kind, now)
+    return {
+      id: Number(info.lastInsertRowid),
+      channelId,
+      author,
+      body,
+      kind,
+      createdAt: now,
+    }
+  }
+
+  /**
+   * Recent messages for a channel, paginated for scrollback. Selects the newest
+   * `limit` rows (optionally strictly older than the `before` message id) in
+   * DESC order, then reverses to ASC so the caller renders oldest-first. Passing
+   * the oldest returned id back as `before` walks backwards through history.
+   */
+  listMessages(channelId: number, before: number | null, limit: number): Message[] {
+    const rows = (
+      before === null
+        ? this.db
+            .prepare(
+              'SELECT * FROM messages WHERE channel_id = ? ORDER BY id DESC LIMIT ?',
+            )
+            .all(channelId, limit)
+        : this.db
+            .prepare(
+              'SELECT * FROM messages WHERE channel_id = ? AND id < ? ORDER BY id DESC LIMIT ?',
+            )
+            .all(channelId, before, limit)
+    ) as MessageRow[]
+    return rows.reverse().map(rowToMessage)
   }
 
   /** Hard-delete a task and all its rows (events, comments, chat messages). */

@@ -202,6 +202,24 @@
   line-height: 1.5;
 }
 
+.workspaceInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transition: border-color var(--transition);
+}
+
+.workspaceInput:focus {
+  outline: none;
+  border-color: var(--accent-line);
+}
+
 .reboot {
   align-self: flex-start;
   padding: 6px 16px;

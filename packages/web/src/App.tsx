@@ -19,10 +19,12 @@ import type {
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
 import { Board } from './components/Board'
+import { TeamView } from './components/TeamView'
 import { SettingsModal } from './components/SettingsModal'
 import { useUiState } from './uiState'
 import { hydrateGrid } from './gridLayout'
 import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState, type TerminalTabState } from './windowTabs'
+import type { HandoffPrefill } from './teamHandoff'
 
 // The former standalone Tasks pane is merged into Workspace; only Workspace and
 // Board remain as top-level modes. The legacy `'tasks'` value is still accepted
@@ -30,6 +32,7 @@ import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState
 const MODES: ReadonlyArray<{ id: WorkspaceMode; label: string }> = [
   { id: 'workspace', label: 'Workspace' },
   { id: 'board', label: 'Board' },
+  { id: 'team', label: 'Team' },
 ]
 
 export default function App() {
@@ -62,6 +65,9 @@ export default function App() {
   )
   // Settings is an ephemeral modal overlay — never persisted.
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // One-shot "Send to my zmrng" pre-fill from the Team tab (T3). A fresh object
+  // per send re-seeds NewTaskForm; cleared identity is fine (seed is idempotent).
+  const [handoffPrefill, setHandoffPrefill] = useState<HandoffPrefill | null>(null)
   const selectedIdRef = useRef<string | null>(null)
 
   const onWs = useCallback((e: WsEvent) => {
@@ -169,6 +175,21 @@ export default function App() {
     void api.archive(id)
   }, [])
 
+  // Team tab handoff: switch to Workspace and seed the local new-task box with a
+  // rich brief (title/body + provenance) and a SUGGESTED repo. The human still
+  // confirms the repo against their own registry (no VPS repo id auto-bound).
+  const onSendToZmrng = useCallback(
+    (prefill: HandoffPrefill) => {
+      setMode('workspace')
+      setHandoffPrefill({ ...prefill })
+    },
+    [setMode],
+  )
+  // Drop the one-shot prefill once NewTaskForm has seeded from it, so a later
+  // hide/show of the new-task card (which remounts the form and resets its local
+  // seeded marker) can't re-seed an already-sent handoff.
+  const onPrefillConsumed = useCallback(() => setHandoffPrefill(null), [])
+
   const selected = selectedId ? tasks[selectedId] : undefined
 
   return (
@@ -202,6 +223,14 @@ export default function App() {
         />
       </div>
 
+      <div style={{ display: mode === 'team' ? 'contents' : 'none' }}>
+        <TeamView
+          workspaceUrl={cfg?.workspaceUrl ?? ''}
+          repos={repos}
+          onSendToZmrng={onSendToZmrng}
+        />
+      </div>
+
       <div style={{ display: mode === 'workspace' ? 'contents' : 'none' }}>
         <WorkspaceView
           task={selected}
@@ -224,6 +253,8 @@ export default function App() {
           connected={connected}
           onSelect={select}
           onCreate={onCreate}
+          prefill={handoffPrefill}
+          onPrefillConsumed={onPrefillConsumed}
           onStart={() => (selected ? api.start(selected.id) : Promise.resolve())}
           onMessage={(text, attachments) =>
             selected ? api.message(selected.id, text, attachments) : Promise.resolve()
