@@ -43,7 +43,7 @@ operate on:
 
 ```json
 [
-  { "id": "my-repo", "label": "My Repo", "path": "C:/Users/you/Projects/my-repo", "defaultBranch": "main" }
+  { "id": "my-repo", "label": "My Repo", "path": "C:/Projects/my-repo", "defaultBranch": "main" }
 ]
 ```
 
