@@ -317,6 +317,18 @@ ping/pong heartbeat. The VPS URL is a per-teammate client setting in Settings
 (localStorage `zmrng-workspace-url`), with an optional server default via
 `ZMRNG_WORKSPACE_URL` surfaced through `GET /api/config` (`workspaceUrl`).
 
+On top of that shell, **channels + live messaging** (T2): `channels` (a fixed
+`#general` plus optional repo-tied ones) and `messages` (`kind ∈ human|agent`)
+live in the same `zmrng.db`. The same multiplexed socket gains `subscribe`/
+`unsubscribe`/`message` frames; a `ChannelManager`'s `Map<channel_id, Set<socket>>`
+fans a posted message out ONLY to sockets subscribed to that channel (no history
+replay). Scrollback loads over the paginated `GET /api/channels/:id/messages`; the
+socket carries only new messages from then on. **A client `message` frame carries
+no `kind`** — a socket post is always persisted as `human`, so a human client
+cannot forge an `agent` message; the `agent` kind is server-controlled (the future
+T4 @mention agent posts server-side). Open membership — every workspace member is
+implicitly in every channel, no per-channel join/invite/ACL.
+
 > **POC exposure precondition (Tailscale is the perimeter):** the VPS
 > workspace port MUST be reachable **only over Tailscale** — firewall it to the
 > tailnet interface, or bind the server to the Tailscale IP. **Never expose it
@@ -334,6 +346,14 @@ ping/pong heartbeat. The VPS URL is a per-teammate client setting in Settings
   channel-tagged frames (`hello`/`ping` client, `roster`/`pong` server); `WsHub` gained a room
   routing dimension (`join`/`leaveAll`/`broadcastRoom`) rather than a rewrite. Presence is
   connection-based + heartbeat (online while holding a live socket; ping/pong evicts a dead one).
+- Team workspace (T2): channels + live messaging. `channels`/`messages` tables (`kind ∈
+  human|agent`) in the same SQLite; the multiplexed socket gained `subscribe`/`unsubscribe`/
+  `message` frames + a `message`/`channels` server frame; a dedicated `ChannelManager`
+  `Map<channel_id, Set<socket>>` (NOT `WsHub` rooms) does per-channel fan-out. REST scrollback
+  (`GET /api/channels`, `GET /api/channels/:id/messages` paginated) + WS-live split, no history
+  replay. Open membership (no per-channel ACL). A client `message` frame carries no `kind` —
+  socket posts are always `human`; the `agent` kind is server-controlled (T4). Deferred to #86:
+  reconnect scrollback gap >1 page + backward-pagination UI.
 - Max OAuth only — `ANTHROPIC_API_KEY` stripped from worker env.
 - No shared package — server↔web types are a manual mirror.
 - Frosted-glass theme; Vitest across both workspaces (typecheck+lint+test+build is validation).
