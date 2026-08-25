@@ -472,6 +472,14 @@ export type WsWorkspaceServerMsg =
   | { type: 'roster'; members: WorkspaceMember[] }
   | { type: 'pong' }
 
+/**
+ * Max length of a self-asserted display-name handle, measured after trimming.
+ * A `hello` frame whose trimmed name exceeds this is rejected server-side so a
+ * client can never store an unbounded handle into `members` (which would then
+ * ride every roster snapshot). Mirrored in `packages/web/src/types.ts`.
+ */
+export const MAX_DISPLAY_NAME_LEN = 64
+
 // ---- preflight (advisory auth presence probe) ----
 
 /** One advisory presence signal — never a hard gate on Start. */

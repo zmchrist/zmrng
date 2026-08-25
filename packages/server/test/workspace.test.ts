@@ -4,6 +4,7 @@ import {
   PresenceTracker,
   WorkspaceManager,
 } from '../src/workspace.js'
+import { MAX_DISPLAY_NAME_LEN } from '../src/types.js'
 import type { Member, WsWorkspaceServerMsg } from '../src/types.js'
 
 describe('parseWorkspaceClientMsg', () => {
@@ -32,6 +33,24 @@ describe('parseWorkspaceClientMsg', () => {
     expect(parseWorkspaceClientMsg(JSON.stringify({ type: 'hello', displayName: 5 }))).toBeUndefined()
     expect(parseWorkspaceClientMsg('')).toBeUndefined()
     expect(parseWorkspaceClientMsg(JSON.stringify(['hello']))).toBeUndefined()
+  })
+
+  it('accepts a name at the length cap but rejects one over it (post-trim)', () => {
+    const atCap = 'a'.repeat(MAX_DISPLAY_NAME_LEN)
+    expect(parseWorkspaceClientMsg(JSON.stringify({ type: 'hello', displayName: atCap }))).toEqual({
+      type: 'hello',
+      displayName: atCap,
+    })
+    const overCap = 'a'.repeat(MAX_DISPLAY_NAME_LEN + 1)
+    expect(
+      parseWorkspaceClientMsg(JSON.stringify({ type: 'hello', displayName: overCap })),
+    ).toBeUndefined()
+    // Length is measured AFTER trimming: surrounding whitespace does not count.
+    const padded = `  ${atCap}  `
+    expect(parseWorkspaceClientMsg(JSON.stringify({ type: 'hello', displayName: padded }))).toEqual({
+      type: 'hello',
+      displayName: atCap,
+    })
   })
 })
 

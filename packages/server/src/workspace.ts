@@ -1,3 +1,4 @@
+import { MAX_DISPLAY_NAME_LEN } from './types.js'
 import type { Db } from './db.js'
 import type {
   Member,
@@ -18,8 +19,9 @@ function asRecord(v: unknown): Record<string, unknown> | undefined {
  * Parse one client->server frame from the multiplexed workspace socket. Tolerant:
  * malformed JSON, an unknown `type`, or a missing/ill-typed/blank field all yield
  * `undefined` rather than throwing (mirrors `terminal.ts` / `chatAgent.ts`). A
- * `hello` frame's display name is trimmed; an empty/whitespace-only name is
- * rejected so it can never create a blank `members` row.
+ * `hello` frame's display name is trimmed; an empty/whitespace-only name — or
+ * one longer than `MAX_DISPLAY_NAME_LEN` after trimming — is rejected so it can
+ * never create a blank or unbounded `members` row.
  */
 export function parseWorkspaceClientMsg(raw: string): WsWorkspaceClientMsg | undefined {
   let parsed: unknown
@@ -33,7 +35,9 @@ export function parseWorkspaceClientMsg(raw: string): WsWorkspaceClientMsg | und
   if (obj.type === 'hello') {
     if (typeof obj.displayName !== 'string') return undefined
     const displayName = obj.displayName.trim()
-    return displayName.length > 0 ? { type: 'hello', displayName } : undefined
+    return displayName.length > 0 && displayName.length <= MAX_DISPLAY_NAME_LEN
+      ? { type: 'hello', displayName }
+      : undefined
   }
   if (obj.type === 'ping') {
     return { type: 'ping' }

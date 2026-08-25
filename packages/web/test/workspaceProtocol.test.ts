@@ -4,6 +4,7 @@ import {
   encodePing,
   parseWorkspaceServerMsg,
 } from '../src/workspaceProtocol'
+import { MAX_DISPLAY_NAME_LEN } from '../src/types'
 
 describe('client encoders', () => {
   it('encodeHello produces a hello frame carrying the display name', () => {
@@ -12,6 +13,14 @@ describe('client encoders', () => {
 
   it('encodeHello trims surrounding whitespace from the display name', () => {
     expect(JSON.parse(encodeHello('  Ada  '))).toEqual({ type: 'hello', displayName: 'Ada' })
+  })
+
+  it('encodeHello clamps an over-long name to the length cap (post-trim)', () => {
+    const overCap = `  ${'a'.repeat(MAX_DISPLAY_NAME_LEN + 50)}  `
+    const frame = JSON.parse(encodeHello(overCap)) as { type: string; displayName: string }
+    expect(frame.type).toBe('hello')
+    expect(frame.displayName).toBe('a'.repeat(MAX_DISPLAY_NAME_LEN))
+    expect(frame.displayName.length).toBe(MAX_DISPLAY_NAME_LEN)
   })
 
   it('encodePing produces a bare ping frame', () => {

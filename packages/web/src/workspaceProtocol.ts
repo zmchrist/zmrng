@@ -4,11 +4,20 @@
 // `parseWorkspaceClientMsg` accepts; `parseWorkspaceServerMsg` is a tolerant
 // guard over the server -> client frames (mirrors `chatProtocol.ts`).
 
+import { MAX_DISPLAY_NAME_LEN } from './types'
 import type { WorkspaceMember, WsWorkspaceServerMsg } from './types'
 
-/** Encode a client `hello` frame — self-assert a display name on first connect. */
+/**
+ * Encode a client `hello` frame — self-assert a display name on first connect.
+ * The name is trimmed and clamped to `MAX_DISPLAY_NAME_LEN` so an over-long
+ * handle never reaches the wire (the server rejects it too — this is the
+ * fast-feedback client mirror of that guard).
+ */
 export function encodeHello(displayName: string): string {
-  return JSON.stringify({ type: 'hello', displayName: displayName.trim() })
+  return JSON.stringify({
+    type: 'hello',
+    displayName: displayName.trim().slice(0, MAX_DISPLAY_NAME_LEN),
+  })
 }
 
 /** Encode a client `ping` heartbeat frame (the server answers with `pong`). */

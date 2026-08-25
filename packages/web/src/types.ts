@@ -446,6 +446,13 @@ export type WsWorkspaceServerMsg =
   | { type: 'roster'; members: WorkspaceMember[] }
   | { type: 'pong' }
 
+/**
+ * Max length of a self-asserted display-name handle, measured after trimming.
+ * The client clamps to this before sending `hello`; the server rejects any
+ * over-cap frame. Mirror of `packages/server/src/types.ts`.
+ */
+export const MAX_DISPLAY_NAME_LEN = 64
+
 export type AuthMode = 'oauth' | 'apikey'
 
 export interface ServerConfig {
