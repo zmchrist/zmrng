@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import styles from './WorkerLog.module.css'
 import type { TaskEvent } from '../types'
 import { actorColor } from '../status'
+import { useAutoScroll } from '../useAutoScroll'
 
 interface Props {
   events: TaskEvent[]
@@ -97,27 +98,34 @@ function renderEvent(ev: TaskEvent) {
 }
 
 export function WorkerLog({ events, live }: Props) {
-  const endRef = useRef<HTMLDivElement>(null)
+  const { ref, onScroll, scrollToBottom, notifyContentChanged, hasNew } =
+    useAutoScroll<HTMLDivElement>()
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [events, live])
+    notifyContentChanged()
+  }, [events, live, notifyContentChanged])
 
   return (
-    <div className={styles.log}>
-      {events.length === 0 && !live && (
-        <div className={styles.placeholder}>No activity yet.</div>
-      )}
-      {events.map(renderEvent)}
-      {live && (
-        <div className={styles.row}>
-          <div className={`${styles.bubble} ${styles.assistant} ${styles.streaming}`}>
-            {live}
-            <span className={styles.caret} />
+    <div className={styles.logWrap}>
+      <div className={styles.log} ref={ref} onScroll={onScroll}>
+        {events.length === 0 && !live && (
+          <div className={styles.placeholder}>No activity yet.</div>
+        )}
+        {events.map(renderEvent)}
+        {live && (
+          <div className={styles.row}>
+            <div className={`${styles.bubble} ${styles.assistant} ${styles.streaming}`}>
+              {live}
+              <span className={styles.caret} />
+            </div>
           </div>
-        </div>
+        )}
+      </div>
+      {hasNew && (
+        <button type="button" className={styles.newMsgPill} onClick={scrollToBottom}>
+          ↓ New message
+        </button>
       )}
-      <div ref={endRef} />
     </div>
   )
 }

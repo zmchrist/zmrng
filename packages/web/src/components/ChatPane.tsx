@@ -4,6 +4,7 @@ import { actorColor } from '../status'
 import { encodeInput, encodeInterrupt, encodeStart, parseChatServerMsg } from '../chatProtocol'
 import { loadChatThread, saveChatThread, serializeTranscript } from '../chatPersistence'
 import { useAttachments } from '../useAttachments'
+import { useAutoScroll } from '../useAutoScroll'
 import { AttachmentTray } from './AttachmentTray'
 import {
   appendPartial,
@@ -59,7 +60,8 @@ export function ChatPane({ id }: Props) {
   const [draft, setDraft] = useState('')
   const files = useAttachments()
   const wsRef = useRef<WebSocket | null>(null)
-  const threadRef = useRef<HTMLDivElement | null>(null)
+  const { ref: threadRef, onScroll, scrollToBottom, notifyContentChanged, hasNew } =
+    useAutoScroll<HTMLDivElement>()
 
   // Open (or re-open, on a config change) the socket. Re-runs when id or any
   // control changes; a config change respawns the `claude` session with the new
@@ -99,11 +101,11 @@ export function ChatPane({ id }: Props) {
     }
   }, [id, model, effort, style])
 
-  // Keep the thread scrolled to the latest item.
+  // Bottom-pin: only follow new items if the operator was already at the
+  // bottom; otherwise `hasNew` flips true and a pill offers to jump down.
   useEffect(() => {
-    const el = threadRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [thread])
+    notifyContentChanged()
+  }, [thread, notifyContentChanged])
 
   // Persist the transcript as it grows, skipping mid-stream token deltas (only
   // once a bubble is closed) so a fast stream doesn't hammer localStorage.
@@ -203,30 +205,37 @@ export function ChatPane({ id }: Props) {
         </select>
       </div>
 
-      <div className={styles.thread} ref={threadRef}>
-        {thread.items.map((item, i) => {
-          if (item.kind === 'user') {
+      <div className={styles.threadWrap}>
+        <div className={styles.thread} ref={threadRef} onScroll={onScroll}>
+          {thread.items.map((item, i) => {
+            if (item.kind === 'user') {
+              return (
+                <div key={i} className={`${styles.bubble} ${styles.user}`}>
+                  {item.text}
+                </div>
+              )
+            }
+            if (item.kind === 'agent') {
+              return (
+                <div key={i} className={`${styles.bubble} ${styles.agent}`}>
+                  {item.text}
+                  {item.streaming && <span className={styles.caret} aria-hidden="true" />}
+                </div>
+              )
+            }
             return (
-              <div key={i} className={`${styles.bubble} ${styles.user}`}>
-                {item.text}
+              <div key={i} className={styles.toolNote} style={{ color: actorColor(item.actor) }}>
+                <span className={styles.toolName}>{item.name}</span>
+                {item.summary && <span className={styles.toolSummary}>{item.summary}</span>}
               </div>
             )
-          }
-          if (item.kind === 'agent') {
-            return (
-              <div key={i} className={`${styles.bubble} ${styles.agent}`}>
-                {item.text}
-                {item.streaming && <span className={styles.caret} aria-hidden="true" />}
-              </div>
-            )
-          }
-          return (
-            <div key={i} className={styles.toolNote} style={{ color: actorColor(item.actor) }}>
-              <span className={styles.toolName}>{item.name}</span>
-              {item.summary && <span className={styles.toolSummary}>{item.summary}</span>}
-            </div>
-          )
-        })}
+          })}
+        </div>
+        {hasNew && (
+          <button type="button" className={styles.newMsgPill} onClick={scrollToBottom}>
+            ↓ New message
+          </button>
+        )}
       </div>
 
       <div

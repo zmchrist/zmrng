@@ -1,3 +1,10 @@
+.logWrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .log {
   flex: 1;
   min-height: 0;
@@ -6,6 +13,29 @@
   display: flex;
   flex-direction: column;
   gap: 13px;
+}
+
+.newMsgPill {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  background: var(--surface-strong);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-soft), var(--glow-accent);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.newMsgPill:hover {
+  background: var(--surface-hover);
 }
 
 .placeholder {
