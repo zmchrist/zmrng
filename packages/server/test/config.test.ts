@@ -117,16 +117,16 @@ describe('resolveRegistry auto-scan of ZMRNG_PROJECTS_DIR', () => {
     // out as invalid, and the real auto-scanned repo of the same id never
     // took its place — the id vanished from the registry entirely.
     const projectsDir = path.join(root, 'projects')
-    execFileSync('git', ['init', '-q'], { cwd: mkdirp(path.join(projectsDir, 'pheme')) })
-    const configDir = configDirWith([{ id: 'pheme', path: '/fake/stale-path-does-not-exist' }])
+    execFileSync('git', ['init', '-q'], { cwd: mkdirp(path.join(projectsDir, 'example-app')) })
+    const configDir = configDirWith([{ id: 'example-app', path: '/fake/stale-path-does-not-exist' }])
     const { repos } = resolveRegistry({
       configDir,
       projectsDir,
       fallbackRoot: root,
       env: {},
     })
-    const pheme = repos.find((r) => r.id === 'pheme')
-    expect(pheme?.path).toBe(path.join(projectsDir, 'pheme'))
+    const found = repos.find((r) => r.id === 'example-app')
+    expect(found?.path).toBe(path.join(projectsDir, 'example-app'))
   })
 })
 
