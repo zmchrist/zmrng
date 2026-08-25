@@ -20,6 +20,11 @@ import type { CaveStyle, EffortLevel, ModelAlias } from '../types'
 interface Props {
   /** Stable id for this chat instance (one WebSocket / claude session per id). */
   id: string
+  /** Seed config from the launching tab's picker (`ChatCard`) — defaults match
+   *  the pre-multi-tab hardcoded values when omitted. */
+  initialModel?: ModelAlias
+  initialEffort?: EffortLevel
+  initialStyle?: CaveStyle
 }
 
 /** Chat-tab defaults — independent of the task-level DEFAULT_* controls. */
@@ -41,10 +46,10 @@ const STYLE_OPTIONS: readonly CaveStyle[] = [
  * modules; this component is intentionally not unit-tested (jsdom has no WS
  * glue worth exercising). Colors come from theme tokens only.
  */
-export function ChatPane({ id }: Props) {
-  const [model, setModel] = useState<ModelAlias>('sonnet')
-  const [effort, setEffort] = useState<EffortLevel>('medium')
-  const [style, setStyle] = useState<CaveStyle>('caveman-full')
+export function ChatPane({ id, initialModel = 'sonnet', initialEffort = 'medium', initialStyle = 'caveman-full' }: Props) {
+  const [model, setModel] = useState<ModelAlias>(initialModel)
+  const [effort, setEffort] = useState<EffortLevel>(initialEffort)
+  const [style, setStyle] = useState<CaveStyle>(initialStyle)
   // Hydrate from the saved transcript (if any) so history survives a refresh/
   // rebuild/tab-reopen — the underlying `claude` session is gone regardless,
   // so it always starts idle (`busy: false`). Plain state (not a ref) so its
