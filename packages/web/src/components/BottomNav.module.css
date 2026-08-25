@@ -64,11 +64,15 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--surface-strong);
-  border: 1px solid var(--border);
+  /* Deliberately more opaque + more blurred than the rest of the flat theme
+     (where --blur is dead): darkened via color-mix on the existing surface
+     token, not a new color, so it still tracks every theme's palette. */
+  background: color-mix(in srgb, var(--surface-strong) 88%, black);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(var(--blur));
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 .menuRow {
   display: flex;
