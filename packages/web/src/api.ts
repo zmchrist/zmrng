@@ -12,6 +12,8 @@ import type {
   PreflightResult,
   AgentSummary,
   ChatMessage,
+  Channel,
+  Message,
   UiState,
   Attachment,
 } from './types'
@@ -200,6 +202,20 @@ export const api = {
   deleteTask: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}`, { method: 'DELETE' }),
   restart: () => req<{ ok: true; restarted: boolean }>('/api/restart', { method: 'POST' }),
+  /** Team-workspace channel list (box 2). */
+  listChannels: () => req<Channel[]>('/api/channels'),
+  /**
+   * Paginated scrollback for one channel (box 4). Pass the oldest loaded
+   * message id as `before` to page backwards; the socket delivers newer live
+   * messages separately (no history replay over the socket).
+   */
+  getChannelMessages: (channelId: number, opts?: { before?: number; limit?: number }) => {
+    const params = new URLSearchParams()
+    if (opts?.before !== undefined) params.set('before', String(opts.before))
+    if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
+    const qs = params.toString()
+    return req<Message[]>(`/api/channels/${channelId}/messages${qs ? `?${qs}` : ''}`)
+  },
   getUiState: () => req<UiState>('/api/ui-state'),
   putUiState: (state: UiState) =>
     req<{ ok: true }>('/api/ui-state', {

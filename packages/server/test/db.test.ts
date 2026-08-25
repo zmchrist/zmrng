@@ -362,6 +362,138 @@ describe('members (team workspace T1)', () => {
   })
 })
 
+describe('channels + messages (team workspace T2)', () => {
+  const tables = (p: string): Set<string> => {
+    const raw = new Database(p)
+    const names = new Set(
+      (
+        raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+          name: string
+        }[]
+      ).map((t) => t.name),
+    )
+    raw.close()
+    return names
+  }
+
+  it('creates the channels and messages tables', () => {
+    new Db(dbPath)
+    const t = tables(dbPath)
+    expect(t.has('channels')).toBe(true)
+    expect(t.has('messages')).toBe(true)
+  })
+
+  it('seeds a fixed #general channel by default (with a null repo_id)', () => {
+    const db = new Db(dbPath)
+    const channels = db.listChannels()
+    expect(channels).toHaveLength(1)
+    expect(channels[0].name).toBe('general')
+    expect(channels[0].repoId).toBeNull()
+    expect(typeof channels[0].id).toBe('number')
+  })
+
+  it('seeds #general idempotently — a reopen does not add a second row', () => {
+    new Db(dbPath)
+    const db2 = new Db(dbPath)
+    expect(db2.listChannels().filter((c) => c.name === 'general')).toHaveLength(1)
+  })
+
+  it('createChannel inserts a repo-tied channel and returns it', () => {
+    const db = new Db(dbPath)
+    const c = db.createChannel('zmrng-dev', 'zmrng', '2026-08-25T00:00:00.000Z')
+    expect(c.name).toBe('zmrng-dev')
+    expect(c.repoId).toBe('zmrng')
+    expect(db.getChannel(c.id)?.name).toBe('zmrng-dev')
+  })
+
+  it('createChannel is idempotent by name (unique) — reuses the existing row', () => {
+    const db = new Db(dbPath)
+    const first = db.createChannel('dupe', null, '2026-08-25T00:00:00.000Z')
+    const again = db.createChannel('dupe', 'zmrng', '2026-08-25T00:05:00.000Z')
+    expect(again.id).toBe(first.id)
+    expect(again.createdAt).toBe(first.createdAt)
+    expect(db.listChannels().filter((c) => c.name === 'dupe')).toHaveLength(1)
+  })
+
+  it('getChannel returns undefined for an unknown id', () => {
+    const db = new Db(dbPath)
+    expect(db.getChannel(99999)).toBeUndefined()
+  })
+
+  it('addMessage persists a message and round-trips its fields', () => {
+    const db = new Db(dbPath)
+    const chan = db.listChannels()[0]
+    const m = db.addMessage(chan.id, 'Ada', 'hello team', 'human', '2026-08-25T00:00:00.000Z')
+    expect(m.channelId).toBe(chan.id)
+    expect(m.author).toBe('Ada')
+    expect(m.body).toBe('hello team')
+    expect(m.kind).toBe('human')
+    expect(m.createdAt).toBe('2026-08-25T00:00:00.000Z')
+    expect(typeof m.id).toBe('number')
+  })
+
+  it('addMessage preserves the agent kind for later agent use', () => {
+    const db = new Db(dbPath)
+    const chan = db.listChannels()[0]
+    const m = db.addMessage(chan.id, 'planner', 'on it', 'agent', '2026-08-25T00:00:01.000Z')
+    expect(m.kind).toBe('agent')
+    expect(db.listMessages(chan.id, null, 10)[0].kind).toBe('agent')
+  })
+
+  it('listMessages returns messages for a channel in ascending id order', () => {
+    const db = new Db(dbPath)
+    const chan = db.listChannels()[0]
+    db.addMessage(chan.id, 'Ada', 'one', 'human', '2026-08-25T00:00:00.000Z')
+    db.addMessage(chan.id, 'Bo', 'two', 'human', '2026-08-25T00:00:01.000Z')
+    db.addMessage(chan.id, 'Ada', 'three', 'human', '2026-08-25T00:00:02.000Z')
+    expect(db.listMessages(chan.id, null, 50).map((m) => m.body)).toEqual(['one', 'two', 'three'])
+  })
+
+  it('listMessages scopes to the requested channel only', () => {
+    const db = new Db(dbPath)
+    const general = db.listChannels()[0]
+    const other = db.createChannel('other', null, '2026-08-25T00:00:00.000Z')
+    db.addMessage(general.id, 'Ada', 'in general', 'human', '2026-08-25T00:00:00.000Z')
+    db.addMessage(other.id, 'Bo', 'in other', 'human', '2026-08-25T00:00:01.000Z')
+    expect(db.listMessages(general.id, null, 50).map((m) => m.body)).toEqual(['in general'])
+    expect(db.listMessages(other.id, null, 50).map((m) => m.body)).toEqual(['in other'])
+  })
+
+  it('listMessages returns the MOST RECENT page (ascending) when over the limit', () => {
+    const db = new Db(dbPath)
+    const chan = db.listChannels()[0]
+    for (let i = 0; i < 5; i++) {
+      db.addMessage(chan.id, 'Ada', `m${i}`, 'human', `2026-08-25T00:00:0${i}.000Z`)
+    }
+    // limit 2 → the two newest, still oldest-first for rendering
+    expect(db.listMessages(chan.id, null, 2).map((m) => m.body)).toEqual(['m3', 'm4'])
+  })
+
+  it('listMessages pages backwards via the `before` cursor (scrollback)', () => {
+    const db = new Db(dbPath)
+    const chan = db.listChannels()[0]
+    const ids: number[] = []
+    for (let i = 0; i < 5; i++) {
+      ids.push(db.addMessage(chan.id, 'Ada', `m${i}`, 'human', `2026-08-25T00:00:0${i}.000Z`).id)
+    }
+    const newest = db.listMessages(chan.id, null, 2) // m3, m4
+    expect(newest.map((m) => m.body)).toEqual(['m3', 'm4'])
+    const older = db.listMessages(chan.id, newest[0].id, 2) // before m3 → m1, m2
+    expect(older.map((m) => m.body)).toEqual(['m1', 'm2'])
+    const oldest = db.listMessages(chan.id, older[0].id, 2) // before m1 → m0
+    expect(oldest.map((m) => m.body)).toEqual(['m0'])
+    expect(ids).toHaveLength(5)
+  })
+
+  it('persists channels and messages across reopen', () => {
+    const db1 = new Db(dbPath)
+    const chan = db1.listChannels()[0]
+    db1.addMessage(chan.id, 'Ada', 'durable', 'human', '2026-08-25T00:00:00.000Z')
+    const db2 = new Db(dbPath)
+    expect(db2.listMessages(chan.id, null, 50).map((m) => m.body)).toEqual(['durable'])
+  })
+})
+
 describe('addUsage', () => {
   const mk = (): Db => {
     const db = new Db(dbPath)

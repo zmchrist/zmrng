@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import styles from './TeamView.module.css'
-import type { WorkspaceMember } from '../types'
-import { encodeHello, encodePing, parseWorkspaceServerMsg } from '../workspaceProtocol'
+import type { Channel, Message, WorkspaceMember } from '../types'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from '../types'
+import {
+  encodeHello,
+  encodePing,
+  encodeSubscribe,
+  encodeUnsubscribe,
+  encodeMessage,
+  parseWorkspaceServerMsg,
+} from '../workspaceProtocol'
 import { emptyRoster, applyWorkspaceMsg } from '../roster'
+import { emptyThread, appendMessage, loadScrollback } from '../channelThread'
+import { api } from '../api'
 import {
   loadStoredHandle,
   saveStoredHandle,
@@ -18,15 +28,23 @@ interface Props {
 
 const PING_MS = 25000
 const RECONNECT_MS = 2000
+const SCROLLBACK_LIMIT = 50
+
+/** Render a channel's name with the conventional leading `#`. */
+function channelLabel(name: string): string {
+  return `#${name}`
+}
 
 /**
  * The Team mode surface: connects to the configured VPS team-workspace server
- * over ONE multiplexed WebSocket, self-asserts a free-text display-name handle
- * on first connect, and renders the live workspace-wide presence roster. Local
- * task execution is untouched — this tab only talks to the VPS socket.
+ * over ONE multiplexed WebSocket, self-asserts a free-text display-name handle,
+ * lists channels, opens one, renders its messages (scrollback via REST + live
+ * NEW messages via the socket), and posts to it via a composer. Human and agent
+ * messages render distinguishably (box 6). Local task execution is untouched.
  *
- * This is connection glue (like WorkspaceGrid) — the wire protocol, roster
- * reducer, and config resolution it composes are each unit-tested in isolation.
+ * This is connection glue (like WorkspaceGrid) — the wire protocol, roster +
+ * channel-thread reducers, and config resolution it composes are each
+ * unit-tested in isolation.
  */
 export function TeamView({ workspaceUrl }: Props) {
   const socketUrl = workspaceSocketUrl(resolveWorkspaceUrl(workspaceUrl))
@@ -34,8 +52,24 @@ export function TeamView({ workspaceUrl }: Props) {
   const [draft, setDraft] = useState('')
   const [roster, setRoster] = useState<WorkspaceMember[]>(emptyRoster)
   const [connected, setConnected] = useState(false)
+  const [channels, setChannels] = useState<Channel[]>([])
+  const [openId, setOpenId] = useState<number | null>(null)
+  const [thread, setThread] = useState<Message[]>(emptyThread)
+  const [composer, setComposer] = useState('')
   const wsRef = useRef<WebSocket | null>(null)
+  // Latest open-channel id, readable inside the stable socket onmessage closure.
+  const openIdRef = useRef<number | null>(null)
+  useEffect(() => {
+    openIdRef.current = openId
+  }, [openId])
 
+  /** Send a pre-encoded frame if the socket is live (dropped otherwise). */
+  const sendFrame = (data: string): void => {
+    const ws = wsRef.current
+    if (ws?.readyState === WebSocket.OPEN) ws.send(data)
+  }
+
+  // ---- socket lifecycle (presence + live message delivery) ----
   useEffect(() => {
     if (!handle || !socketUrl) return
     let closed = false
@@ -60,7 +94,17 @@ export function TeamView({ workspaceUrl }: Props) {
       }
       ws.onmessage = (ev) => {
         const msg = parseWorkspaceServerMsg(String(ev.data))
-        if (msg) setRoster((prev) => applyWorkspaceMsg(prev, msg))
+        if (!msg) return
+        if (msg.type === 'message') {
+          // Only the currently-open channel's live messages hit the thread.
+          if (msg.message.channelId === openIdRef.current) {
+            setThread((prev) => appendMessage(prev, msg.message))
+          }
+        } else if (msg.type === 'channels') {
+          setChannels(msg.channels)
+        } else {
+          setRoster((prev) => applyWorkspaceMsg(prev, msg))
+        }
       }
       ws.onclose = () => {
         setConnected(false)
@@ -82,6 +126,54 @@ export function TeamView({ workspaceUrl }: Props) {
     }
   }, [handle, socketUrl])
 
+  // ---- load the channel list once connected; default to the first channel ----
+  useEffect(() => {
+    if (!handle || !connected) return
+    let cancelled = false
+    api
+      .listChannels()
+      .then((list) => {
+        if (cancelled) return
+        setChannels(list)
+        setOpenId((cur) => (cur !== null ? cur : (list[0]?.id ?? null)))
+      })
+      .catch(() => {
+        // transient failure — the socket stays live; a reconnect retries this
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [handle, connected])
+
+  // ---- open a channel: REST scrollback + subscribe to live fan-out ----
+  // The thread is reset in the channel-switch handlers (not here) to keep this
+  // effect free of synchronous setState; on a plain reconnect the scrollback
+  // page merges (deduped) into whatever live messages already arrived.
+  useEffect(() => {
+    if (!connected || openId === null) return
+    let cancelled = false
+    api
+      .getChannelMessages(openId, { limit: SCROLLBACK_LIMIT })
+      .then((page) => {
+        if (!cancelled) setThread((prev) => loadScrollback(prev, page))
+      })
+      .catch(() => {
+        // scrollback failed — live messages still flow once subscribed
+      })
+    sendFrame(encodeSubscribe(openId))
+    return () => {
+      cancelled = true
+      sendFrame(encodeUnsubscribe(openId))
+    }
+  }, [connected, openId])
+
+  /** Switch the open channel, clearing the previous channel's thread. */
+  const openChannelId = (id: number): void => {
+    if (id === openId) return
+    setThread(emptyThread())
+    setOpenId(id)
+  }
+
   const onJoin = (e: React.FormEvent) => {
     e.preventDefault()
     const name = draft.trim()
@@ -94,6 +186,18 @@ export function TeamView({ workspaceUrl }: Props) {
     saveStoredHandle('')
     setHandle('')
     setDraft('')
+    setOpenId(null)
+    setThread(emptyThread())
+  }
+
+  const onSend = (e: React.FormEvent) => {
+    e.preventDefault()
+    const body = composer.trim()
+    if (!body || openId === null) return
+    // Posted human message returns via the channel fan-out (we are subscribed),
+    // so it appears in the thread through the live socket — no optimistic append.
+    sendFrame(encodeMessage(openId, handle, body))
+    setComposer('')
   }
 
   if (!socketUrl) {
@@ -127,7 +231,7 @@ export function TeamView({ workspaceUrl }: Props) {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder="e.g. Ada"
-              maxLength={64}
+              maxLength={MAX_DISPLAY_NAME_LEN}
               autoFocus
             />
             <button type="submit" className={styles.joinBtn} disabled={!draft.trim()}>
@@ -140,6 +244,7 @@ export function TeamView({ workspaceUrl }: Props) {
   }
 
   const onlineCount = roster.filter((m) => m.online).length
+  const openChannel = channels.find((c) => c.id === openId) ?? null
 
   return (
     <div className={styles.team}>
@@ -156,25 +261,97 @@ export function TeamView({ workspaceUrl }: Props) {
           change name
         </button>
       </div>
-      <div className={styles.rosterHead}>
-        <span className={styles.rosterTitle}>Roster</span>
-        <span className={styles.rosterCount}>
-          {onlineCount} online · {roster.length} total
-        </span>
+
+      <div className={styles.body}>
+        <div className={styles.rail}>
+          <div className={styles.sectionHead}>
+            <span className={styles.sectionTitle}>Channels</span>
+          </div>
+          <ul className={styles.channels}>
+            {channels.length === 0 && <li className={styles.railEmpty}>No channels yet.</li>}
+            {channels.map((c) => (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  className={`${styles.channel} ${c.id === openId ? styles.channelActive : ''}`}
+                  onClick={() => openChannelId(c.id)}
+                >
+                  {channelLabel(c.name)}
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          <div className={styles.sectionHead}>
+            <span className={styles.sectionTitle}>Roster</span>
+            <span className={styles.rosterCount}>
+              {onlineCount} online · {roster.length} total
+            </span>
+          </div>
+          <ul className={styles.roster}>
+            {roster.length === 0 && <li className={styles.railEmpty}>No members yet.</li>}
+            {roster.map((m) => (
+              <li key={m.id} className={styles.member}>
+                <span
+                  className={`${styles.dot} ${m.online ? styles.dotOn : styles.dotOff}`}
+                  aria-hidden="true"
+                />
+                <span className={styles.memberName}>{m.displayName}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className={styles.channelPane}>
+          {openChannel ? (
+            <>
+              <div className={styles.channelHead}>
+                <span className={styles.channelName}>{channelLabel(openChannel.name)}</span>
+                {openChannel.repoId && (
+                  <span className={styles.channelRepo}>{openChannel.repoId}</span>
+                )}
+              </div>
+              <ul className={styles.thread}>
+                {thread.length === 0 && <li className={styles.threadEmpty}>No messages yet.</li>}
+                {thread.map((m) => (
+                  <li
+                    key={m.id}
+                    className={`${styles.message} ${
+                      m.kind === 'agent' ? styles.messageAgent : styles.messageHuman
+                    }`}
+                  >
+                    <span className={styles.messageAuthor}>
+                      {m.author}
+                      {m.kind === 'agent' && <span className={styles.agentTag}>agent</span>}
+                    </span>
+                    <span className={styles.messageBody}>{m.body}</span>
+                  </li>
+                ))}
+              </ul>
+              <form className={styles.composer} onSubmit={onSend}>
+                <input
+                  className={styles.input}
+                  type="text"
+                  value={composer}
+                  onChange={(e) => setComposer(e.target.value)}
+                  placeholder={`Message ${channelLabel(openChannel.name)}`}
+                  maxLength={MAX_MESSAGE_BODY_LEN}
+                  disabled={!connected}
+                />
+                <button
+                  type="submit"
+                  className={styles.joinBtn}
+                  disabled={!composer.trim() || !connected}
+                >
+                  Send
+                </button>
+              </form>
+            </>
+          ) : (
+            <div className={styles.threadEmpty}>Select a channel to start chatting.</div>
+          )}
+        </div>
       </div>
-      <ul className={styles.roster}>
-        {roster.length === 0 && <li className={styles.rosterEmpty}>No members yet.</li>}
-        {roster.map((m) => (
-          <li key={m.id} className={styles.member}>
-            <span
-              className={`${styles.dot} ${m.online ? styles.dotOn : styles.dotOff}`}
-              aria-hidden="true"
-            />
-            <span className={styles.memberName}>{m.displayName}</span>
-            <span className={styles.memberState}>{m.online ? 'online' : 'offline'}</span>
-          </li>
-        ))}
-      </ul>
     </div>
   )
 }
