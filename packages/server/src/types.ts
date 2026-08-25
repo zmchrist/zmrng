@@ -452,24 +452,73 @@ export interface WorkspaceMember {
 }
 
 /**
+ * A message's origin, so the UI can render human and agent posts distinguishably
+ * (box 6 of #74). `human` = a teammate typed it; `agent` = an agent posted it
+ * (reserved for #76/T4 — T2 only ever persists `human` from the composer, but the
+ * column + type exist now so agent posting plugs in without a migration).
+ */
+export type MessageKind = 'human' | 'agent'
+
+/**
+ * One team-workspace channel. Channels are FLAT and OPEN — every workspace member
+ * can read/post in any channel; there are no per-channel membership or ACL rows.
+ * `repoId` optionally ties a channel to a target repo; the fixed `#general`
+ * channel (seeded by default) carries a null `repoId`.
+ */
+export interface Channel {
+  id: number
+  name: string
+  repoId: string | null
+  createdAt: string
+}
+
+/**
+ * One persisted channel message. `author` is a self-asserted, free-text member
+ * handle (the same identity model as T1 presence — no verification). `kind`
+ * distinguishes human vs agent posts.
+ */
+export interface Message {
+  id: number
+  channelId: number
+  author: string
+  body: string
+  kind: MessageKind
+  createdAt: string
+}
+
+/**
  * client -> server frames over the ONE multiplexed workspace socket
  * (GET /ws/workspace). `hello` self-asserts a display name on first connect;
- * `ping` is the client heartbeat (the server answers with `pong`). The socket
- * is multiplexed by design — frames are channel-tagged by `type`, never one
- * socket per resource.
+ * `ping` is the client heartbeat (the server answers with `pong`). `subscribe`/
+ * `unsubscribe` register interest in a channel's live message fan-out as the
+ * client opens/closes it; `message` posts to a channel (persisted, then fanned
+ * out only to sockets subscribed to that channel — no history replay). A client
+ * `message` frame carries NO `kind` — a socket post is always persisted as
+ * `human`; the `agent` kind is server-controlled (a future T4 agent posts
+ * server-side), so a human client can never forge an agent-authored message. The
+ * socket is multiplexed by design — frames are channel-tagged by `type`, never
+ * one socket per resource.
  */
 export type WsWorkspaceClientMsg =
   | { type: 'hello'; displayName: string }
   | { type: 'ping' }
+  | { type: 'subscribe'; channelId: number }
+  | { type: 'unsubscribe'; channelId: number }
+  | { type: 'message'; channelId: number; author: string; body: string }
 
 /**
  * server -> client frames over the workspace socket. `roster` is a full
  * presence-roster snapshot, re-sent on every join/leave; `pong` answers a
- * client `ping`.
+ * client `ping`; `message` delivers ONE newly-posted channel message live to
+ * subscribed sockets (never history — scrollback comes over REST); `channels`
+ * is an optional full channel-list snapshot (the client normally lists channels
+ * over REST, but the frame exists so the server can push list changes).
  */
 export type WsWorkspaceServerMsg =
   | { type: 'roster'; members: WorkspaceMember[] }
   | { type: 'pong' }
+  | { type: 'message'; message: Message }
+  | { type: 'channels'; channels: Channel[] }
 
 /**
  * Max length of a self-asserted display-name handle, measured after trimming.
@@ -478,6 +527,25 @@ export type WsWorkspaceServerMsg =
  * ride every roster snapshot). Mirrored in `packages/web/src/types.ts`.
  */
 export const MAX_DISPLAY_NAME_LEN = 64
+
+/**
+ * Max length of a channel message body, measured after trimming. A `message`
+ * frame whose trimmed body exceeds this is rejected server-side (tolerant parse
+ * → undefined) so a client can never persist an unbounded message. Mirrored in
+ * `packages/web/src/types.ts`.
+ */
+export const MAX_MESSAGE_BODY_LEN = 4000
+
+/**
+ * Default page size for the paginated scrollback route
+ * (`GET /api/channels/:id/messages`) and its hard upper bound. Mirrored in
+ * `packages/web/src/types.ts`.
+ */
+export const DEFAULT_MESSAGE_PAGE = 50
+export const MAX_MESSAGE_PAGE = 200
+
+/** Name of the fixed channel seeded by default in every workspace. */
+export const GENERAL_CHANNEL_NAME = 'general'
 
 // ---- preflight (advisory auth presence probe) ----
 

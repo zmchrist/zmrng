@@ -1,11 +1,18 @@
-import { MAX_DISPLAY_NAME_LEN } from './types.js'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from './types.js'
 import type { Db } from './db.js'
 import type {
   Member,
+  Message,
+  MessageKind,
   WorkspaceMember,
   WsWorkspaceClientMsg,
   WsWorkspaceServerMsg,
 } from './types.js'
+
+/** A finite integer that could index a channel row (positive whole number). */
+function isChannelId(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v)
+}
 
 // ---- tolerant client-frame parsing -----------------------------------------
 
@@ -41,6 +48,29 @@ export function parseWorkspaceClientMsg(raw: string): WsWorkspaceClientMsg | und
   }
   if (obj.type === 'ping') {
     return { type: 'ping' }
+  }
+  if (obj.type === 'subscribe' || obj.type === 'unsubscribe') {
+    return isChannelId(obj.channelId)
+      ? { type: obj.type, channelId: obj.channelId }
+      : undefined
+  }
+  if (obj.type === 'message') {
+    if (!isChannelId(obj.channelId)) return undefined
+    if (typeof obj.author !== 'string' || typeof obj.body !== 'string') return undefined
+    const author = obj.author.trim()
+    const body = obj.body.trim()
+    if (author.length === 0 || author.length > MAX_DISPLAY_NAME_LEN) return undefined
+    if (body.length === 0 || body.length > MAX_MESSAGE_BODY_LEN) return undefined
+    // A client `message` frame carries no `kind`: an inbound socket post is
+    // always `human`. Any client-supplied `kind` is ignored here so a human
+    // cannot forge an `agent`-authored message (the `agent` kind is set
+    // server-side by the future T4 agent path, never over this socket).
+    return {
+      type: 'message',
+      channelId: obj.channelId,
+      author,
+      body,
+    }
   }
   return undefined
 }
@@ -142,5 +172,78 @@ export class WorkspaceManager {
 
   private broadcastRoster(): void {
     this.broadcast({ type: 'roster', members: this.roster() })
+  }
+}
+
+// ---- channel manager -------------------------------------------------------
+
+/** The channel/message-table surface the manager needs (kept narrow for testability). */
+type ChannelStore = Pick<Db, 'listChannels' | 'getChannel' | 'addMessage' | 'listMessages'>
+
+/**
+ * Owns channel message posting and live fan-out. Keeps the ticket's named
+ * `Map<channel_id, Set<socket>>` subscription registry: a socket `subscribe`s
+ * to a channel as it opens it and `unsubscribe`s (or, on disconnect,
+ * `unsubscribeAll`s) as it closes it. A posted message is persisted, then fanned
+ * out ONLY to the sockets currently subscribed to that channel — NO history
+ * replay over the socket (scrollback is a REST concern). Generic over the socket
+ * type so it is unit-testable with plain object doubles — the route injects real
+ * `ws` WebSockets, tests inject `{}`. The per-socket `send` sink mirrors
+ * `TaskManager`/`WorkspaceManager`'s broadcast injection.
+ */
+export class ChannelManager<S = object> {
+  private subs = new Map<number, Set<S>>()
+
+  constructor(
+    private db: ChannelStore,
+    private send: (socket: S, frame: WsWorkspaceServerMsg) => void,
+  ) {}
+
+  /** Register a socket's interest in a channel's live fan-out (idempotent). */
+  subscribe(socket: S, channelId: number): void {
+    let set = this.subs.get(channelId)
+    if (!set) {
+      set = new Set<S>()
+      this.subs.set(channelId, set)
+    }
+    set.add(socket)
+  }
+
+  /** Drop a socket's interest in one channel (idempotent). */
+  unsubscribe(socket: S, channelId: number): void {
+    const set = this.subs.get(channelId)
+    if (!set) return
+    set.delete(socket)
+    if (set.size === 0) this.subs.delete(channelId)
+  }
+
+  /** Drop a socket from every channel it was subscribed to (disconnect cleanup). */
+  unsubscribeAll(socket: S): void {
+    for (const [channelId, set] of this.subs) {
+      set.delete(socket)
+      if (set.size === 0) this.subs.delete(channelId)
+    }
+  }
+
+  /**
+   * Persist a message to a channel and fan it out to every subscribed socket.
+   * Returns the stored message, or `undefined` if the channel does not exist
+   * (in which case nothing is persisted and nothing is delivered).
+   */
+  post(
+    channelId: number,
+    author: string,
+    body: string,
+    kind: MessageKind,
+    now: string = new Date().toISOString(),
+  ): Message | undefined {
+    if (!this.db.getChannel(channelId)) return undefined
+    const message = this.db.addMessage(channelId, author, body, kind, now)
+    const set = this.subs.get(channelId)
+    if (set) {
+      const frame: WsWorkspaceServerMsg = { type: 'message', message }
+      for (const socket of set) this.send(socket, frame)
+    }
+    return message
   }
 }
