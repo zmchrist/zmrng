@@ -12,13 +12,14 @@ import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { TerminalManager, parseClientMsg } from './terminal.js'
 import { ChatManager, parseChatClientMsg } from './chatAgent.js'
-import { WorkspaceManager, parseWorkspaceClientMsg } from './workspace.js'
+import { WorkspaceManager, ChannelManager, parseWorkspaceClientMsg } from './workspace.js'
 import { sanitizeAttachments } from './runner.js'
 import { listWorktreeFiles, selfUpdate } from './worktree.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
 import { parseStreamedText } from './chat.js'
 import { readUiState, writeUiState } from './uiState.js'
+import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE } from './types.js'
 import type {
   WsEvent,
   EffortLevel,
@@ -27,6 +28,8 @@ import type {
   WorktreeFileTree,
   AgentSummary,
   ChatMessage,
+  Channel,
+  Message,
   UiState,
   TermServerMsg,
   ChatServerMsg,
@@ -94,6 +97,17 @@ const chats = new ChatManager()
 const workspace = new WorkspaceManager(db, (frame: WsWorkspaceServerMsg) =>
   hub.broadcastRoom('workspace', JSON.stringify(frame)),
 )
+// Channel messaging: a dedicated Map<channel_id, Set<socket>> subscription
+// registry fans a posted message out ONLY to the sockets that subscribed to that
+// channel. The per-socket send sink writes directly to the target ws socket (no
+// history replay — scrollback is the REST route below).
+const channels = new ChannelManager<WebSocket>(db, (socket, frame) => {
+  try {
+    socket.send(JSON.stringify(frame))
+  } catch {
+    // socket closed mid-send; its close handler drops the subscription
+  }
+})
 
 await app.register(websocket)
 
@@ -264,6 +278,28 @@ app.post('/api/tasks', (req, reply) => {
 app.get('/api/tasks/:id/events', (req) => {
   const { id } = req.params as { id: string }
   return db.getEvents(id)
+})
+
+// Team-workspace channel list (box 2). Always 200; #general is seeded by default.
+app.get('/api/channels', (): Channel[] => db.listChannels())
+
+// Paginated scrollback for one channel (box 4). Mirrors the events/WS split: REST
+// serves history, the workspace socket delivers only NEW messages. `before` (an
+// oldest-loaded message id) walks backwards; `limit` is clamped to a hard cap.
+// Always 200: a bad id / unknown channel yields an empty page, never a 500.
+app.get('/api/channels/:id/messages', (req): Message[] => {
+  const { id } = req.params as { id: string }
+  const { before, limit } = req.query as { before?: string; limit?: string }
+  const channelId = Number(id)
+  if (!Number.isInteger(channelId)) return []
+  const beforeId = before !== undefined && before !== '' ? Number(before) : NaN
+  const cursor = Number.isInteger(beforeId) ? beforeId : null
+  const requested = limit !== undefined ? Number(limit) : DEFAULT_MESSAGE_PAGE
+  const page =
+    Number.isInteger(requested) && requested > 0
+      ? Math.min(requested, MAX_MESSAGE_PAGE)
+      : DEFAULT_MESSAGE_PAGE
+  return db.listMessages(channelId, cursor, page)
 })
 
 // Directory listing (not contents) of a task's worktree, for the Workspace file
@@ -656,6 +692,7 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
   const cleanup = (): void => {
     clearInterval(heartbeat)
     hub.leaveAll(socket)
+    channels.unsubscribeAll(socket)
     if (joined) {
       workspace.leave(socket)
       joined = false
@@ -671,6 +708,13 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
         joined = true
       } else if (msg.type === 'ping') {
         send({ type: 'pong' })
+      } else if (msg.type === 'subscribe') {
+        channels.subscribe(socket, msg.channelId)
+      } else if (msg.type === 'unsubscribe') {
+        channels.unsubscribe(socket, msg.channelId)
+      } else if (msg.type === 'message') {
+        // Persist + fan out live to subscribed sockets only (no history replay).
+        channels.post(msg.channelId, msg.author, msg.body, msg.kind)
       }
     } catch (err) {
       app.log.error({ err }, 'workspace message handler failed')
