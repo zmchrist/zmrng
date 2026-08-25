@@ -15,6 +15,15 @@
 
 .item {
   position: relative;
+  margin-bottom: 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  transition: background var(--transition), border-color var(--transition),
+    transform var(--transition), box-shadow var(--transition);
+}
+
+.row {
   width: 100%;
   display: flex;
   align-items: center;
@@ -22,13 +31,10 @@
   gap: 10px;
   text-align: left;
   padding: 13px 14px;
-  margin-bottom: 7px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
   background: transparent;
+  border: none;
   color: var(--text);
-  transition: background var(--transition), border-color var(--transition),
-    transform var(--transition), box-shadow var(--transition);
+  cursor: pointer;
 }
 
 /* accent rail that grows on the active row */
@@ -104,4 +110,30 @@
   color: currentColor;
   background: color-mix(in srgb, currentColor 14%, transparent);
   box-shadow: 0 0 14px -4px currentColor;
+}
+
+/* ---- expanded selected-row body (folded in from the old active-task card) - */
+.expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 14px 14px;
+}
+
+.detailsToggle {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.detailsToggle:hover {
+  color: var(--text-dim);
 }
