@@ -152,7 +152,6 @@ export type GridCardId =
   | 'concurrency'
   | 'reviewqueue'
   | 'newtask'
-  | 'activetask'
   | 'tasklist'
   | 'files'
   | 'viewers'

@@ -26,7 +26,6 @@ export const CARD_IDS: readonly GridCardId[] = [
   'concurrency',
   'reviewqueue',
   'newtask',
-  'activetask',
   'tasklist',
   'files',
   'viewers',
@@ -46,7 +45,7 @@ const DENSITY_DIMS: Record<GridDensity, { rowH: number; gap: number }> = {
 }
 
 /**
- * The seed layout for the 10-card roster: a sensible non-overlapping arrangement
+ * The seed layout for the 9-card roster: a sensible non-overlapping arrangement
  * across the 12-column grid. Pure — returns a fresh array each call.
  */
 export function defaultCards(): GridCardGeo[] {
@@ -57,13 +56,12 @@ export function defaultCards(): GridCardGeo[] {
     { id: 'files', x: 0, y: 2, w: 3, h: 6, minW: 2, minH: 3 },
     { id: 'viewers', x: 3, y: 2, w: 9, h: 6, minW: 4, minH: 3 },
     { id: 'newtask', x: 0, y: 8, w: 4, h: 3, minW: 3, minH: 2 },
-    { id: 'activetask', x: 4, y: 8, w: 4, h: 3, minW: 3, minH: 2 },
-    { id: 'tasklist', x: 8, y: 8, w: 4, h: 6, minW: 3, minH: 3 },
+    { id: 'tasklist', x: 4, y: 8, w: 8, h: 6, minW: 3, minH: 3 },
     // Terminal + Chat own a PTY / `/ws/chat` session, so they seed HIDDEN — the
     // operator shows them from the Cards menu, matching the old "only spawn on
     // open" behavior. Placed on the bottom row so their absence leaves no hole.
-    { id: 'chat', x: 0, y: 11, w: 4, h: 3, minW: 3, minH: 3, hidden: true },
-    { id: 'terminal', x: 4, y: 11, w: 4, h: 3, minW: 3, minH: 3, hidden: true },
+    { id: 'chat', x: 0, y: 14, w: 4, h: 3, minW: 3, minH: 3, hidden: true },
+    { id: 'terminal', x: 4, y: 14, w: 4, h: 3, minW: 3, minH: 3, hidden: true },
   ]
 }
 

@@ -24,7 +24,6 @@ import { FileTree } from './FileTree'
 import { WorkspaceTabs } from './WorkspaceTabs'
 import { NewTaskForm } from './NewTaskForm'
 import { TaskList } from './TaskList'
-import { TaskControls } from './TaskControls'
 import { ChatPane } from './ChatPane'
 import { Terminal } from './Terminal'
 import { PipelineCard } from './PipelineCard'
@@ -253,11 +252,13 @@ export function WorkspaceView({
     newtask: (
       <NewTaskForm repos={repos} defaultRepoId={config?.defaultRepoId ?? ''} onCreate={onCreate} />
     ),
-    activetask: task ? (
-      <TaskControls
-        task={task}
-        config={config}
+    tasklist: (
+      <TaskList
+        tasks={tasks}
         repos={repos}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        config={config}
         onStart={onStart}
         onResume={onResume}
         onInterrupt={onInterrupt}
@@ -265,10 +266,7 @@ export function WorkspaceView({
         onCancel={onCancel}
         onDelete={onDelete}
       />
-    ) : (
-      <div className={gridStyles.cardEmpty}>No task selected.</div>
     ),
-    tasklist: <TaskList tasks={tasks} repos={repos} selectedId={selectedId} onSelect={onSelect} />,
     files: filesBody,
     viewers: (
       <WorkspaceTabs
