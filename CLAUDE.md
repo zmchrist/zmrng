@@ -16,18 +16,7 @@ backlog ─Start─▶ clarify ─READY─▶ planning ─PLAN_READY─▶ execu
 ```
 A worker that needs a missing subagent emits `ZMRNG_BLOCKED: <reason>` and parks in `blocked` until the operator resumes it. `building` is a legacy single-phase status, retained only for old DB rows/events.
 
-## ⚠️ App-only focus (operator directive) — **SUSPENDED for the public-readiness plan**
-> **OVERRIDE (2026-07-27):** for the duration of
-> `.agents/plans/public-readiness-and-harness-productization.md` this rule is
-> **suspended**. That plan is **web-interface only** — `npm run build` + `npm start`
-> (or `npm run dev`) is the whole story. **Do not run `npm run desktop:build`** to
-> "finish" work, and do not touch `packages/desktop`, the splash, the Tauri Rust
-> code, or sidecar bundling. The shipped `.app` will carry a stale bundled copy of
-> `server/dist` + `web/dist` throughout the plan; that is expected, not a bug. The
-> app-only rule below **resumes** once the plan lands and the app is re-bundled as a
-> separate follow-up.
-
-**(Original rule, kept for reference — resumes after the plan above.)**
+## App-only focus (operator directive)
 **All work in this directory targets the desktop APP (`packages/desktop` Tauri shell),
 not the browser "website".** There is one codebase — `packages/web` is the app's
 frontend and `packages/server` is bundled as the app's sidecar — so every source change

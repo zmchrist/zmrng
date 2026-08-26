@@ -25,6 +25,7 @@ import { useUiState } from './uiState'
 import { hydrateGrid } from './gridLayout'
 import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState, type TerminalTabState } from './windowTabs'
 import type { HandoffPrefill } from './teamHandoff'
+import { isTauriRuntime } from './runtime'
 
 // The former standalone Tasks pane is merged into Workspace; only Workspace and
 // Board remain as top-level modes. The legacy `'tasks'` value is still accepted
@@ -34,6 +35,9 @@ const MODES: ReadonlyArray<{ id: WorkspaceMode; label: string }> = [
   { id: 'board', label: 'Board' },
   { id: 'team', label: 'Team' },
 ]
+
+// Read once — the runtime never changes mid-session.
+const isNativeApp = isTauriRuntime()
 
 export default function App() {
   const [tasks, setTasks] = useState<Record<string, Task>>({})
@@ -194,7 +198,7 @@ export default function App() {
 
   return (
     <div className={styles.app}>
-      <div className={styles.topbar} data-tauri-drag-region>
+      <div className={styles.topbar} data-tauri-drag-region data-native={isNativeApp || undefined}>
         <span className={styles.topbarLeft}>
           <span className={styles.brand}>zmrng</span>
           <nav className={styles.modeTabs} aria-label="Workspace mode">
