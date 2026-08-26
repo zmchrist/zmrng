@@ -21,9 +21,16 @@ export interface ThemeDef {
   bg: string
   dark: AccentPair
   light: AccentPair
+  /**
+   * Optional named backdrop this theme paints behind the app (set as the
+   * `data-backdrop` attribute on the document root by applyTheme). theme.css
+   * gates the cosmic nebula + starfield on `[data-backdrop="cosmos"]`. Themes
+   * without a backdrop show a flat `--bg` field.
+   */
+  backdrop?: string
 }
 
-export const DEFAULT_THEME_ID = 'orange'
+export const DEFAULT_THEME_ID = 'cosmos'
 export const DEFAULT_THEME_MODE: ThemeMode = 'dark'
 
 // Order matches the confirmed catalog: one theme per color, plus black/white/grey.
@@ -35,6 +42,17 @@ export const DEFAULT_THEME_MODE: ThemeMode = 'dark'
 // the dark translucent glass and keep the bg-colored `--accent-ink` legible when
 // painted on an accent fill; light pairs are the same hue family pushed lighter.
 export const THEMES: ThemeDef[] = [
+  {
+    id: 'cosmos',
+    label: 'Cosmos',
+    // The signature look: a deep space-navy field carrying a drifting nebula
+    // wash + starfield (painted by the [data-backdrop="cosmos"] layers in
+    // theme.css), lit by a warm cosmic gold → amber accent run.
+    bg: '#090b13',
+    dark: { accent: '#f2ca8a', accent2: '#f0a86a' },
+    light: { accent: '#f7d9a0', accent2: '#f5c089' },
+    backdrop: 'cosmos',
+  },
   {
     id: 'red',
     label: 'Red',
@@ -199,9 +217,17 @@ export function saveStoredTheme(stored: StoredTheme): void {
 
 /** Applies a theme/mode to the document root by setting the computed CSS vars. */
 export function applyTheme(themeId: string, mode: ThemeMode): void {
-  const vars = buildThemeVars(getTheme(themeId), mode)
+  const theme = getTheme(themeId)
+  const vars = buildThemeVars(theme, mode)
   const root = document.documentElement
   for (const [key, value] of Object.entries(vars)) {
     root.style.setProperty(key, value)
+  }
+  // Toggle the backdrop layer (cosmic nebula + starfield) — theme.css gates it
+  // on [data-backdrop]. Themes without a backdrop show a flat --bg field.
+  if (theme.backdrop) {
+    root.setAttribute('data-backdrop', theme.backdrop)
+  } else {
+    root.removeAttribute('data-backdrop')
   }
 }

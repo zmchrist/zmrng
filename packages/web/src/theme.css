@@ -1,72 +1,74 @@
 :root {
-  /* ---- base ------------------------------------------------------------- */
-  /* Flat electric-orange field. No transparency, no vibrancy, no drifting
-     atmosphere — the whole canvas is a solid orange plane. */
-  --bg: #ff4d00;
+  /* ---- base — "Cosmos": a deep space-navy field ------------------------- */
+  /* The cosmic radial-gradient atmosphere + starfield are painted on the
+     body backdrop layers (below), gated by [data-backdrop="cosmos"]; --bg is
+     the flat field colour underneath so non-cosmos themes still get a solid
+     field when they override it. */
+  --bg: #090b13;
 
-  /* ---- surfaces — translucent near-black-navy panels over the field ----- */
-  --surface: rgba(3, 4, 30, 0.34);
-  --surface-strong: rgba(2, 3, 22, 0.5);
-  --surface-hover: rgba(245, 245, 245, 0.1);
+  /* ---- surfaces — translucent glass panels over the cosmic field -------- */
+  --surface: rgba(14, 18, 32, 0.5);
+  --surface-strong: rgba(16, 20, 34, 0.62);
+  --surface-hover: rgba(255, 255, 255, 0.06);
   /* inset wells for fields / code */
   --well: rgba(0, 0, 0, 0.3);
   --well-strong: rgba(0, 0, 0, 0.46);
 
-  /* blur is dead: panels are solid, not glass */
-  --blur: 0px;
-  --glass: none;
+  /* frosted glass is back: real backdrop blur on every panel */
+  --blur: 20px;
+  --glass: blur(20px) saturate(1.1);
 
-  /* ---- edges / hairlines — hard off-white brutalist rules --------------- */
-  --border: rgba(245, 245, 245, 0.55);
-  --border-strong: rgba(245, 245, 245, 0.92);
-  /* no glass bevel in a flat theme */
-  --hairline: none;
-  --hairline-soft: none;
+  /* ---- edges / hairlines — soft luminous glass rules -------------------- */
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.17);
+  /* subtle top-edge bevel so glass panels catch light */
+  --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --hairline-soft: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
   /* ---- text --------------------------------------------------------------*/
-  --text: #f5f5f5;
-  --text-dim: rgba(245, 245, 245, 0.72);
-  --text-faint: rgba(245, 245, 245, 0.5);
+  --text: #e9e6dd;
+  --text-dim: #9aa0b2;
+  --text-faint: #5f6678;
 
-  /* ---- accent — acid-yellow, the sole accent hue (monotone) ------------- */
-  --accent: #edff45;
-  --accent-2: #edff45;
-  --accent-bright: #edff45;
-  --accent-soft: rgba(237, 255, 69, 0.16);
-  --accent-line: rgba(237, 255, 69, 0.7);
-  --accent-grad: linear-gradient(135deg, #edff45 0%, #d4e800 100%);
-  /* orange ink reads on top of the yellow accent fill */
-  --accent-ink: #ff4d00;
+  /* ---- accent — warm cosmic gold ---------------------------------------- */
+  --accent: #f2ca8a;
+  --accent-2: #f0a86a;
+  --accent-bright: #f7d9a0;
+  --accent-soft: rgba(242, 202, 138, 0.16);
+  --accent-line: rgba(242, 202, 138, 0.7);
+  --accent-grad: linear-gradient(135deg, #f2ca8a 0%, #f0a86a 100%);
+  /* deep space-navy ink reads on top of the gold accent fill */
+  --accent-ink: #20170a;
 
-  /* ---- status hues — kept as functional signal, tuned for flat orange --- */
-  --status-backlog: #cfd3d8;
-  --status-clarify: #ffd166;
-  --status-planning: #7c9bff;
-  --status-executing: #5ec8ff;
-  --status-validating: #50e0c8;
-  --status-blocked: #ff8a3d;
-  --status-review: #c79bff;
-  --status-done: #6ee7a8;
-  --status-failed: #ff5a5a;
+  /* ---- status hues — functional signal, tuned for the cosmos palette ---- */
+  --status-backlog: #5f6678;
+  --status-clarify: #f0c98a;
+  --status-planning: #9fb4ff;
+  --status-executing: #9fb4ff;
+  --status-validating: #7fd0c0;
+  --status-blocked: #f0a86a;
+  --status-review: #c9a0f0;
+  --status-done: #8fd0a4;
+  --status-failed: #f09a8a;
   /* manual terminal board state — shelved, dimmest of the terminal hues */
-  --status-archived: #767c86;
+  --status-archived: #4a5063;
   /* legacy single-phase status (old DB rows) */
-  --status-building: #92b7d6;
+  --status-building: #9fb4ff;
 
   /* ---- actor hues — color-code worker + subagents ------------------------ */
   --actor-main: var(--accent);
-  --actor-frontend-specialist: #7c9bff;
-  --actor-backend-specialist: #5ec8ff;
-  --actor-qa: #ffd166;
-  --actor-code-reviewer: #c79bff;
-  --actor-doc-updater: #50e0c8;
-  --actor-general-purpose: #cfd3d8;
-  --actor-default: rgba(245, 245, 245, 0.7);
+  --actor-frontend-specialist: #9fb4ff;
+  --actor-backend-specialist: #7fb0ff;
+  --actor-qa: #f0c98a;
+  --actor-code-reviewer: #c9a0f0;
+  --actor-doc-updater: #7fd0c0;
+  --actor-general-purpose: #9aa0b2;
+  --actor-default: rgba(233, 230, 221, 0.7);
 
-  /* ---- shape — sharp brutalist corners ----------------------------------- */
-  --radius: 2px;
-  --radius-sm: 2px;
-  --radius-pill: 2px;
+  /* ---- shape — soft rounded glass corners -------------------------------- */
+  --radius: 11px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
 
   /* ---- motion ------------------------------------------------------------ */
   --transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -76,26 +78,24 @@
   --panel-duration: 170ms;
   --panel-ease: cubic-bezier(0.32, 0.72, 0, 1);
 
-  /* ---- elevation — flat, no shadow ---------------------------------------- */
-  --shadow: none;
-  --shadow-soft: none;
+  /* ---- elevation — soft floating-glass depth ----------------------------- */
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.42);
+  --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.3);
   --glow-accent: 0 0 0 1px var(--accent-line);
   --glow-accent-strong: 0 0 0 1px var(--border-strong);
   --glow-operator: 0 0 0 1px var(--border);
   --focus-ring: 0 0 0 1px var(--accent-line);
 
   /* ---- controls ------------------------------------------------------------ */
-  --scrollbar-thumb: rgba(245, 245, 245, 0.25);
-  --scrollbar-thumb-hover: rgba(245, 245, 245, 0.4);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.17);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
 
-  /* ---- typography — uppercase groovy display, clean sans body ------------ */
-  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  /* display face for the brand: flowy 70s-hippie script, all caps + italic */
+  /* ---- typography — clean mono brand, clean sans body -------------------- */
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  /* display face — kept defined for any remaining --font-display consumers */
   --font-display: 'Lobster', cursive;
-  /* dedicated face for the "zmrng" brand span only — chunky groovy display,
-     non-italic (Modak). Kept separate from --font-display so other
-     --font-display consumers are untouched. */
-  --font-brand: 'Modak', cursive;
+  /* brand wordmark: understated monospace, matching the Cosmos screens */
+  --font-brand: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --tracking-wide: 0.16em;
   --tracking-tight: -0.012em;
@@ -121,6 +121,64 @@ body {
   text-rendering: optimizeLegibility;
   font-feature-settings: 'cv11', 'ss01';
   overflow: hidden;
+}
+
+/* App content sits above the fixed cosmic backdrop layers. */
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---- Cosmos backdrop — a drifting nebula + a twinkling starfield --------
+   Two fixed full-viewport layers painted behind the app, only when the active
+   theme requests the cosmos backdrop (set via [data-backdrop] on the root by
+   applyTheme). ::before is the coloured nebula wash; ::after is the star specks.
+   Both are inert (pointer-events:none) and sit at z-index 0, below #root. */
+html[data-backdrop='cosmos'] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 600px at 50% -12%, rgba(255, 224, 180, 0.2), transparent 60%),
+    radial-gradient(720px 540px at 10% 118%, rgba(255, 150, 172, 0.12), transparent 62%),
+    radial-gradient(760px 560px at 112% 6%, rgba(140, 170, 255, 0.14), transparent 60%),
+    radial-gradient(120% 120% at 50% 45%, transparent 52%, rgba(2, 3, 8, 0.62) 100%);
+}
+
+html[data-backdrop='cosmos'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1.6px 1.6px at 22% 14%, #ffffff, transparent),
+    radial-gradient(1.6px 1.6px at 68% 30%, #ffe9c8, transparent),
+    radial-gradient(1.4px 1.4px at 40% 62%, #cdd8ff, transparent),
+    radial-gradient(1.4px 1.4px at 47% 20%, #ffffff, transparent),
+    radial-gradient(1.6px 1.6px at 80% 74%, #ffd9b0, transparent),
+    radial-gradient(1.4px 1.4px at 12% 46%, #cdd8ff, transparent),
+    radial-gradient(1.4px 1.4px at 88% 22%, #ffffff, transparent),
+    radial-gradient(1.4px 1.4px at 30% 84%, #ffe9c8, transparent),
+    radial-gradient(1.5px 1.5px at 60% 50%, #ffffff, transparent),
+    radial-gradient(1.3px 1.3px at 5% 78%, #cdd8ff, transparent),
+    radial-gradient(1.4px 1.4px at 94% 60%, #ffd9b0, transparent),
+    radial-gradient(1.3px 1.3px at 72% 8%, #ffffff, transparent);
+  background-repeat: no-repeat;
+  opacity: 0.55;
+  animation: cosmos-twinkle 4.2s ease-in-out infinite;
+}
+
+@keyframes cosmos-twinkle {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.8;
+  }
 }
 
 button {
