@@ -403,9 +403,11 @@ are operator-owned deployment config (`ZMRNG_WORKSPACE_REPO_PATH`/`_BOT_AGENT`/
   selected TaskList row rather than a standalone card). Grid geometry is in 12-col CELL units
   (screen-width-independent), persisted globally in `GlobalUiState.grid` (server
   round-trips, never validates). The pure reducer + geometry live in
-  `packages/web/src/gridLayout.ts`; interaction modes are reflow|swap|free. Terminal + Chat
-  seed hidden; cards that own a live socket/session (terminal/chat/viewers) stay mounted
-  (`display:none`) while hidden so the session survives hide→show. The retired
+  `packages/web/src/gridLayout.ts`; interaction modes are reflow|swap|free. All 9 cards,
+  including Terminal + Chat, seed visible so their tab-strip `+` affordance is discoverable
+  without opening the Cards show/hide menu first; cards that own a live socket/session
+  (terminal/chat/viewers) stay mounted (`display:none`) while hidden so the session
+  survives hide→show. The retired
   GlobalUiState pane/dock/rail/split fields are kept in the type for back-compat with
   already-persisted docs; `TerminalDock.tsx`/`terminalDock.ts` and `NotesPanel.tsx` remain
   as orphaned modules (no importer, tests still pass).

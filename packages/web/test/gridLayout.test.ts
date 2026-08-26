@@ -203,6 +203,13 @@ describe('defaultCards', () => {
       expect(cards[i].w).toBeGreaterThanOrEqual(cards[i].minW)
     }
   })
+
+  it('seeds every card visible, including Chat and Terminal', () => {
+    const cards = defaultCards()
+    for (const c of cards) {
+      expect(c.hidden).toBeFalsy()
+    }
+  })
 })
 
 describe('hydrateGrid / normalizeGrid', () => {

@@ -57,11 +57,12 @@ export function defaultCards(): GridCardGeo[] {
     { id: 'viewers', x: 3, y: 2, w: 9, h: 6, minW: 4, minH: 3 },
     { id: 'newtask', x: 0, y: 8, w: 4, h: 3, minW: 3, minH: 2 },
     { id: 'tasklist', x: 4, y: 8, w: 8, h: 6, minW: 3, minH: 3 },
-    // Terminal + Chat own a PTY / `/ws/chat` session, so they seed HIDDEN — the
-    // operator shows them from the Cards menu, matching the old "only spawn on
-    // open" behavior. Placed on the bottom row so their absence leaves no hole.
-    { id: 'chat', x: 0, y: 14, w: 4, h: 3, minW: 3, minH: 3, hidden: true },
-    { id: 'terminal', x: 4, y: 14, w: 4, h: 3, minW: 3, minH: 3, hidden: true },
+    // Terminal + Chat start with an empty tab strip (no PTY/`/ws/chat` session
+    // spawns until the operator clicks +), so they seed VISIBLE like every
+    // other card — the `+` add-tab affordance needs to be discoverable without
+    // digging into the Cards show/hide menu first.
+    { id: 'chat', x: 0, y: 14, w: 4, h: 3, minW: 3, minH: 3 },
+    { id: 'terminal', x: 4, y: 14, w: 4, h: 3, minW: 3, minH: 3 },
   ]
 }
 
