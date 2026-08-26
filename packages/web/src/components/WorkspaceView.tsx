@@ -32,8 +32,8 @@ import { ReviewQueueCard } from './ReviewQueueCard'
 import { WorkspaceGrid } from './WorkspaceGrid'
 import { BottomNav } from './BottomNav'
 import { LIVE_STATUSES } from '../status'
-import { hydrateLayout, openFile, pruneFileTabs } from '../workspaceLayout'
-import { showCard } from '../gridLayout'
+import { hydrateLayout, openFile, openPanel, pruneFileTabs } from '../workspaceLayout'
+import { showCard, toggleMinimize } from '../gridLayout'
 import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
 import type { HandoffPrefill } from '../teamHandoff'
 
@@ -151,6 +151,10 @@ export function WorkspaceView({
   const [hydratedFor, setHydratedFor] = useState<string | null>(null)
   const [prunedFor, setPrunedFor] = useState<Loaded | null>(null)
   const [agents, setAgents] = useState<AgentSummary[]>([])
+  // Set by `onSelectFromList` when a TaskList click targets a task other than
+  // the currently loaded one — consumed once that task's layout hydrates below,
+  // so clicking a task row always brings its Worker Log tab to the front.
+  const [pendingLogFocus, setPendingLogFocus] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -196,7 +200,10 @@ export function WorkspaceView({
     setPrunedFor(null)
     const stored = taskId ? perTask[taskId]?.layout : undefined
     const legacy = taskId ? perTask[taskId]?.activePath : undefined
-    setLayout(hydrateLayout(stored, legacy ?? null))
+    const hydrated = hydrateLayout(stored, legacy ?? null)
+    const focusLog = taskId !== null && pendingLogFocus === taskId
+    if (focusLog) setPendingLogFocus(null)
+    setLayout(focusLog ? openPanel(hydrated, 'log') : hydrated)
   }
 
   const current = loaded && loaded.id === treeKey ? loaded.tree : null
@@ -232,6 +239,29 @@ export function WorkspaceView({
   )
 
   const selectedPath = activeFilePath(layout)
+
+  // TaskList-only click wiring: pull the Worker Log tab to the front and reveal
+  // the Viewers card (un-hiding it if hidden/minimized) so the operator lands on
+  // the worker chat. Selecting the already-loaded task's own row can act on the
+  // current layout right away; selecting a different task defers the tab-focus
+  // to `pendingLogFocusRef` above, since that task's layout only hydrates once
+  // the parent re-renders with the new selection.
+  const onSelectFromList = useCallback(
+    (id: string) => {
+      if (id === taskId) {
+        applyLayout(openPanel(layout, 'log'))
+      } else {
+        setPendingLogFocus(id)
+      }
+      const viewers = grid.cards.find((c) => c.id === 'viewers')
+      let nextGrid = grid
+      if (viewers?.hidden) nextGrid = showCard(nextGrid, 'viewers')
+      if (viewers?.minimized) nextGrid = toggleMinimize(nextGrid, 'viewers')
+      if (nextGrid !== grid) onGridChange(nextGrid)
+      onSelect(id)
+    },
+    [taskId, layout, grid, onGridChange, onSelect, applyLayout],
+  )
 
   const filesBody: ReactNode = (
     <>
@@ -281,7 +311,7 @@ export function WorkspaceView({
         tasks={tasks}
         repos={repos}
         selectedId={selectedId}
-        onSelect={onSelect}
+        onSelect={onSelectFromList}
         config={config}
         onStart={onStart}
         onResume={onResume}
