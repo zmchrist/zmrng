@@ -11,13 +11,20 @@ import {
 } from '../src/themes'
 
 describe('THEMES catalog', () => {
-  it('has 11 themes: one per color plus black/white/grey', () => {
-    expect(THEMES).toHaveLength(11)
+  it('has 12 themes: cosmos + one per color plus black/white/grey', () => {
+    expect(THEMES).toHaveLength(12)
     const ids = THEMES.map((t) => t.id)
-    expect(new Set(ids).size).toBe(11)
-    for (const id of ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'teal', 'black', 'white', 'grey']) {
+    expect(new Set(ids).size).toBe(12)
+    for (const id of ['cosmos', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'teal', 'black', 'white', 'grey']) {
       expect(ids).toContain(id)
     }
+  })
+
+  it('cosmos is the default theme and requests the cosmos backdrop', () => {
+    expect(DEFAULT_THEME_ID).toBe('cosmos')
+    expect(getTheme('cosmos').backdrop).toBe('cosmos')
+    // non-cosmos themes have no backdrop (flat field)
+    expect(getTheme('orange').backdrop).toBeUndefined()
   })
 
   it('every theme defines a dark and light accent pair', () => {
@@ -85,7 +92,7 @@ describe('theme persistence (localStorage)', () => {
     localStorage.clear()
   })
 
-  it('defaults to orange/dark when nothing is stored', () => {
+  it('defaults to the default theme/dark when nothing is stored', () => {
     expect(loadStoredTheme()).toEqual({ themeId: DEFAULT_THEME_ID, mode: DEFAULT_THEME_MODE })
   })
 
