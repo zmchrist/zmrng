@@ -73,16 +73,12 @@
 
 .brand {
   font-family: var(--font-brand);
-  font-size: 22px;
+  font-size: 14px;
   line-height: 30px;
-  font-weight: 400;
+  font-weight: 600;
   font-style: normal;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  background: linear-gradient(120deg, var(--text) 28%, var(--accent-bright));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  letter-spacing: 0.05em;
+  text-transform: none;
   color: var(--text);
 }
 
