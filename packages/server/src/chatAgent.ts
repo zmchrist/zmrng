@@ -1,4 +1,4 @@
-import { config } from './config.js'
+import { config, repoById } from './config.js'
 import { styleDirective } from './phases.js'
 import {
   defaultRunnerFactory,
@@ -66,6 +66,7 @@ export function parseChatClientMsg(raw: string): ChatClientMsg | undefined {
         model: obj.model,
         effort: obj.effort as EffortLevel,
         style: obj.style as CaveStyle,
+        ...(typeof obj.repoId === 'string' ? { repoId: obj.repoId } : {}),
       }
     }
     return undefined
@@ -92,12 +93,18 @@ export interface ChatConfig {
   model: string
   effort: EffortLevel
   style: CaveStyle
+  /** Picks which registered repo the session's cwd is rooted at. A missing or
+   *  unresolvable id falls back to `config.projectsDir` ("Projects root"). */
+  repoId?: string
 }
 
 /**
  * Owns the set of live chat `Runner`s. Each `create()` spawns one conversational
- * `claude` rooted at `config.projectsDir`; `killAll()` tears them all down on
- * shutdown. Mirrors `TerminalManager`'s factory seam so tests never spawn a real
+ * `claude` rooted at the chosen repo's path (`cfg.repoId`, resolved via
+ * `repoById`), or `config.projectsDir` when `repoId` is absent/unresolvable
+ * ("Projects root", the default). No worktree is created — the session just
+ * runs at the repo root; `killAll()` tears every session down on shutdown.
+ * Mirrors `TerminalManager`'s factory seam so tests never spawn a real
  * `claude`. The OAuth env-strip already lives inside `Runner`'s constructor, so
  * (unlike `TerminalManager`) this manager does not repeat it.
  */
@@ -108,11 +115,12 @@ export class ChatManager {
 
   /** Spawn one chat session with the given controls and track it. */
   create(cfg: ChatConfig, cb: RunnerCallbacks): RunnerLike {
+    const root = (cfg.repoId ? repoById(cfg.repoId)?.path : undefined) ?? config.projectsDir
     const opts: SpawnOptions = {
-      cwd: config.projectsDir,
+      cwd: root,
       model: cfg.model,
       effort: cfg.effort,
-      systemPrompt: chatSystemPrompt(cfg.style, config.projectsDir),
+      systemPrompt: chatSystemPrompt(cfg.style, root),
     }
     const session = this.factory(opts, {
       ...cb,
