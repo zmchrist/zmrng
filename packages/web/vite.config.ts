@@ -3,17 +3,12 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  // The voice ML stack (transformers.js + kokoro-js) bundles onnxruntime-web,
-  // which loads its WASM runtime via a dynamic import. Vite's dep pre-bundler
-  // rewrites those imports into `.vite/deps`, which 404s ORT's wasm glue and
-  // breaks model init — so exclude the whole stack from optimization. The
-  // workers additionally pin ORT's `wasmPaths` to a served CDN URL (see
-  // src/voice/*Worker.ts).
-  optimizeDeps: {
-    exclude: ['@huggingface/transformers', 'onnxruntime-web', 'kokoro-js'],
-  },
-  // Emit the STT/TTS Web Workers as ES modules so their dynamic ORT imports and
-  // `import.meta` (used by kokoro-js) work in both dev and the production build.
+  // Emit the STT/TTS Web Workers as ES modules so their runtime `import.meta`
+  // and dynamic `import()` (the voice ML stack is loaded from a CDN at runtime —
+  // see src/voice/*Worker.ts) work in both dev and the production build. The ML
+  // libs are intentionally NOT bundled by Vite/Rolldown: bundling transformers.js
+  // makes its internal CJS `require('onnxruntime-web/wasm')` execute in the ES
+  // worker, which has no `require`. Loading from jsDelivr `/+esm` avoids that.
   worker: {
     format: 'es',
   },
