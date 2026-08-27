@@ -293,18 +293,17 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
 
   return (
     <div className={styles.team}>
-      <div className={styles.head}>
-        <span className={styles.title}>Team</span>
+      <div className={styles.teamHead}>
         <span className={styles.you}>
           <span
             className={`${styles.dot} ${connected ? styles.dotOn : styles.dotOff}`}
             aria-hidden="true"
           />
           {connected ? 'connected' : 'connecting…'} as <strong>{handle}</strong>
+          <button type="button" className={styles.leaveBtn} onClick={onLeave} title="Change name">
+            change name
+          </button>
         </span>
-        <button type="button" className={styles.leaveBtn} onClick={onLeave} title="Change name">
-          change name
-        </button>
       </div>
 
       <div className={styles.body}>

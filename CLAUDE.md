@@ -16,7 +16,7 @@ backlog ─Start─▶ clarify ─READY─▶ planning ─PLAN_READY─▶ execu
 ```
 A worker that needs a missing subagent emits `ZMRNG_BLOCKED: <reason>` and parks in `blocked` until the operator resumes it. `building` is a legacy single-phase status, retained only for old DB rows/events.
 
-## App-only focus (operator directive)
+## ⚠️ App-only focus (operator directive)
 **All work in this directory targets the desktop APP (`packages/desktop` Tauri shell),
 not the browser "website".** There is one codebase — `packages/web` is the app's
 frontend and `packages/server` is bundled as the app's sidecar — so every source change
