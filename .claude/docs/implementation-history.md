@@ -106,3 +106,28 @@ Third slice (decision D6; the `repo_id` use from D7; PR #89, closes #75): the pl
 
 ## Team workspace T4 — @mention-triggered shared team agent (2026-08-25)
 Fourth slice (decisions D8/D4; PR #90, closes #76): the shared team agent in the channels, server-only (agent-kind rendering already shipped in T2). New `agentResponder.ts` holds pure seams `detectMention(body, botHandle)` (word-boundary anchored — `@agent` triggers, `@agentsmith`/`foo@agent.com` do not), `botAuthorFromHandle`, `buildAgentMessages` (last-N scrollback → agent chat turns, human posts prefixed with author, the bot's own prior posts mapped to `assistant`), `parseAgentReply` (tolerant `reply`/`content`/`text`/`message` extraction), `resolveBotAgent`, plus the injectable `AgentResponder` class. **ONE shared instance** (D8/D4) is constructed once alongside `ChannelManager` in `index.ts` — every channel's mentions route to the one configured bot `AgentTarget` (the existing U4 `fetch(agent.url)` adapter); the persistent memory is a property of the remote Hermes endpoint, not per-channel. In the `/ws/workspace` message handler, after the human message persists as `kind='human'`, a mention fires `handleMention` **async, fire-and-forget** (never blocks or crashes the socket): it best-effort `git pull --ff-only`s a read-only reference checkout (skipped gracefully when unset; never throws into the handler), gathers the last N messages (default 20) of THAT channel, relays them to the bot endpoint, and posts the reply back as a server-controlled **`kind='agent'`** message (a human client can never forge `kind=agent`). The agent talks and plans only — it never creates worktrees and never executes code (D1). The fetch is bounded by an `AbortController` deadline (default 60s, `ZMRNG_WORKSPACE_AGENT_TIMEOUT_MS`) so a hung upstream can't leak a request per mention; every failure path (network error, non-OK status, empty reply, abort) is logged structurally with no agent post. New server-only config keys: `ZMRNG_WORKSPACE_REPO_PATH` (`workspaceRepoPath`, `''` → pull skipped), `ZMRNG_WORKSPACE_BOT_AGENT` (`workspaceBotAgentId`, `''` → first configured agent), `ZMRNG_WORKSPACE_BOT_HANDLE` (`workspaceBotHandle`, default `@agent`), `ZMRNG_WORKSPACE_SCROLLBACK` (`workspaceScrollback`, 20), `ZMRNG_WORKSPACE_AGENT_TIMEOUT_MS` (`workspaceAgentTimeoutMs`, 60000). No agents configured → responder is `undefined` and mentions are a graceful no-op. The live checkout path and which live `AgentTarget` is the bot are orchestrator/operator-owned deployment config (built against config keys, tested with a mocked fetch + injected pull — no network hit, no hardcoded URL). Deferred to #92: bound @mention concurrency (serialize/queue the shared-memory agent's turns).
+
+## Local Voice Chat — Phase 1 (2026-08-27)
+Hands-free spoken conversation with the SAME standalone `/ws/chat` agent the text Chat
+pane already drives — a pure frontend I/O shell layered on the existing socket, ZERO
+server changes, ZERO `types.ts` change. Reuses `chatProtocol.ts`/`chatThread.ts`
+unchanged. New pure modules `voiceSentences.ts` (buffers streamed `partial` deltas into
+whole sentences for TTS) and `voiceTurn.ts` (`idle|listening|transcribing|thinking|
+speaking` state machine — freeze rule ignores `speechEnd` while speaking, plus
+barge-in/stop interrupt semantics), both unit-tested. New `voice/` seam:
+`backend.ts` (`VoiceBackend` interface), `localBackend.ts` (`LocalVoiceBackend` —
+transformers.js Whisper STT + kokoro-js Kokoro-82M TTS, each in its own Web Worker,
+WebGPU→WASM fallback; not unit-tested, same ML/worker-glue policy as `Terminal.tsx`),
+`sttWorker.ts`/`ttsWorker.ts` + `workerProtocol.ts` (shared worker message types),
+`player.ts` (`PcmPlayer`, Web-Audio PCM playback with `stop()` for barge-in). New
+component `VoiceView` (`VoiceView.tsx`/`VoiceView.module.css`) owns one `/ws/chat`
+WebSocket per enabled session (own-socket pattern mirroring `ChatPane`/`Terminal`) plus
+the mic VAD (`@ricky0123/vad-web` MicVAD) and the ML backend behind the seam.
+`WorkspaceView.tsx` gained a 5th Worker-pane tab — `'voice'` added to the `PaneTab`
+union/`PANE_TABS` — rendering `<VoiceView>` as a stay-mounted `display:none` panel
+alongside Terminal/Chat so an enabled session survives a pane-tab switch; self-contained,
+no persisted tabs, no `GlobalUiState` change. New deps (`packages/web` only):
+`@huggingface/transformers`, `kokoro-js`, `@ricky0123/vad-web`. **Phase 2 (deferred):**
+vendoring the ML models + ORT WASM into the Tauri `.app` (`web/dist`), a
+WebGPU-in-WKWebView investigation, and `desktop:build` support — until then Local Voice
+Chat only works in the browser dev/build target, not the shipped desktop app.
