@@ -3,6 +3,7 @@ import styles from './TaskList.module.css'
 import ctrl from './TaskActions.module.css'
 import type { RepoTarget, ServerConfig, Task } from '../types'
 import { STATUS_LABEL, statusColor } from '../status'
+import { openExternal } from '../openExternal'
 
 /** Format an integer with thousands separators (locale-independent grouping). */
 function fmt(n: number): string {
@@ -121,9 +122,13 @@ export function TaskList({
                       </button>
                     )}
                     {t.status === 'review' && t.prUrl && (
-                      <a className={ctrl.linkBtn} href={t.prUrl} target="_blank" rel="noreferrer">
+                      <button
+                        type="button"
+                        className={ctrl.linkBtn}
+                        onClick={() => openExternal(t.prUrl!)}
+                      >
                         Open PR ↗
-                      </a>
+                      </button>
                     )}
                     {t.status === 'review' && (
                       <button

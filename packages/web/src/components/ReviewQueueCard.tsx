@@ -2,6 +2,7 @@ import styles from './DashboardCards.module.css'
 import type { RepoTarget, Task } from '../types'
 import { reviewQueue } from '../dashboardData'
 import { STATUS_LABEL, statusColor } from '../status'
+import { openExternal } from '../openExternal'
 
 interface Props {
   tasks: Task[]
@@ -38,9 +39,9 @@ export function ReviewQueueCard({ tasks, repos, onSelect }: Props) {
             {STATUS_LABEL[r.status]}
           </span>
           {r.prUrl && (
-            <a className={styles.rqOpen} href={r.prUrl} target="_blank" rel="noreferrer">
+            <button type="button" className={styles.rqOpen} onClick={() => openExternal(r.prUrl!)}>
               Open ↗
-            </a>
+            </button>
           )}
         </div>
       ))}
