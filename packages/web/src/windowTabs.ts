@@ -77,7 +77,7 @@ export function addChatTab(
   state: TabsState<ChatTabState>,
   id: string,
   label: string,
-  defaults: { model: ModelAlias; effort: EffortLevel; style: CaveStyle },
+  defaults: { model: ModelAlias; effort: EffortLevel; style: CaveStyle; repoId: string },
 ): TabsState<ChatTabState> {
   return appendTab(state, { id, label, ...defaults, launched: false })
 }
@@ -87,11 +87,11 @@ export function launchChatTab(state: TabsState<ChatTabState>, id: string): TabsS
   return { ...state, tabs: state.tabs.map((t) => (t.id === id ? { ...t, launched: true } : t)) }
 }
 
-/** Update a not-yet-launched chat tab's picked model/effort/style. */
+/** Update a not-yet-launched chat tab's picked model/effort/style/repo. */
 export function setChatTabConfig(
   state: TabsState<ChatTabState>,
   id: string,
-  patch: Partial<Pick<ChatTabState, 'model' | 'effort' | 'style'>>,
+  patch: Partial<Pick<ChatTabState, 'model' | 'effort' | 'style' | 'repoId'>>,
 ): TabsState<ChatTabState> {
   return { ...state, tabs: state.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) }
 }
@@ -121,5 +121,10 @@ export function hydrateChatTabs(stored?: TabsState<ChatTabState> | null): TabsSt
   if (stored && Array.isArray(stored.tabs) && stored.tabs.length > 0) {
     return repairActiveId({ tabs: stored.tabs, activeId: stored.activeId ?? null })
   }
-  return addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'caveman-full' })
+  return addChatTab(emptyTabs(), 'chat-1', 'Chat 1', {
+    model: 'sonnet',
+    effort: 'medium',
+    style: 'caveman-full',
+    repoId: '',
+  })
 }

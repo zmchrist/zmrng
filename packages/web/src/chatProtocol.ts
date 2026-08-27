@@ -5,9 +5,15 @@
 
 import type { Attachment, CaveStyle, ChatServerMsg, EffortLevel } from './types'
 
-/** Encode a client `start` frame — (re)spawn a session with the chosen controls. */
-export function encodeStart(model: string, effort: EffortLevel, style: CaveStyle): string {
-  return JSON.stringify({ type: 'start', model, effort, style })
+/**
+ * Encode a client `start` frame — (re)spawn a session with the chosen controls.
+ * `repoId` picks which registered repo the session's cwd is rooted at; omit it
+ * (or pass `''`) for "Projects root" (`config.projectsDir`, the default).
+ */
+export function encodeStart(model: string, effort: EffortLevel, style: CaveStyle, repoId?: string): string {
+  return repoId
+    ? JSON.stringify({ type: 'start', model, effort, style, repoId })
+    : JSON.stringify({ type: 'start', model, effort, style })
 }
 
 /** Encode a client `input` frame (one operator turn -> server), optionally with attachments. */
