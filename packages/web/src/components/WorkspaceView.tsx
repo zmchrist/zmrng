@@ -337,7 +337,7 @@ export function WorkspaceView({
         onSelectTask={onSelect}
       />
     ),
-    chat: <ChatCard tabs={chatTabs} onTabsChange={onChatTabsChange} />,
+    chat: <ChatCard tabs={chatTabs} onTabsChange={onChatTabsChange} repos={repos} />,
     terminal: <TerminalCard tabs={terminalTabs} onTabsChange={onTerminalTabsChange} />,
   }
 

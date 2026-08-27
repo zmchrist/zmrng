@@ -16,6 +16,25 @@ describe('client encoders', () => {
     })
   })
 
+  it('encodeStart omits repoId when absent — byte-identical to the pre-feature frame', () => {
+    expect(encodeStart('sonnet', 'medium', 'caveman-full')).toBe(
+      JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full' }),
+    )
+    expect(encodeStart('sonnet', 'medium', 'caveman-full', '')).toBe(
+      JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full' }),
+    )
+  })
+
+  it('encodeStart includes repoId when a repo is chosen', () => {
+    expect(JSON.parse(encodeStart('sonnet', 'medium', 'caveman-full', 'repo-a'))).toEqual({
+      type: 'start',
+      model: 'sonnet',
+      effort: 'medium',
+      style: 'caveman-full',
+      repoId: 'repo-a',
+    })
+  })
+
   it('encodeInput produces an input frame carrying the text', () => {
     expect(JSON.parse(encodeInput('hello agent'))).toEqual({ type: 'input', text: 'hello agent' })
   })
