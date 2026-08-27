@@ -1,19 +1,21 @@
+/* The Team surface fills App's mode-content region (right of the persistent
+   activity rail): a compact handle header over a sidebar (channels + roster) |
+   chat-pane split — no outer padding/gap. */
 .team {
-  grid-column: 1 / -1;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 20px 24px;
-  min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   color: var(--text);
   font-family: var(--font);
 }
 
-/* ---- empty / join states ---- */
+/* ---- empty / join states — centered within the card body ---- */
 
 .empty,
 .join {
+  margin: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -103,6 +105,20 @@
 
 /* ---- connected header ---- */
 
+/* Compact team header strip inside the mode card (below App's persistent
+   title bar): shows the handle + change-name, seamless border-bottom. */
+.teamHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  background: var(--surface-strong);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border-bottom: 1px solid var(--border);
+}
+
 .head {
   display: flex;
   align-items: center;
@@ -134,23 +150,29 @@
 .body {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 220px 1fr;
-  gap: 16px;
+  display: flex;
 }
 
 .rail {
+  width: 224px;
+  flex: none;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 12px 12px;
+  background: var(--surface);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border-right: 1px solid var(--border);
 }
 
 .sectionHead {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  padding: 10px 0 6px;
+  padding: 10px 2px 6px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -265,15 +287,14 @@
 }
 
 .channelPane {
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  backdrop-filter: var(--glass);
-  -webkit-backdrop-filter: var(--glass);
+  background: var(--well);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   overflow: hidden;
 }
 

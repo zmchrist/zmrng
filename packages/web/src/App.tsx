@@ -14,7 +14,6 @@ import type {
   RepoTarget,
   WorkspaceMode,
   Attachment,
-  GridState,
 } from './types'
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
@@ -22,16 +21,13 @@ import { Board } from './components/Board'
 import { TeamView } from './components/TeamView'
 import { SettingsModal } from './components/SettingsModal'
 import { useUiState } from './uiState'
-import { hydrateGrid } from './gridLayout'
 import type { HandoffPrefill } from './teamHandoff'
 
-// The former standalone Tasks pane is merged into Workspace; only Workspace and
-// Board remain as top-level modes. The legacy `'tasks'` value is still accepted
-// from persisted UI state and migrated to `'workspace'` below.
-const MODES: ReadonlyArray<{ id: WorkspaceMode; label: string }> = [
-  { id: 'workspace', label: 'Workspace' },
-  { id: 'board', label: 'Board' },
-  { id: 'team', label: 'Team' },
+/** Activity-rail nav — persistent across every mode; ⚙ opens Settings. */
+const RAIL: ReadonlyArray<{ id: WorkspaceMode; glyph: string; label: string }> = [
+  { id: 'workspace', glyph: '≣', label: 'Workspace' },
+  { id: 'board', glyph: '⑃', label: 'Board' },
+  { id: 'team', glyph: '▤', label: 'Team' },
 ]
 
 export default function App() {
@@ -46,14 +42,9 @@ export default function App() {
   const storedMode = ui.state.global.mode ?? 'workspace'
   const mode: WorkspaceMode = storedMode === 'tasks' ? 'workspace' : storedMode
   const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
-  // The Workspace dashboard-grid state. Hydrated (seeded on first load / repaired
-  // if malformed) from the persisted GlobalUiState.grid, round-tripped on change.
-  const grid = useMemo(() => hydrateGrid(ui.state.global.grid), [ui.state.global.grid])
-  const setGrid = useCallback((next: GridState) => ui.patchGlobal({ grid: next }), [ui])
   // Settings is an ephemeral modal overlay — never persisted.
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // One-shot "Send to my zmrng" pre-fill from the Team tab (T3). A fresh object
-  // per send re-seeds NewTaskForm; cleared identity is fine (seed is idempotent).
+  // One-shot "Send to my zmrng" pre-fill from the Team tab (T3).
   const [handoffPrefill, setHandoffPrefill] = useState<HandoffPrefill | null>(null)
   const selectedIdRef = useRef<string | null>(null)
 
@@ -162,9 +153,7 @@ export default function App() {
     void api.archive(id)
   }, [])
 
-  // Team tab handoff: switch to Workspace and seed the local new-task box with a
-  // rich brief (title/body + provenance) and a SUGGESTED repo. The human still
-  // confirms the repo against their own registry (no VPS repo id auto-bound).
+  // Team tab handoff: switch to Workspace and seed the local new-task box.
   const onSendToZmrng = useCallback(
     (prefill: HandoffPrefill) => {
       setMode('workspace')
@@ -172,82 +161,132 @@ export default function App() {
     },
     [setMode],
   )
-  // Drop the one-shot prefill once NewTaskForm has seeded from it, so a later
-  // hide/show of the new-task card (which remounts the form and resets its local
-  // seeded marker) can't re-seed an already-sent handoff.
   const onPrefillConsumed = useCallback(() => setHandoffPrefill(null), [])
 
   const selected = selectedId ? tasks[selectedId] : undefined
 
+  // ---- persistent title-bar breadcrumb + status-bar metrics ----
+  const breadcrumb =
+    mode === 'workspace'
+      ? (selected?.title ?? 'No task selected')
+      : mode === 'board'
+        ? 'Board'
+        : 'Team'
+  const lanes = cfg?.maxLanes ?? 0
+  const running = sorted.filter((t) => t.status === 'executing').length
+  const queued = sorted.filter((t) => t.queued).length
+  const branch = selected?.branch ?? 'main'
+  const modelLabel = selected ? `${selected.model} / ${selected.effort}` : 'idle'
+
   return (
     <div className={styles.app}>
-      <div className={styles.topbar} data-tauri-drag-region>
-        <span className={styles.topbarLeft}>
-          <span className={styles.brand}>zmrng</span>
-          <nav className={styles.modeTabs} aria-label="Workspace mode">
-            {MODES.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                className={`${styles.modeTab} ${mode === m.id ? styles.modeTabActive : ''}`}
-                aria-pressed={mode === m.id}
-                onClick={() => setMode(m.id)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </nav>
-        </span>
-      </div>
       <AuthBanner />
 
-      <div style={{ display: mode === 'board' ? 'contents' : 'none' }}>
-        <Board
-          tasks={sorted}
-          repos={repos}
-          onSelectTask={onBoardSelectTask}
-          onArchive={onBoardArchive}
-        />
-      </div>
+      <div className={styles.frame}>
+        {/* title bar (persistent) */}
+        <div className={styles.tbar} data-tauri-drag-region>
+          <span className={styles.tbLights} aria-hidden="true">
+            <span className={styles.tbLightR} />
+            <span className={styles.tbLightY} />
+            <span className={styles.tbLightG} />
+          </span>
+          <span className={styles.tbBrand}>zmrng</span>
+          <span className={styles.tbSep}>›</span>
+          <span className={styles.tbCrumb}>{breadcrumb}</span>
+          <span className={`${styles.tbConn} ${connected ? '' : styles.tbConnDown}`}>
+            <span className={styles.tbConnDot} />
+            {connected ? 'connected' : 'offline'}
+          </span>
+        </div>
 
-      <div style={{ display: mode === 'team' ? 'contents' : 'none' }}>
-        <TeamView
-          workspaceUrl={cfg?.workspaceUrl ?? ''}
-          repos={repos}
-          onSendToZmrng={onSendToZmrng}
-        />
-      </div>
+        {/* body: persistent activity rail | swappable mode content */}
+        <div className={styles.frameBody}>
+          <nav className={styles.arail} aria-label="Navigation">
+            {RAIL.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className={`${styles.arailBtn} ${mode === r.id ? styles.arailActive : ''}`}
+                aria-pressed={mode === r.id}
+                aria-label={r.label}
+                title={r.label}
+                onClick={() => setMode(r.id)}
+              >
+                {r.glyph}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`${styles.arailBtn} ${styles.arailBottom}`}
+              aria-label="Settings"
+              title="Settings"
+              onClick={() => setSettingsOpen((v) => !v)}
+            >
+              ⚙
+            </button>
+          </nav>
 
-      <div style={{ display: mode === 'workspace' ? 'contents' : 'none' }}>
-        <WorkspaceView
-          task={selected}
-          events={events}
-          live={live}
-          perTask={ui.state.perTask}
-          onPerTaskChange={ui.patchTask}
-          tasks={sorted}
-          repos={repos}
-          config={cfg}
-          selectedId={selectedId}
-          grid={grid}
-          onGridChange={setGrid}
-          settingsOpen={settingsOpen}
-          onSettingsToggle={() => setSettingsOpen((v) => !v)}
-          connected={connected}
-          onSelect={select}
-          onCreate={onCreate}
-          prefill={handoffPrefill}
-          onPrefillConsumed={onPrefillConsumed}
-          onStart={() => (selected ? api.start(selected.id) : Promise.resolve())}
-          onMessage={(text, attachments) =>
-            selected ? api.message(selected.id, text, attachments) : Promise.resolve()
-          }
-          onResume={() => (selected ? api.resume(selected.id) : Promise.resolve())}
-          onInterrupt={() => (selected ? api.interrupt(selected.id) : Promise.resolve())}
-          onDone={() => (selected ? api.done(selected.id) : Promise.resolve())}
-          onCancel={() => (selected ? api.cancel(selected.id) : Promise.resolve())}
-          onDelete={() => (selected ? api.deleteTask(selected.id) : Promise.resolve())}
-        />
+          <div
+            className={styles.modeContent}
+            style={{ display: mode === 'workspace' ? 'flex' : 'none' }}
+          >
+            <WorkspaceView
+              task={selected}
+              events={events}
+              live={live}
+              tasks={sorted}
+              repos={repos}
+              config={cfg}
+              selectedId={selectedId}
+              onSelect={select}
+              onCreate={onCreate}
+              prefill={handoffPrefill}
+              onPrefillConsumed={onPrefillConsumed}
+              onStart={() => (selected ? api.start(selected.id) : Promise.resolve())}
+              onMessage={(text, attachments) =>
+                selected ? api.message(selected.id, text, attachments) : Promise.resolve()
+              }
+              onResume={() => (selected ? api.resume(selected.id) : Promise.resolve())}
+              onInterrupt={() => (selected ? api.interrupt(selected.id) : Promise.resolve())}
+              onDone={() => (selected ? api.done(selected.id) : Promise.resolve())}
+              onCancel={() => (selected ? api.cancel(selected.id) : Promise.resolve())}
+              onDelete={() => (selected ? api.deleteTask(selected.id) : Promise.resolve())}
+            />
+          </div>
+
+          <div
+            className={styles.modeContent}
+            style={{ display: mode === 'board' ? 'flex' : 'none' }}
+          >
+            <Board
+              tasks={sorted}
+              repos={repos}
+              onSelectTask={onBoardSelectTask}
+              onArchive={onBoardArchive}
+            />
+          </div>
+
+          <div
+            className={styles.modeContent}
+            style={{ display: mode === 'team' ? 'flex' : 'none' }}
+          >
+            <TeamView
+              workspaceUrl={cfg?.workspaceUrl ?? ''}
+              repos={repos}
+              onSendToZmrng={onSendToZmrng}
+            />
+          </div>
+        </div>
+
+        {/* status bar (persistent) */}
+        <div className={styles.sbar}>
+          <span className={styles.sbBranch}>{branch}</span>
+          <span className={styles.sbItem}>
+            · {running}/{lanes} lanes{queued > 0 ? ` · ${queued} queued` : ''}
+          </span>
+          <span className={styles.sbSpacer} />
+          <span className={styles.sbItem}>{modelLabel}</span>
+        </div>
       </div>
 
       <SettingsModal
