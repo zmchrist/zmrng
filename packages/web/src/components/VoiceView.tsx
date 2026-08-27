@@ -40,6 +40,17 @@ const STYLE_OPTIONS: readonly CaveStyle[] = [
 /** The VAD emits 16 kHz mono audio (its fixed output rate). */
 const VAD_SAMPLE_RATE = 16000
 
+// `@ricky0123/vad-web` is the THIRD onnxruntime-web instance in this feature
+// (after whisper's transformers.js and kokoro's nested transformers.js). It
+// bundles its own ORT for Silero VAD, so Vite/Rolldown pre-bundles its wasm into
+// `.vite/deps`, which 404s. Point its worklet + silero `.onnx` (`baseAssetPath`)
+// and its ORT wasm (`onnxWASMBasePath`) at a CDN, pinned to the exact installed
+// versions — vad-web 0.0.30 and the onnxruntime-web 1.29.0 it depends on. This
+// version exposes no `ortConfig` hook, so single-threading relies on ORT's
+// `!crossOriginIsolated` auto-clamp (verified). Phase 2 vendors these locally.
+const VAD_ASSET_CDN = 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.30/dist/'
+const VAD_ORT_WASM_CDN = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/'
+
 /** Human-readable label for the current turn state (status line). */
 const TURN_LABEL: Record<VoiceState, string> = {
   idle: 'Off',
@@ -218,7 +229,12 @@ export function VoiceView({ repos, config }: Props) {
         setLoadStatus('Requesting microphone…')
         const { MicVAD } = await import('@ricky0123/vad-web')
         if (cancelled) return
-        const vad = await MicVAD.new({ onSpeechStart, onSpeechEnd })
+        const vad = await MicVAD.new({
+          onSpeechStart,
+          onSpeechEnd,
+          baseAssetPath: VAD_ASSET_CDN,
+          onnxWASMBasePath: VAD_ORT_WASM_CDN,
+        })
         if (cancelled) {
           void vad.destroy()
           return

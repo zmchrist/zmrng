@@ -1,21 +1,28 @@
 // TTS Web Worker: runs Kokoro-82M (kokoro-js, ONNX) off the UI thread. Tries
 // WebGPU first, falls back to WASM. Not unit-tested (real ONNX inference + worker
 // glue); isolated behind LocalVoiceBackend.
-import { KokoroTTS, env as kokoroEnv } from 'kokoro-js'
+import type { KokoroTTS } from 'kokoro-js'
 import type { ProgressInfo } from '@huggingface/transformers'
 import type { TtsRequest, TtsResponse } from './workerProtocol'
 
-const TTS_MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX'
-const DEFAULT_VOICE = 'af_heart'
+// Phase 1 loads kokoro-js from a CDN at runtime (a `/* @vite-ignore */` dynamic
+// import) to sidestep Rolldown's CJS-external interop — same reason as the STT
+// worker. The jsDelivr `/+esm` endpoint flattens kokoro plus its nested
+// transformers.js and onnxruntime-web into browser-ready ESM. Phase 2 swaps this
+// for a locally-vendored ESM path so the .app runs offline.
+const KOKORO_CDN = 'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm'
 
 // kokoro-js bundles its OWN nested transformers.js (3.8.1 → onnxruntime-web
-// 1.22-dev), a different instance from the whisper worker's. Point its ORT wasm
-// runtime at a CDN pinned to that exact version (Vite's dep-optimizer is excluded
-// for this stack — see vite.config.ts). kokoro only re-exports a `wasmPaths`
-// setter; threads are left to ORT's `!crossOriginIsolated` auto-clamp to 1 (no
-// SharedArrayBuffer, since we do not enable COOP/COEP).
-kokoroEnv.wasmPaths =
+// 1.22-dev), a different instance/version from the whisper worker's. Point its
+// ORT wasm runtime at a CDN pinned to that exact version (must match the glue in
+// the /+esm bundle). kokoro only re-exports a `wasmPaths` setter; threads are
+// left to ORT's `!crossOriginIsolated` auto-clamp to 1 (no SharedArrayBuffer,
+// since we do not enable COOP/COEP).
+const KOKORO_ORT_WASM_CDN =
   'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/'
+
+const TTS_MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX'
+const DEFAULT_VOICE = 'af_heart'
 
 const ctx = self as unknown as {
   postMessage(message: TtsResponse, transfer?: Transferable[]): void
@@ -25,15 +32,19 @@ const ctx = self as unknown as {
 let ttsPromise: Promise<KokoroTTS> | null = null
 
 async function load(): Promise<KokoroTTS> {
+  const url = KOKORO_CDN
+  const { KokoroTTS: KokoroTTSClass, env } = (await import(/* @vite-ignore */ url)) as typeof import('kokoro-js')
+  env.wasmPaths = KOKORO_ORT_WASM_CDN
+
   const progress_callback = (info: ProgressInfo) => {
     if (info.status === 'progress' && typeof info.progress === 'number') {
       ctx.postMessage({ type: 'progress', progress: info.progress / 100 })
     }
   }
   try {
-    return await KokoroTTS.from_pretrained(TTS_MODEL, { dtype: 'fp32', device: 'webgpu', progress_callback })
+    return await KokoroTTSClass.from_pretrained(TTS_MODEL, { dtype: 'fp32', device: 'webgpu', progress_callback })
   } catch {
-    return await KokoroTTS.from_pretrained(TTS_MODEL, { dtype: 'q8', device: 'wasm', progress_callback })
+    return await KokoroTTSClass.from_pretrained(TTS_MODEL, { dtype: 'q8', device: 'wasm', progress_callback })
   }
 }
 
