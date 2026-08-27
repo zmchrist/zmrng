@@ -227,3 +227,10 @@ non-obvious root cause, or is likely to recur. Template in
   site individually.
 - **Files:** `packages/server/src/index.ts` (top-level, right after `Fastify(...)`)
 - **Date Found:** 2026-08-18
+
+### Voice models load to 100% then "no available backend found" / ORT wasm fetch fails
+- **Error:** `Voice unavailable: Error: no available backend found. ERR: [wasm] TypeError: Failed to fetch dynamically imported module: http://localhost:5174/node_modules/.vite/deps/ort-wasm-simd-threaded.mjs?import, [cpu] Error: previous call to 'initWasm()' failed.`
+- **Cause:** Two stacked causes. (1) Vite's dep pre-bundler rewrote `onnxruntime-web` (bundled inside `@huggingface/transformers`/`kokoro-js`) into `.vite/deps`, which mangled ORT's dynamic wasm-glue import → 404. (2) ORT's threaded build wants `SharedArrayBuffer`, which needs COOP/COEP cross-origin isolation we deliberately do NOT enable.
+- **Solution:** In `packages/web/vite.config.ts` add `optimizeDeps.exclude: ['@huggingface/transformers','onnxruntime-web','kokoro-js']` + `worker.format: 'es'` (the ES worker format also silences the kokoro `import.meta`/iife build warning). In each voice worker, before any model load, pin ORT's `wasmPaths` to a CDN URL matching the EXACT onnxruntime-web version that transformers instance depends on — they differ: whisper's top-level transformers 4.2.0 → `onnxruntime-web@1.26.0-dev.20260416-b7804b056c`; kokoro-js bundles its own nested transformers 3.8.1 → `onnxruntime-web@1.22.0-dev.20250409-89f8206ba4`. Set `env.backends.onnx.wasm.numThreads = 1` where reachable (whisper's `env`); kokoro-js only re-exports a `wasmPaths` setter, so its threads rely on ORT's built-in `!crossOriginIsolated` auto-clamp to 1 (verified in both ORT bundles). Phase 2 swaps the CDN paths for locally-bundled assets.
+- **Files:** `packages/web/vite.config.ts`, `packages/web/src/voice/sttWorker.ts`, `packages/web/src/voice/ttsWorker.ts`
+- **Date Found:** 2026-08-27

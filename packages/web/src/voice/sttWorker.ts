@@ -2,12 +2,29 @@
 // WebGPU first, falls back to WASM. Not unit-tested (real ONNX inference + worker
 // glue — same policy as Terminal.tsx / WorkspaceGrid.tsx); isolated behind the
 // LocalVoiceBackend so VoiceView never sees it.
-import { pipeline, type ProgressInfo } from '@huggingface/transformers'
+import { env, pipeline, type ProgressInfo } from '@huggingface/transformers'
 import type { SttRequest, SttResponse } from './workerProtocol'
 
 /** Small Whisper checkpoint — English, low-latency. Change here to trade speed/accuracy. */
 const STT_MODEL = 'Xenova/whisper-tiny.en'
 const WHISPER_SAMPLE_RATE = 16000
+
+// Serve ORT's WASM runtime from a CDN pinned to the exact onnxruntime-web version
+// this transformers.js release (v4.2.0) depends on. Vite's dep-optimizer is
+// excluded for this stack (see vite.config.ts), so ORT must fetch its wasm/glue
+// from a real URL rather than a mangled `.vite/deps` path. Phase 2 swaps this for
+// a locally-bundled `/models`-style path.
+const ORT_WASM_CDN =
+  'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0-dev.20260416-b7804b056c/dist/'
+
+// Force single-threaded ORT: the threaded build needs SharedArrayBuffer, which
+// requires COOP/COEP cross-origin isolation we deliberately do not enable. (ORT
+// also auto-clamps to 1 when `!crossOriginIsolated`; this is belt-and-suspenders.)
+const wasmEnv = env.backends?.onnx?.wasm
+if (wasmEnv) {
+  wasmEnv.numThreads = 1
+  wasmEnv.wasmPaths = ORT_WASM_CDN
+}
 
 // Minimal typed view of the DedicatedWorkerGlobalScope (the web tsconfig uses the
 // DOM lib, which types `self` as Window — cast to the worker surface we use).
