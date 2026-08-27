@@ -46,6 +46,13 @@ interface Props {
    * resets the local seeded marker and would re-seed the already-sent handoff.
    */
   onPrefillConsumed?: () => void
+  /**
+   * Modal (Cosmos) mode: render the form body directly with no collapsed
+   * "+ New task" launcher, and route Cancel / successful-create to the host so
+   * it can dismiss the surrounding modal.
+   */
+  embedded?: boolean
+  onRequestClose?: () => void
 }
 
 const MODEL_OPTIONS: ModelAlias[] = ['opus', 'sonnet']
@@ -66,8 +73,16 @@ const FLOW_DEFAULTS: Record<FlowMode, { model: ModelAlias; effort: EffortLevel }
   plan: { model: DEFAULT_MODEL, effort: DEFAULT_EFFORT },
 }
 
-export function NewTaskForm({ repos, defaultRepoId, onCreate, prefill, onPrefillConsumed }: Props) {
-  const [open, setOpen] = useState(false)
+export function NewTaskForm({
+  repos,
+  defaultRepoId,
+  onCreate,
+  prefill,
+  onPrefillConsumed,
+  embedded = false,
+  onRequestClose,
+}: Props) {
+  const [open, setOpen] = useState(embedded)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [flow, setFlow] = useState<FlowMode>(DEFAULT_FLOW)
@@ -132,13 +147,14 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate, prefill, onPrefill
       setStyle(DEFAULT_STYLE)
       setRepoId('')
       files.clear()
-      setOpen(false)
+      if (embedded) onRequestClose?.()
+      else setOpen(false)
     } finally {
       setBusy(false)
     }
   }
 
-  if (!open) {
+  if (!open && !embedded) {
     return (
       <div className={styles.wrap}>
         <button type="button" className={styles.newBtn} onClick={() => setOpen(true)}>
@@ -249,7 +265,11 @@ export function NewTaskForm({ repos, defaultRepoId, onCreate, prefill, onPrefill
         </label>
       </div>
       <div className={styles.actions}>
-        <button type="button" className={styles.ghost} onClick={() => setOpen(false)}>
+        <button
+          type="button"
+          className={styles.ghost}
+          onClick={() => (embedded ? onRequestClose?.() : setOpen(false))}
+        >
           Cancel
         </button>
         <button
