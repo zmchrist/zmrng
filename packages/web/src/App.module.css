@@ -7,6 +7,18 @@
   gap: 12px;
 }
 
+/* Native app: the OS window already supplies rounded corners, shadow, and
+   chrome, so drop the inset margin/border/radius. Otherwise the glass frame
+   reads as a second, simulated window floating inside the real one. */
+.app[data-native] {
+  padding: 0;
+}
+.app[data-native] .frame {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 /* ===== Persistent Cosmos app frame ======================================
    ONE unified glass card wraps every mode. The title bar, left activity rail,
    and status bar stay STATIC across Workspace / Board / Team — only the center
@@ -36,23 +48,12 @@
   -webkit-backdrop-filter: var(--glass);
   border-bottom: 1px solid var(--border);
 }
-.tbLights {
-  display: flex;
-  gap: 8px;
-}
-.tbLights span {
-  width: 11px;
-  height: 11px;
-  border-radius: var(--radius-pill);
-}
-.tbLightR {
-  background: #e06c60;
-}
-.tbLightY {
-  background: #e0b84f;
-}
-.tbLightG {
-  background: #5aac6a;
+/* Native macOS window uses overlay traffic lights (titleBarStyle: Overlay).
+   The real OS lights float top-left over this bar, so reserve a left gutter
+   in the native app to keep the brand from rendering under them. No fake
+   lights are drawn — the OS provides the single, functional trio. */
+.app[data-native] .tbar {
+  padding-left: 76px;
 }
 .tbBrand {
   margin-left: 6px;

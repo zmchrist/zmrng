@@ -203,11 +203,6 @@ export default function App() {
       <div className={styles.frame}>
         {/* title bar (persistent) */}
         <div className={styles.tbar} data-tauri-drag-region>
-          <span className={styles.tbLights} aria-hidden="true">
-            <span className={styles.tbLightR} />
-            <span className={styles.tbLightY} />
-            <span className={styles.tbLightG} />
-          </span>
           <span className={styles.tbBrand}>zmrng</span>
           <span className={styles.tbSep}>›</span>
           <span className={styles.tbCrumb}>{breadcrumb}</span>
