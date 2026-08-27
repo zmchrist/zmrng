@@ -175,7 +175,11 @@
    window drag handle in the native Tauri window via data-tauri-drag-region
    (inert in the browser dev view). Interactive children (tabs) sit above the
    drag region and stay clickable. Left-justified snug against the pane edge
-   (browser dev view only — no native traffic-light reserve here).
+   in the browser dev view; the native app (`[data-native]`, set from
+   `window.__TAURI__` in App.tsx) reserves a left gutter so the brand/mode-tab
+   buttons don't render underneath the real macOS traffic lights — without it
+   they read as a second, non-functional trio of top-left buttons stacked on
+   top of the OS ones.
    NOTE: -webkit-app-region is Electron-only; WKWebView (Tauri v2) ignores it.
    Drag is driven solely by the data-tauri-drag-region attribute. */
 .topbar {
@@ -186,6 +190,10 @@
   height: 44px;
   padding: 0 6px 0 0;
   flex-shrink: 0;
+}
+
+.topbar[data-native] {
+  padding-left: 78px; /* clears the macOS traffic-light gutter */
 }
 
 /* ---- mode tabs: Tasks · Board · Workspace ------------------------------ */

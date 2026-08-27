@@ -255,6 +255,33 @@ export interface GlobalUiState {
    * hydrates a default layout in that case.
    */
   grid?: GridState
+  /**
+   * Per-card tab-strip metadata for the Chat and Terminal cards (tab id,
+   * label, and for chat the picked model/effort/style). GLOBAL, like `grid`.
+   * The live session itself is never persisted — PTYs and chat WS sessions
+   * are ephemeral by hard rule — so on reload terminal tabs respawn fresh
+   * and chat tabs reappear needing another Launch press. Absent on older
+   * docs — the client hydrates one default tab per card in that case.
+   */
+  chatTabs?: { tabs: ChatTabMeta[]; activeId: string | null }
+  terminalTabs?: { tabs: TerminalTabMeta[]; activeId: string | null }
+}
+
+/** Persisted metadata for one Terminal-card tab. */
+export interface TerminalTabMeta {
+  id: string
+  label: string
+}
+
+/** Persisted metadata for one Chat-card tab: id/label plus the picked
+ *  config and whether Launch has been pressed yet. */
+export interface ChatTabMeta {
+  id: string
+  label: string
+  model: ModelAlias
+  effort: EffortLevel
+  style: CaveStyle
+  launched: boolean
 }
 
 // ---- workspace tab-pane layout (Zed-style collapsible tabs) ----
@@ -413,11 +440,13 @@ export type TermServerMsg =
 /**
  * client -> server chat frames (over GET /ws/chat). `start` spawns a fresh
  * conversational `claude` session with the chosen controls (killing any prior
- * one on the socket); `input` sends an operator turn; `interrupt` cuts the
+ * one on the socket); `repoId` picks which registered repo the session's cwd
+ * is rooted at (a missing/unresolvable id falls back to `config.projectsDir`,
+ * i.e. "Projects root"). `input` sends an operator turn; `interrupt` cuts the
  * in-flight turn without killing the session.
  */
 export type ChatClientMsg =
-  | { type: 'start'; model: string; effort: EffortLevel; style: CaveStyle }
+  | { type: 'start'; model: string; effort: EffortLevel; style: CaveStyle; repoId?: string }
   | { type: 'input'; text: string; attachments?: Attachment[] }
   | { type: 'interrupt' }
 

@@ -18,9 +18,10 @@ import { FileTree } from './FileTree'
 import { Viewer } from './Viewer'
 import { NewTaskForm } from './NewTaskForm'
 import { TaskList } from './TaskList'
-import { ChatPane } from './ChatPane'
-import { Terminal } from './Terminal'
+import { ChatCard } from './ChatCard'
+import { TerminalCard } from './TerminalCard'
 import { WorkerLogPanel } from './WorkerLogPanel'
+import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
 import type { HandoffPrefill } from '../teamHandoff'
 
 /** Worker-pane tabs — the fixed Cosmos IDE tab set (replaces the draggable grid). */
@@ -40,6 +41,13 @@ interface Props {
   repos: RepoTarget[]
   config: ServerConfig | null
   selectedId: string | null
+  /** Per-tab state for the multi-tab Chat and Terminal panes + their
+   *  persistence sinks (global UI state). Feed the tabbed ChatCard/TerminalCard
+   *  dropped into the IDE's Chat/Terminal tabs. */
+  chatTabs: TabsState<ChatTabState>
+  onChatTabsChange: (next: TabsState<ChatTabState>) => void
+  terminalTabs: TabsState<TerminalTabState>
+  onTerminalTabsChange: (next: TabsState<TerminalTabState>) => void
   onSelect: (id: string) => void
   onCreate: (
     title: string,
@@ -95,6 +103,10 @@ export function WorkspaceView({
   repos,
   config,
   selectedId,
+  chatTabs,
+  onChatTabsChange,
+  terminalTabs,
+  onTerminalTabsChange,
   onSelect,
   onCreate,
   prefill,
@@ -154,6 +166,16 @@ export function WorkspaceView({
     setTab('files')
   }, [])
 
+  // Clicking a task row selects it AND brings the Worker pane to the front, so
+  // the operator always lands on that task's live worker log (#95).
+  const onSelectRow = useCallback(
+    (id: string) => {
+      onSelect(id)
+      setTab('worker')
+    },
+    [onSelect],
+  )
+
   const status = task?.status ?? null
 
   return (
@@ -176,7 +198,7 @@ export function WorkspaceView({
             tasks={tasks}
             repos={repos}
             selectedId={selectedId}
-            onSelect={onSelect}
+            onSelect={onSelectRow}
             config={config}
             onStart={onStart}
             onResume={onResume}
@@ -265,22 +287,24 @@ export function WorkspaceView({
             </div>
           </div>
 
-          {/* Terminal — kept mounted so the PTY session survives tab switches. */}
+          {/* Terminal — multi-tab card; every PTY tab stays mounted so sessions
+              survive both card-tab and pane-tab switches. */}
           <div
             className={styles.tabPanel}
             style={{ display: tab === 'terminal' ? 'flex' : 'none' }}
             role="tabpanel"
           >
-            <Terminal id="workspace-terminal" />
+            <TerminalCard tabs={terminalTabs} onTabsChange={onTerminalTabsChange} />
           </div>
 
-          {/* Chat — kept mounted so the /ws/chat session survives tab switches. */}
+          {/* Chat — multi-tab card (per-tab repo picker); every /ws/chat tab stays
+              mounted so sessions survive tab switches. */}
           <div
             className={styles.tabPanel}
             style={{ display: tab === 'chat' ? 'flex' : 'none' }}
             role="tabpanel"
           >
-            <ChatPane id="workspace-chat" />
+            <ChatCard tabs={chatTabs} onTabsChange={onChatTabsChange} repos={repos} />
           </div>
         </div>
       </section>

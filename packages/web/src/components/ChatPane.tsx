@@ -20,6 +20,15 @@ import type { CaveStyle, EffortLevel, ModelAlias } from '../types'
 interface Props {
   /** Stable id for this chat instance (one WebSocket / claude session per id). */
   id: string
+  /** Seed config from the launching tab's picker (`ChatCard`) — defaults match
+   *  the pre-multi-tab hardcoded values when omitted. */
+  initialModel?: ModelAlias
+  initialEffort?: EffortLevel
+  initialStyle?: CaveStyle
+  /** The repo chosen at launch (`''` = "Projects root"). Locked for the life
+   *  of this session — unlike model/effort/style, there is no way to change it
+   *  post-launch (no repo-switch on a live tab). */
+  initialRepoId?: string
 }
 
 /** Chat-tab defaults — independent of the task-level DEFAULT_* controls. */
@@ -41,10 +50,18 @@ const STYLE_OPTIONS: readonly CaveStyle[] = [
  * modules; this component is intentionally not unit-tested (jsdom has no WS
  * glue worth exercising). Colors come from theme tokens only.
  */
-export function ChatPane({ id }: Props) {
-  const [model, setModel] = useState<ModelAlias>('sonnet')
-  const [effort, setEffort] = useState<EffortLevel>('medium')
-  const [style, setStyle] = useState<CaveStyle>('caveman-full')
+export function ChatPane({
+  id,
+  initialModel = 'sonnet',
+  initialEffort = 'medium',
+  initialStyle = 'caveman-full',
+  initialRepoId = '',
+}: Props) {
+  const [model, setModel] = useState<ModelAlias>(initialModel)
+  const [effort, setEffort] = useState<EffortLevel>(initialEffort)
+  const [style, setStyle] = useState<CaveStyle>(initialStyle)
+  // Locked for the session's lifetime — no setter, no config-row UI to change it.
+  const repoId = initialRepoId
   // Hydrate from the saved transcript (if any) so history survives a refresh/
   // rebuild/tab-reopen — the underlying `claude` session is gone regardless,
   // so it always starts idle (`busy: false`). Plain state (not a ref) so its
@@ -72,7 +89,7 @@ export function ChatPane({ id }: Props) {
     const ws = new WebSocket(`${proto}://${location.host}/ws/chat`)
     wsRef.current = ws
 
-    ws.onopen = () => ws.send(encodeStart(model, effort, style))
+    ws.onopen = () => ws.send(encodeStart(model, effort, style, repoId))
     ws.onmessage = (e) => {
       const msg = parseChatServerMsg(String(e.data))
       if (!msg) return
@@ -99,7 +116,7 @@ export function ChatPane({ id }: Props) {
       wsRef.current = null
       ws.close()
     }
-  }, [id, model, effort, style])
+  }, [id, model, effort, style, repoId])
 
   // Bottom-pin: only follow new items if the operator was already at the
   // bottom; otherwise `hasNew` flips true and a pill offers to jump down.

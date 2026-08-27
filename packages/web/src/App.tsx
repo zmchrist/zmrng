@@ -21,7 +21,9 @@ import { Board } from './components/Board'
 import { TeamView } from './components/TeamView'
 import { SettingsModal } from './components/SettingsModal'
 import { useUiState } from './uiState'
+import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState, type TerminalTabState } from './windowTabs'
 import type { HandoffPrefill } from './teamHandoff'
+import { isTauriRuntime } from './runtime'
 
 /** Activity-rail nav — persistent across every mode; ⚙ opens Settings. */
 const RAIL: ReadonlyArray<{ id: WorkspaceMode; glyph: string; label: string }> = [
@@ -29,6 +31,9 @@ const RAIL: ReadonlyArray<{ id: WorkspaceMode; glyph: string; label: string }> =
   { id: 'board', glyph: '⑃', label: 'Board' },
   { id: 'team', glyph: '▤', label: 'Team' },
 ]
+
+// Read once — the runtime never changes mid-session.
+const isNativeApp = isTauriRuntime()
 
 export default function App() {
   const [tasks, setTasks] = useState<Record<string, Task>>({})
@@ -42,6 +47,19 @@ export default function App() {
   const storedMode = ui.state.global.mode ?? 'workspace'
   const mode: WorkspaceMode = storedMode === 'tasks' ? 'workspace' : storedMode
   const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
+  // Per-card tab-strip state for the Chat and Terminal panes, hydrated/persisted
+  // from GlobalUiState — the live sessions themselves stay ephemeral. Feeds the
+  // tabbed ChatCard/TerminalCard inside the Workspace IDE's Chat/Terminal tabs.
+  const chatTabs = useMemo(() => hydrateChatTabs(ui.state.global.chatTabs), [ui.state.global.chatTabs])
+  const setChatTabs = useCallback((next: TabsState<ChatTabState>) => ui.patchGlobal({ chatTabs: next }), [ui])
+  const terminalTabs = useMemo(
+    () => hydrateTerminalTabs(ui.state.global.terminalTabs),
+    [ui.state.global.terminalTabs],
+  )
+  const setTerminalTabs = useCallback(
+    (next: TabsState<TerminalTabState>) => ui.patchGlobal({ terminalTabs: next }),
+    [ui],
+  )
   // Settings is an ephemeral modal overlay — never persisted.
   const [settingsOpen, setSettingsOpen] = useState(false)
   // One-shot "Send to my zmrng" pre-fill from the Team tab (T3).
@@ -179,7 +197,7 @@ export default function App() {
   const modelLabel = selected ? `${selected.model} / ${selected.effort}` : 'idle'
 
   return (
-    <div className={styles.app}>
+    <div className={styles.app} data-native={isNativeApp || undefined}>
       <AuthBanner />
 
       <div className={styles.frame}>
@@ -238,6 +256,10 @@ export default function App() {
               repos={repos}
               config={cfg}
               selectedId={selectedId}
+              chatTabs={chatTabs}
+              onChatTabsChange={setChatTabs}
+              terminalTabs={terminalTabs}
+              onTerminalTabsChange={setTerminalTabs}
               onSelect={select}
               onCreate={onCreate}
               prefill={handoffPrefill}

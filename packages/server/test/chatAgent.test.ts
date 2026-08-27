@@ -32,6 +32,7 @@ let created: FakeRunner[]
 let factory: RunnerFactory
 
 let savedProjectsDir: string
+let savedRepos: typeof config.repos
 
 beforeEach(() => {
   created = []
@@ -42,10 +43,13 @@ beforeEach(() => {
   }
   savedProjectsDir = config.projectsDir
   config.projectsDir = '/tmp/zmrng-test-projects'
+  savedRepos = config.repos
+  config.repos = [{ id: 'repo-a', label: 'Repo A', path: '/tmp/repo-a', defaultBranch: 'main' }]
 })
 
 afterEach(() => {
   config.projectsDir = savedProjectsDir
+  config.repos = savedRepos
 })
 
 /** Minimal no-op callbacks; individual tests override the ones they assert on. */
@@ -70,6 +74,14 @@ describe('parseChatClientMsg', () => {
         JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full' }),
       ),
     ).toEqual({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full' })
+  })
+
+  it('parses a well-formed start frame carrying a repoId', () => {
+    expect(
+      parseChatClientMsg(
+        JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full', repoId: 'repo-a' }),
+      ),
+    ).toEqual({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full', repoId: 'repo-a' })
   })
 
   it('parses a well-formed input frame', () => {
@@ -131,6 +143,19 @@ describe('ChatManager.create (fake runner factory)', () => {
     expect(created[0].opts.model).toBe('sonnet')
     expect(created[0].opts.effort).toBe('medium')
     expect(created[0].opts.systemPrompt).toContain('/tmp/zmrng-test-projects')
+  })
+
+  it('spawns at the chosen repo path when repoId resolves', () => {
+    const mgr = new ChatManager(factory)
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'caveman-full', repoId: 'repo-a' }, noopCallbacks())
+    expect(created[0].opts.cwd).toBe('/tmp/repo-a')
+    expect(created[0].opts.systemPrompt).toContain('/tmp/repo-a')
+  })
+
+  it('falls back to config.projectsDir when repoId is missing or unresolvable', () => {
+    const mgr = new ChatManager(factory)
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'caveman-full', repoId: 'nope' }, noopCallbacks())
+    expect(created[0].opts.cwd).toBe('/tmp/zmrng-test-projects')
   })
 
   it('routes send/interrupt/kill to the returned session', () => {
