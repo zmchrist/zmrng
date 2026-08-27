@@ -21,6 +21,7 @@ import { Board } from './components/Board'
 import { TeamView } from './components/TeamView'
 import { SettingsModal } from './components/SettingsModal'
 import { useUiState } from './uiState'
+import { nextRailState } from './railState'
 import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState, type TerminalTabState } from './windowTabs'
 import type { HandoffPrefill } from './teamHandoff'
 import { isTauriRuntime } from './runtime'
@@ -47,6 +48,18 @@ export default function App() {
   const storedMode = ui.state.global.mode ?? 'workspace'
   const mode: WorkspaceMode = storedMode === 'tasks' ? 'workspace' : storedMode
   const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
+  // Ephemeral: whether the Workspace Tasks side panel is collapsed. Re-clicking
+  // the active Workspace rail button toggles it; leaving Workspace re-expands it.
+  const [tasksCollapsed, setTasksCollapsed] = useState(false)
+  // Activity-rail click: pure reducer decides mode + collapse from current state.
+  const onRailClick = useCallback(
+    (id: WorkspaceMode) => {
+      const next = nextRailState({ mode, tasksCollapsed }, id)
+      if (next.mode !== mode) setMode(next.mode)
+      setTasksCollapsed(next.tasksCollapsed)
+    },
+    [mode, tasksCollapsed, setMode],
+  )
   // Per-card tab-strip state for the Chat and Terminal panes, hydrated/persisted
   // from GlobalUiState — the live sessions themselves stay ephemeral. Feeds the
   // tabbed ChatCard/TerminalCard inside the Workspace IDE's Chat/Terminal tabs.
@@ -223,7 +236,7 @@ export default function App() {
                 aria-pressed={mode === r.id}
                 aria-label={r.label}
                 title={r.label}
-                onClick={() => setMode(r.id)}
+                onClick={() => onRailClick(r.id)}
               >
                 {r.glyph}
               </button>
@@ -251,6 +264,7 @@ export default function App() {
               repos={repos}
               config={cfg}
               selectedId={selectedId}
+              tasksCollapsed={tasksCollapsed}
               chatTabs={chatTabs}
               onChatTabsChange={setChatTabs}
               terminalTabs={terminalTabs}

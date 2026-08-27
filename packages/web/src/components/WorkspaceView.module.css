@@ -143,10 +143,19 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   background: var(--surface);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
   border-right: 1px solid var(--border);
+  transition: width var(--transition), opacity var(--transition);
+}
+/* Collapsed by re-clicking the Workspace rail button — slides to zero width. */
+.tasksPanelCollapsed {
+  width: 0;
+  opacity: 0;
+  border-right-color: transparent;
+  pointer-events: none;
 }
 .tasksHead {
   flex: none;
