@@ -1,0 +1,195 @@
+/* Voice surface — config row + big talk control + a spoken-transcript thread.
+   All colors/blur/radius from theme tokens, no raw values. */
+.pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--well);
+}
+
+/* ---- config row (model / effort / style / repo) ----------------------- */
+.configRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  flex: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-strong);
+}
+
+.select {
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  transition: var(--transition);
+}
+.select:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.select:disabled {
+  opacity: 0.5;
+}
+
+/* ---- controls row ----------------------------------------------------- */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  flex: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.talkBtn {
+  padding: 8px 18px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--surface-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.talkBtn:hover {
+  background: var(--surface-hover);
+}
+.talkBtnOn {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.interruptBtn {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.interruptBtn:hover {
+  background: var(--surface-hover);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+.dotOn {
+  background: var(--accent);
+}
+
+.error {
+  flex: none;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--status-failed);
+  background: var(--surface-strong);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---- transcript thread ------------------------------------------------ */
+.thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.empty {
+  margin: auto;
+  max-width: 40ch;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.bubble {
+  max-width: 78%;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.user {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.agent {
+  align-self: flex-start;
+  background: var(--surface-strong);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.caret {
+  display: inline-block;
+  width: 6px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: blink 1s steps(2, start) infinite;
+}
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.toolNote {
+  align-self: center;
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  max-width: 90%;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  opacity: 0.85;
+}
+.toolName {
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+.toolSummary {
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -20,17 +20,19 @@ import { NewTaskForm } from './NewTaskForm'
 import { TaskList } from './TaskList'
 import { ChatCard } from './ChatCard'
 import { TerminalCard } from './TerminalCard'
+import { VoiceView } from './VoiceView'
 import { WorkerLogPanel } from './WorkerLogPanel'
 import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
 import type { HandoffPrefill } from '../teamHandoff'
 
 /** Worker-pane tabs — the fixed Cosmos IDE tab set (replaces the draggable grid). */
-type PaneTab = 'worker' | 'files' | 'terminal' | 'chat'
+type PaneTab = 'worker' | 'files' | 'terminal' | 'chat' | 'voice'
 const PANE_TABS: ReadonlyArray<{ id: PaneTab; label: string }> = [
   { id: 'worker', label: 'Worker' },
   { id: 'files', label: 'Files' },
   { id: 'terminal', label: 'Terminal' },
   { id: 'chat', label: 'Chat' },
+  { id: 'voice', label: 'Voice' },
 ]
 
 interface Props {
@@ -312,6 +314,17 @@ export function WorkspaceView({
             role="tabpanel"
           >
             <ChatCard tabs={chatTabs} onTabsChange={onChatTabsChange} repos={repos} />
+          </div>
+
+          {/* Voice — hands-free spoken chat over the same /ws/chat agent. Stays
+              mounted so an enabled session (socket + mic + ML workers) survives a
+              pane-tab switch, same policy as the Terminal/Chat panels. */}
+          <div
+            className={styles.tabPanel}
+            style={{ display: tab === 'voice' ? 'flex' : 'none' }}
+            role="tabpanel"
+          >
+            <VoiceView repos={repos} config={config} />
           </div>
         </div>
       </section>
