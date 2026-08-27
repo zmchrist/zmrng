@@ -8,6 +8,7 @@
     {
       "identifier": "shell:allow-execute",
       "allow": [{ "name": "node", "sidecar": true }]
-    }
+    },
+    "shell:allow-open"
   ]
 }
