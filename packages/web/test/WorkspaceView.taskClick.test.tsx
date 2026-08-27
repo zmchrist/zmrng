@@ -67,6 +67,7 @@ function Harness() {
       repos={[{ id: 'zmrng', label: 'zmrng', path: '/x', defaultBranch: 'main' }]}
       config={null}
       selectedId={selectedId}
+      tasksCollapsed={false}
       chatTabs={{ tabs: [], activeId: null }}
       onChatTabsChange={() => {}}
       terminalTabs={{ tabs: [], activeId: null }}
