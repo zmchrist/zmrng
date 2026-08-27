@@ -41,6 +41,9 @@ interface Props {
   repos: RepoTarget[]
   config: ServerConfig | null
   selectedId: string | null
+  /** Whether the Tasks side panel is collapsed (ephemeral, driven by re-clicking
+   *  the Workspace activity-rail button). */
+  tasksCollapsed: boolean
   /** Per-tab state for the multi-tab Chat and Terminal panes + their
    *  persistence sinks (global UI state). Feed the tabbed ChatCard/TerminalCard
    *  dropped into the IDE's Chat/Terminal tabs. */
@@ -103,6 +106,7 @@ export function WorkspaceView({
   repos,
   config,
   selectedId,
+  tasksCollapsed,
   chatTabs,
   onChatTabsChange,
   terminalTabs,
@@ -180,7 +184,10 @@ export function WorkspaceView({
 
   return (
     <div className={styles.center}>
-      <aside className={styles.tasksPanel}>
+      <aside
+        className={`${styles.tasksPanel} ${tasksCollapsed ? styles.tasksPanelCollapsed : ''}`}
+        aria-hidden={tasksCollapsed || undefined}
+      >
         <div className={styles.tasksHead}>
           <span className={styles.tasksLabel}>Tasks</span>
           <button
