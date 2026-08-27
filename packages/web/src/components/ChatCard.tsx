@@ -12,11 +12,13 @@ import {
   type ChatTabState,
   type TabsState,
 } from '../windowTabs'
-import type { CaveStyle, EffortLevel, ModelAlias } from '../types'
+import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget } from '../types'
 
 interface Props {
   tabs: TabsState<ChatTabState>
   onTabsChange: (next: TabsState<ChatTabState>) => void
+  /** Same repo registry as task creation (`GET /api/repos`). */
+  repos: RepoTarget[]
 }
 
 const MODEL_OPTIONS: readonly ModelAlias[] = ['sonnet', 'opus']
@@ -34,18 +36,22 @@ const NEW_TAB_DEFAULTS = {
   model: 'sonnet' as ModelAlias,
   effort: 'medium' as EffortLevel,
   style: 'caveman-full' as CaveStyle,
+  /** `''` = "Projects root" (`config.projectsDir`), the default. */
+  repoId: '',
 }
 
 /**
  * The Chat card's own tab strip: `+` opens a new unlaunched tab, each tab has
- * an `×` to close. An unlaunched tab shows a model/effort/style picker gated
- * behind a Launch button — the `/ws/chat` session (`ChatPane`) only mounts
- * once Launch is pressed, so a fresh tab (including the very first one) never
- * auto-spawns a session. All tabs stay mounted (`display:none` when inactive)
- * so switching tabs never kills a live session, matching the existing
- * hide/show-survives-session policy for this card.
+ * an `×` to close. An unlaunched tab shows a model/effort/style/repo picker
+ * gated behind a Launch button — the `/ws/chat` session (`ChatPane`) only
+ * mounts once Launch is pressed, so a fresh tab (including the very first
+ * one) never auto-spawns a session. The repo choice locks once launched — no
+ * repo-switch on a live tab, unlike model/effort/style. All tabs stay mounted
+ * (`display:none` when inactive) so switching tabs never kills a live
+ * session, matching the existing hide/show-survives-session policy for this
+ * card.
  */
-export function ChatCard({ tabs, onTabsChange }: Props) {
+export function ChatCard({ tabs, onTabsChange, repos }: Props) {
   const addTab = useCallback(() => {
     const id = `chat-${crypto.randomUUID()}`
     onTabsChange(addChatTab(tabs, id, nextLabel('Chat', tabs), NEW_TAB_DEFAULTS))
@@ -55,7 +61,7 @@ export function ChatCard({ tabs, onTabsChange }: Props) {
   const activate = useCallback((id: string) => onTabsChange(setActiveTab(tabs, id)), [tabs, onTabsChange])
   const launch = useCallback((id: string) => onTabsChange(launchChatTab(tabs, id)), [tabs, onTabsChange])
   const setConfig = useCallback(
-    (id: string, patch: Partial<Pick<ChatTabState, 'model' | 'effort' | 'style'>>) =>
+    (id: string, patch: Partial<Pick<ChatTabState, 'model' | 'effort' | 'style' | 'repoId'>>) =>
       onTabsChange(setChatTabConfig(tabs, id, patch)),
     [tabs, onTabsChange],
   )
@@ -75,7 +81,13 @@ export function ChatCard({ tabs, onTabsChange }: Props) {
         {tabs.tabs.map((t) => (
           <div key={t.id} className={styles.tabBody} style={{ display: t.id === tabs.activeId ? 'flex' : 'none' }}>
             {t.launched ? (
-              <ChatPane id={t.id} initialModel={t.model} initialEffort={t.effort} initialStyle={t.style} />
+              <ChatPane
+                id={t.id}
+                initialModel={t.model}
+                initialEffort={t.effort}
+                initialStyle={t.style}
+                initialRepoId={t.repoId}
+              />
             ) : (
               <div className={styles.launch}>
                 <span className={styles.launchLabel}>Configure this chat</span>
@@ -113,6 +125,19 @@ export function ChatCard({ tabs, onTabsChange }: Props) {
                     {STYLE_OPTIONS.map((st) => (
                       <option key={st} value={st}>
                         {st}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className={styles.select}
+                    aria-label="Repo"
+                    value={t.repoId}
+                    onChange={(e) => setConfig(t.id, { repoId: e.target.value })}
+                  >
+                    <option value="">Projects root</option>
+                    {repos.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.label}
                       </option>
                     ))}
                   </select>

@@ -440,11 +440,13 @@ export type TermServerMsg =
 /**
  * client -> server chat frames (over GET /ws/chat). `start` spawns a fresh
  * conversational `claude` session with the chosen controls (killing any prior
- * one on the socket); `input` sends an operator turn; `interrupt` cuts the
+ * one on the socket); `repoId` picks which registered repo the session's cwd
+ * is rooted at (a missing/unresolvable id falls back to `config.projectsDir`,
+ * i.e. "Projects root"). `input` sends an operator turn; `interrupt` cuts the
  * in-flight turn without killing the session.
  */
 export type ChatClientMsg =
-  | { type: 'start'; model: string; effort: EffortLevel; style: CaveStyle }
+  | { type: 'start'; model: string; effort: EffortLevel; style: CaveStyle; repoId?: string }
   | { type: 'input'; text: string; attachments?: Attachment[] }
   | { type: 'interrupt' }
 

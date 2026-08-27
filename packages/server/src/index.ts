@@ -634,7 +634,7 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
     }
   }
 
-  const startSession = (model: string, effort: EffortLevel, style: CaveStyle): void => {
+  const startSession = (model: string, effort: EffortLevel, style: CaveStyle, repoId?: string): void => {
     // Replace any prior session on this socket (a config change respawns).
     if (session) {
       try {
@@ -646,7 +646,7 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
     }
     try {
       session = chats.create(
-        { model, effort, style },
+        { model, effort, style, repoId },
         {
           onSession: (sessionId) => send({ type: 'ready', sessionId }),
           onPartial: (text) => send({ type: 'partial', text }),
@@ -684,7 +684,7 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
     try {
       const msg = parseChatClientMsg(String(raw))
       if (!msg) return
-      if (msg.type === 'start') startSession(msg.model, msg.effort, msg.style)
+      if (msg.type === 'start') startSession(msg.model, msg.effort, msg.style, msg.repoId)
       else if (msg.type === 'input') session?.send(msg.text, msg.attachments)
       else if (msg.type === 'interrupt') session?.interrupt()
     } catch (err) {

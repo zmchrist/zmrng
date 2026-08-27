@@ -56,6 +56,7 @@ describe('addChatTab', () => {
       model: 'sonnet',
       effort: 'medium',
       style: 'caveman-full',
+      repoId: '',
     })
     expect(ids(s)).toEqual(['chat-1'])
     expect(s.activeId).toBe('chat-1')
@@ -65,6 +66,7 @@ describe('addChatTab', () => {
       model: 'sonnet',
       effort: 'medium',
       style: 'caveman-full',
+      repoId: '',
       launched: false,
     })
   })
@@ -72,8 +74,8 @@ describe('addChatTab', () => {
 
 describe('launchChatTab', () => {
   it('flips launched on the target tab only', () => {
-    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'normal' })
-    s = addChatTab(s, 'chat-2', 'Chat 2', { model: 'opus', effort: 'high', style: 'normal' })
+    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'normal', repoId: '' })
+    s = addChatTab(s, 'chat-2', 'Chat 2', { model: 'opus', effort: 'high', style: 'normal', repoId: '' })
     s = launchChatTab(s, 'chat-1')
     expect(s.tabs.find((t) => t.id === 'chat-1')?.launched).toBe(true)
     expect(s.tabs.find((t) => t.id === 'chat-2')?.launched).toBe(false)
@@ -82,9 +84,9 @@ describe('launchChatTab', () => {
 
 describe('setChatTabConfig', () => {
   it('patches only the targeted tab, leaving launched untouched', () => {
-    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'normal' })
-    s = setChatTabConfig(s, 'chat-1', { model: 'opus', effort: 'xhigh' })
-    expect(s.tabs[0]).toMatchObject({ model: 'opus', effort: 'xhigh', style: 'normal', launched: false })
+    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'normal', repoId: '' })
+    s = setChatTabConfig(s, 'chat-1', { model: 'opus', effort: 'xhigh', repoId: 'repo-a' })
+    expect(s.tabs[0]).toMatchObject({ model: 'opus', effort: 'xhigh', style: 'normal', repoId: 'repo-a', launched: false })
   })
 })
 
@@ -180,7 +182,9 @@ describe('hydrateChatTabs', () => {
 
   it('passes through a persisted non-empty list unchanged', () => {
     const stored: TabsState<ChatTabState> = {
-      tabs: [{ id: 'c-9', label: 'Chat 9', model: 'opus', effort: 'low', style: 'normal', launched: true }],
+      tabs: [
+        { id: 'c-9', label: 'Chat 9', model: 'opus', effort: 'low', style: 'normal', repoId: 'repo-a', launched: true },
+      ],
       activeId: 'c-9',
     }
     expect(hydrateChatTabs(stored)).toEqual(stored)
