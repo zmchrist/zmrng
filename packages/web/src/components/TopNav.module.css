@@ -1,0 +1,63 @@
+/* Board / Team top nav bar (Cosmos) — a seamless top strip inside the mode
+   card, not a detached floating bar. Border-bottom only, no radius/shadow. */
+.bar {
+  flex: none;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 16px;
+  background: var(--surface-strong);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-family: var(--font-brand);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+.tab {
+  padding: 5px 11px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition), background var(--transition);
+}
+.tab:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.tabActive,
+.tabActive:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.conn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+.connDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--status-done);
+}
+.connDown .connDot {
+  background: var(--status-failed);
+}

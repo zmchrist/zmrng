@@ -407,9 +407,15 @@ export async function selfUpdate(repoRoot: string, defaultBranch = 'main'): Prom
     throw new Error(`git fetch origin failed: ${errMsg(err)}`, { cause: err })
   }
 
-  const dirty = (await git(repoRoot, ['status', '--porcelain'])).length > 0
-  if (dirty) {
-    throw new Error('working tree has uncommitted changes — aborted self-update')
+  const statusOutput = await git(repoRoot, ['status', '--porcelain'])
+  if (statusOutput.length > 0) {
+    const files = statusOutput
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => line.slice(3))
+    throw new Error(
+      `working tree has uncommitted changes — aborted self-update (${files.join(', ')})`,
+    )
   }
 
   let current: string
