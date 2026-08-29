@@ -12,6 +12,7 @@ import {
   type ChatTabState,
   type TabsState,
 } from '../windowTabs'
+import { removeChatThread } from '../chatPersistence'
 import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget } from '../types'
 
 interface Props {
@@ -45,8 +46,9 @@ const NEW_TAB_DEFAULTS = {
  * an `×` to close. An unlaunched tab shows a model/effort/style/repo picker
  * gated behind a Launch button — the `/ws/chat` session (`ChatPane`) only
  * mounts once Launch is pressed, so a fresh tab (including the very first
- * one) never auto-spawns a session. The repo choice locks once launched — no
- * repo-switch on a live tab, unlike model/effort/style. All tabs stay mounted
+ * one) never auto-spawns a session. The repo choice seeds the live pane's own
+ * Repo select (`ChatPane`), where it can be changed the same way as
+ * model/effort/style. All tabs stay mounted
  * (`display:none` when inactive) so switching tabs never kills a live
  * session, matching the existing hide/show-survives-session policy for this
  * card.
@@ -57,7 +59,15 @@ export function ChatCard({ tabs, onTabsChange, repos }: Props) {
     onTabsChange(addChatTab(tabs, id, nextLabel('Chat', tabs), NEW_TAB_DEFAULTS))
   }, [tabs, onTabsChange])
 
-  const closeThisTab = useCallback((id: string) => onTabsChange(closeTab(tabs, id)), [tabs, onTabsChange])
+  const closeThisTab = useCallback(
+    (id: string) => {
+      // Purge the closed tab's saved transcript so its history can't leak into
+      // a later tab that happens to reuse the same id (e.g. a re-seeded default).
+      removeChatThread(id)
+      onTabsChange(closeTab(tabs, id))
+    },
+    [tabs, onTabsChange],
+  )
   const activate = useCallback((id: string) => onTabsChange(setActiveTab(tabs, id)), [tabs, onTabsChange])
   const launch = useCallback((id: string) => onTabsChange(launchChatTab(tabs, id)), [tabs, onTabsChange])
   const setConfig = useCallback(
@@ -87,6 +97,7 @@ export function ChatCard({ tabs, onTabsChange, repos }: Props) {
                 initialEffort={t.effort}
                 initialStyle={t.style}
                 initialRepoId={t.repoId}
+                repos={repos}
               />
             ) : (
               <div className={styles.launch}>

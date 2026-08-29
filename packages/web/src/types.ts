@@ -258,8 +258,9 @@ export interface TerminalTabMeta {
 /** Persisted metadata for one Chat-card tab: id/label plus the picked
  *  config and whether Launch has been pressed yet. `repoId` picks which
  *  registered repo the session's cwd is rooted at; `''` means "Projects
- *  root" (the default). Locked once the tab launches — no repo-switch on a
- *  live tab, unlike model/effort/style. */
+ *  root" (the default). Seeds the launched pane's own Repo select — a live
+ *  tab can still change it there, same as model/effort/style, which respawns
+ *  the session. */
 export interface ChatTabMeta {
   id: string
   label: string

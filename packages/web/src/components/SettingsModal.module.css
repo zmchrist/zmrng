@@ -95,6 +95,10 @@
   flex-direction: column;
   gap: 12px;
 }
+/* Breathing room between stacked settings sections. */
+.body > .section + .section {
+  margin-top: 22px;
+}
 
 .sectionHead {
   display: flex;
@@ -193,6 +197,67 @@
 .themeSelect option {
   background: var(--well);
   color: var(--text);
+}
+
+/* Opacity readout in the section head (mirrors the numeric feel of the value). */
+.opacityValue {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Window-opacity range slider — accent-tinted track + thumb, matching the
+   frosted-glass control language. */
+.opacitySlider {
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.opacitySlider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--well);
+  border: 1px solid var(--border);
+}
+.opacitySlider::-moz-range-track {
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--well);
+  border: 1px solid var(--border);
+}
+.opacitySlider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  margin-top: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  border: 1px solid var(--accent-line);
+  box-shadow: var(--hairline-soft);
+}
+.opacitySlider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  border: 1px solid var(--accent-line);
+  box-shadow: var(--hairline-soft);
+}
+.opacitySlider:focus {
+  outline: none;
+}
+.opacitySlider:focus::-webkit-slider-thumb {
+  box-shadow: var(--focus-ring);
+}
+.opacitySlider:focus::-moz-range-thumb {
+  box-shadow: var(--focus-ring);
 }
 
 .rebootHint {

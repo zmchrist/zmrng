@@ -281,7 +281,7 @@ export function TerminalDock({
                 className={styles.termHost}
                 style={{ display: t.id === dock.activeId ? 'block' : 'none' }}
               >
-                {t.kind === 'chat' ? <ChatPane id={t.id} /> : <Terminal id={t.id} />}
+                {t.kind === 'chat' ? <ChatPane id={t.id} repos={[]} /> : <Terminal id={t.id} />}
               </div>
             ))}
           </div>

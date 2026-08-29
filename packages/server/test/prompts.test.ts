@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   PR_BODY_FILE,
   PR_BODY_TEMPLATE,
+  clarifyKickoff,
   directKickoff,
   executeKickoff,
   planKickoff,
@@ -73,6 +74,52 @@ describe('systemPrompt', () => {
     expect(prompt).toMatch(/zmrng-code-reviewer/)
     expect(prompt).toMatch(/zmrng-doc-updater/)
     expect(prompt).toMatch(/guaranteed present/i)
+  })
+})
+
+describe('clarifyKickoff', () => {
+  const prompt = clarifyKickoff(task)
+
+  it('carries the task title and body as the interview subject', () => {
+    expect(prompt).toContain(task.title)
+    expect(prompt).toContain(task.body)
+  })
+
+  it('still names the clarify phase and forbids writing code/plan yet', () => {
+    expect(prompt).toMatch(/CLARIFY PHASE/)
+    expect(prompt).toMatch(/Do NOT write code or a plan yet/)
+  })
+
+  it('is skeptical by default — refuses ZMRNG_READY until scope is concrete', () => {
+    // The worker must keep probing thin/vague answers, not self-certify a
+    // premature READY on a layman's under-scoped reply (D3 skeptical-by-default).
+    expect(prompt).toMatch(/skeptical/i)
+    expect(prompt).toMatch(/vague|thin|underspecified|under-scoped/i)
+    // The refusal must be explicit: do NOT emit READY while scope is unclear.
+    expect(prompt).toMatch(/do NOT (emit|output).*ZMRNG_READY/i)
+    expect(prompt).toMatch(/concrete/i)
+  })
+
+  it('restates its understanding and waits for explicit confirmation before READY', () => {
+    // Before emitting READY the worker echoes back what it understood and waits
+    // for the operator to confirm (D3 restate-and-confirm).
+    expect(prompt).toMatch(/restate|echo|here is what I understand/i)
+    expect(prompt).toMatch(/confirm/i)
+    // The confirm must GATE the token emission, in this order within the
+    // directive: restate → explicit-confirmation gate → emit ZMRNG_READY.
+    // Anchor on the specific emission instruction and the confirmation gate
+    // (not a bare ZMRNG_READY, which also appears in the skeptical refusal
+    // line "Do NOT emit ZMRNG_READY while…"), so a reordering that emits the
+    // token before requiring confirmation trips this test.
+    const restateIdx = prompt.search(/restate|here is what I understand/i)
+    const confirmGateIdx = prompt.search(/AFTER .*explicit confirmation/i)
+    const emitIdx = prompt.indexOf('output the exact token ZMRNG_READY')
+    expect(restateIdx).toBeGreaterThan(-1)
+    expect(confirmGateIdx).toBeGreaterThan(-1)
+    expect(emitIdx).toBeGreaterThan(-1)
+    // restate BEFORE the confirmation gate BEFORE the token emission.
+    expect(restateIdx).toBeLessThan(confirmGateIdx)
+    expect(confirmGateIdx).toBeLessThan(emitIdx)
   })
 })
 
