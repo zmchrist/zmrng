@@ -11,7 +11,7 @@ import {
   pushUser,
   type ThreadState,
 } from '../chatThread'
-import { emptyBuffer, flush, push, type SentenceBuffer } from '../voiceSentences'
+import { emptyBuffer, flush, push, sanitizeForSpeech, type SentenceBuffer } from '../voiceSentences'
 import { initialTurn, reduce, type VoiceEvent, type VoiceState } from '../voiceTurn'
 import { LocalVoiceBackend } from '../voice/localBackend'
 import type { VoiceBackend } from '../voice/backend'
@@ -109,15 +109,32 @@ export function VoiceView({ repos, config }: Props) {
   }, [])
 
   /** Queue one sentence for speech, dropping it if its turn was superseded. */
-  const speakSentence = useCallback((text: string, epoch: number) => {
+  const speakSentence = useCallback((rawText: string, epoch: number) => {
+    // Strip markdown noise (`*`, `_`, backtick, etc.) so the TTS engine never
+    // pronounces "asterisk"; the visible transcript keeps the original text.
+    const text = sanitizeForSpeech(rawText)
+    // Nothing speakable left after stripping (e.g. a lone "**") — skip synth.
+    if (!text) return
+    console.info('[voice] speakSentence queued:', JSON.stringify(text), 'epoch=', epoch)
     synthChainRef.current = synthChainRef.current
       .then(async () => {
-        if (epoch !== epochRef.current) return
+        if (epoch !== epochRef.current) {
+          console.warn('[voice] DROP before synth: epoch', epoch, '!=', epochRef.current, '-', JSON.stringify(text))
+          return
+        }
         const backend = backendRef.current
         const player = playerRef.current
-        if (!backend || !player) return
+        if (!backend || !player) {
+          console.warn('[voice] DROP: no backend/player', { backend: !!backend, player: !!player })
+          return
+        }
+        console.info('[voice] synth start:', JSON.stringify(text))
         const pcm = await backend.synthesize(text)
-        if (epoch !== epochRef.current) return
+        console.info('[voice] synth done: samples=', pcm.length)
+        if (epoch !== epochRef.current) {
+          console.warn('[voice] DROP after synth: epoch', epoch, '!=', epochRef.current)
+          return
+        }
         await player.enqueue(pcm, backend.sampleRate)
       })
       .catch((err: unknown) => {

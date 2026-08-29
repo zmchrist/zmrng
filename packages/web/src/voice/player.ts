@@ -34,13 +34,16 @@ export class PcmPlayer {
   async unlock(): Promise<void> {
     try {
       const ctx = this.context()
+      console.info('[voice] unlock: ctx.state before resume =', ctx.state, 'rate=', ctx.sampleRate)
       if (ctx.state === 'suspended') await ctx.resume()
       const buffer = ctx.createBuffer(1, 1, this.defaultRate)
       const source = ctx.createBufferSource()
       source.buffer = buffer
       source.connect(ctx.destination)
       source.start(0)
-    } catch {
+      console.info('[voice] unlock: ctx.state after resume =', ctx.state)
+    } catch (err) {
+      console.warn('[voice] unlock failed', err)
       // autoplay still blocked / context unavailable — enqueue will retry resume
     }
   }
@@ -52,6 +55,12 @@ export class PcmPlayer {
   async enqueue(pcm: Float32Array, sampleRate = this.defaultRate): Promise<void> {
     const ctx = this.context()
     if (ctx.state === 'suspended') await ctx.resume()
+    // Peak amplitude tells silent-synth (all ~0) apart from silent-playback.
+    let peak = 0
+    for (let k = 0; k < pcm.length; k++) {
+      const a = Math.abs(pcm[k])
+      if (a > peak) peak = a
+    }
     const buffer = ctx.createBuffer(1, pcm.length, sampleRate)
     buffer.getChannelData(0).set(pcm)
     const source = ctx.createBufferSource()
@@ -61,6 +70,16 @@ export class PcmPlayer {
     source.start(startAt)
     this.nextTime = startAt + buffer.duration
     this.sources.add(source)
+    console.info(
+      '[voice] enqueue: samples=', pcm.length,
+      'peak=', peak.toFixed(4),
+      'srcRate=', sampleRate,
+      'ctx.state=', ctx.state,
+      'ctxRate=', ctx.sampleRate,
+      'startAt=', startAt.toFixed(3),
+      'now=', ctx.currentTime.toFixed(3),
+      'dur=', buffer.duration.toFixed(3),
+    )
     source.onended = () => {
       this.sources.delete(source)
     }
