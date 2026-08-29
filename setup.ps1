@@ -57,6 +57,30 @@ function Open-Url($url) {
 # ---------------------------------------------------------------------------
 Write-Head "zmrng setup wizard (Windows)"
 Write-Info "This gets the dev server running. Follow the prompts; re-run any time."
+Write-Info ""
+Write-Info "First time? Two things to expect:"
+Write-Info "  - You must have EXTRACTED the zip to a real folder (not run it from"
+Write-Info "    inside the zip preview). If you double-clicked from inside the zip,"
+Write-Info "    close this, Extract All to e.g. C:\Projects\zmrng, and run it there."
+Write-Info "  - A blue 'Windows protected your PC' pop-up is normal (SmartScreen):"
+Write-Info "    click 'More info' then 'Run anyway'."
+
+# Guard: refuse to run from a zip-preview temp dir. When you double-click a file
+# inside a zip in Explorer, it extracts to a read-only %TEMP%\Temp<N>_<name>.zip
+# folder; npm install and config writes fail there in confusing ways. Detect that
+# and stop with a clear instruction instead of failing three stages in.
+$here = $PSScriptRoot
+$tempRoot = [System.IO.Path]::GetTempPath()
+if ($here.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase) -or ($here -match '\.zip\\')) {
+  Write-Host ''
+  Write-Bad "You're running this from inside the zip (a temporary folder)."
+  Write-Info "Windows extracted the zip read-only, so install/config will fail here."
+  Write-Info "Fix: right-click the downloaded .zip -> Extract All -> choose a real"
+  Write-Info "folder (e.g. C:\Projects\zmrng), then double-click setup.cmd in THAT folder."
+  Write-Host ''
+  Read-Host "  Press Enter to exit" | Out-Null
+  exit 1
+}
 
 # ---------------------------------------------------------------------------
 # 1. Node.js 20.11 - 22.x
