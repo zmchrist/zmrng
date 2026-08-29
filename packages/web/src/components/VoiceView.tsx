@@ -121,10 +121,14 @@ export function VoiceView({ repos, config }: Props) {
         await player.enqueue(pcm, backend.sampleRate)
       })
       .catch((err: unknown) => {
-        // A single sentence failing to synthesize should not break the stream,
-        // but surface it — a silent catch here is exactly what made a broken TTS
-        // leg look like "the agent replied but no voice came out".
-        setError(`Voice playback error: ${String(err)}`)
+        const msg = String(err)
+        // A "voice backend disposed" rejection is a benign teardown race (the
+        // engine effect tearing down on disable / a dev HMR reload rejects any
+        // in-flight synth) — NOT a real failure, so don't alarm the operator.
+        // Surface only genuine synth/playback errors. A single sentence failing
+        // should also not break the rest of the stream.
+        if (/disposed/i.test(msg)) return
+        setError(`Voice playback error: ${msg}`)
       })
   }, [])
 
@@ -190,12 +194,13 @@ export function VoiceView({ repos, config }: Props) {
     if (!enabled) return
     let cancelled = false
     const backend = new LocalVoiceBackend()
-    // Reuse the player pre-created + unlocked in the Start-Voice gesture (see
-    // `handleToggle`) so the AudioContext keeps its user-activation; only make a
-    // fresh one on a config-change respawn where the ref was cleared.
-    const player = playerRef.current ?? new PcmPlayer(backend.sampleRate)
+    // The player is owned OUTSIDE this effect (created + unlocked in the
+    // Start-Voice gesture, closed on disable/unmount). We only ensure one
+    // exists; we deliberately never close it here, so a spurious effect re-run
+    // (e.g. a dev HMR reload) can't discard the gesture-unlocked AudioContext
+    // and leave later playback silently suspended.
+    if (!playerRef.current) playerRef.current = new PcmPlayer(backend.sampleRate)
     backendRef.current = backend
-    playerRef.current = player
 
     const onSpeechStart = () => {
       if (turnRef.current === 'speaking') {
@@ -270,8 +275,9 @@ export function VoiceView({ repos, config }: Props) {
       epochRef.current++
       void vadRef.current?.destroy()
       vadRef.current = null
-      void playerRef.current?.close()
-      playerRef.current = null
+      // NOTE: the player is intentionally NOT closed here — it is owned by the
+      // gesture/disable/unmount path so its unlocked AudioContext survives a
+      // spurious effect re-run. Only the backend (workers) is released here.
       backendRef.current?.dispose()
       backendRef.current = null
       sentBufRef.current = emptyBuffer()
@@ -291,14 +297,28 @@ export function VoiceView({ repos, config }: Props) {
   // The Start-Voice click is the one guaranteed user gesture. Create + unlock
   // the AudioContext here (synchronously in the gesture) so the agent's spoken
   // reply — which arrives much later, in an async continuation — is not dropped
-  // by the browser's autoplay policy. The engine effect then reuses this player.
+  // by the browser's autoplay policy. The player is owned here (gesture) and
+  // torn down on disable/unmount, NOT inside the enabled effect, so a spurious
+  // effect re-run never discards the unlocked context.
   const handleToggle = useCallback(() => {
     if (!enabled) {
       if (!playerRef.current) playerRef.current = new PcmPlayer(TTS_SAMPLE_RATE)
       void playerRef.current.unlock()
+    } else {
+      void playerRef.current?.close()
+      playerRef.current = null
     }
     toggle()
   }, [enabled, toggle])
+
+  // Release the player's AudioContext if the component ever fully unmounts
+  // (the enabled effect only releases the ML backend/workers, never the player).
+  useEffect(() => {
+    return () => {
+      void playerRef.current?.close()
+      playerRef.current = null
+    }
+  }, [])
 
   // A config change respawns the session — clear the visible transcript too.
   const resetForConfigChange = useCallback(() => {
