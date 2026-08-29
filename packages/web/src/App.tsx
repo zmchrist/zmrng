@@ -63,7 +63,13 @@ export default function App() {
   // Per-card tab-strip state for the Chat and Terminal panes, hydrated/persisted
   // from GlobalUiState — the live sessions themselves stay ephemeral. Feeds the
   // tabbed ChatCard/TerminalCard inside the Workspace IDE's Chat/Terminal tabs.
-  const chatTabs = useMemo(() => hydrateChatTabs(ui.state.global.chatTabs), [ui.state.global.chatTabs])
+  // A unique seed id per app boot for the fresh default chat tab, so a newly
+  // seeded "Chat 1" never reuses a closed tab's persisted transcript key.
+  const chatSeedId = useMemo(() => `chat-${crypto.randomUUID()}`, [])
+  const chatTabs = useMemo(
+    () => hydrateChatTabs(ui.state.global.chatTabs, chatSeedId),
+    [ui.state.global.chatTabs, chatSeedId],
+  )
   const setChatTabs = useCallback((next: TabsState<ChatTabState>) => ui.patchGlobal({ chatTabs: next }), [ui])
   const terminalTabs = useMemo(
     () => hydrateTerminalTabs(ui.state.global.terminalTabs),
