@@ -6,6 +6,21 @@ files only. No `node_modules/`, no `.env`, no `config/repos.json` /
 those locally. See `README.md` for what the app does; this file is just the
 "get it running" checklist.
 
+## Quick start (recommended) — the setup wizard
+
+**Double-click `setup.cmd`** in this folder. A guided wizard runs that checks
+each prerequisite, installs dependencies, writes your config, walks you through
+logging into GitHub + Claude, then launches zmrng and opens it in your browser.
+
+The wizard is safe to re-run — if a prerequisite is missing it opens the right
+download page, tells you exactly what to do, and you re-run it when you're done.
+It cannot *install* Node / Build Tools / Claude / gh for you (those have their
+own installers), but it detects them, guides you, and handles everything else.
+
+You still need the prerequisites in section 1 below — the wizard checks for them
+and points you at each installer. The manual steps (sections 2–4) are the
+fallback if you'd rather not use the wizard.
+
 ## 1. Prerequisites (install these first)
 
 | Tool | Why | Notes |
