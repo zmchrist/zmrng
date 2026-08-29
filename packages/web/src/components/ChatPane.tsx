@@ -15,7 +15,7 @@ import {
   pushUser,
   type ThreadState,
 } from '../chatThread'
-import type { CaveStyle, EffortLevel, ModelAlias } from '../types'
+import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget } from '../types'
 
 interface Props {
   /** Stable id for this chat instance (one WebSocket / claude session per id). */
@@ -25,10 +25,13 @@ interface Props {
   initialModel?: ModelAlias
   initialEffort?: EffortLevel
   initialStyle?: CaveStyle
-  /** The repo chosen at launch (`''` = "Projects root"). Locked for the life
-   *  of this session — unlike model/effort/style, there is no way to change it
-   *  post-launch (no repo-switch on a live tab). */
+  /** The repo chosen at launch (`''` = "Projects root"). Changeable live via
+   *  the config row's Repo select, same as model/effort/style — picking a
+   *  different repo respawns the session. */
   initialRepoId?: string
+  /** Same repo registry as task creation (`GET /api/repos`), for the live
+   *  Repo select. */
+  repos: RepoTarget[]
 }
 
 /** Chat-tab defaults — independent of the task-level DEFAULT_* controls. */
@@ -56,12 +59,12 @@ export function ChatPane({
   initialEffort = 'medium',
   initialStyle = 'caveman-full',
   initialRepoId = '',
+  repos,
 }: Props) {
   const [model, setModel] = useState<ModelAlias>(initialModel)
   const [effort, setEffort] = useState<EffortLevel>(initialEffort)
   const [style, setStyle] = useState<CaveStyle>(initialStyle)
-  // Locked for the session's lifetime — no setter, no config-row UI to change it.
-  const repoId = initialRepoId
+  const [repoId, setRepoId] = useState(initialRepoId)
   // Hydrate from the saved transcript (if any) so history survives a refresh/
   // rebuild/tab-reopen — the underlying `claude` session is gone regardless,
   // so it always starts idle (`busy: false`). Plain state (not a ref) so its
@@ -217,6 +220,23 @@ export function ChatPane({
           {STYLE_OPTIONS.map((st) => (
             <option key={st} value={st}>
               {st}
+            </option>
+          ))}
+        </select>
+        <select
+          className={styles.select}
+          aria-label="Repo"
+          value={repoId}
+          disabled={thread.busy}
+          onChange={(e) => {
+            setRepoId(e.target.value)
+            resetForConfigChange()
+          }}
+        >
+          <option value="">Projects root</option>
+          {repos.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.label}
             </option>
           ))}
         </select>
