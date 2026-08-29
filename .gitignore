@@ -32,3 +32,6 @@ packages/desktop/src-tauri/icons/*
 # Python bytecode (harness hooks)
 __pycache__/
 *.pyc
+
+# Playwright MCP screenshot artifacts
+.playwright-mcp/
