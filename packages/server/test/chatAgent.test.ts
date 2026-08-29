@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import { config } from '../src/config.js'
-import { ChatManager, chatSystemPrompt, parseChatClientMsg } from '../src/chatAgent.js'
+import { ChatManager, chatSystemPrompt, parseChatClientMsg, voiceSystemPrompt } from '../src/chatAgent.js'
 import type { RunnerCallbacks, RunnerFactory, RunnerLike, SpawnOptions } from '../src/runner.js'
 
 // Drives the REAL ChatManager with an INJECTED FAKE RunnerFactory, so no test
@@ -84,6 +84,22 @@ describe('parseChatClientMsg', () => {
     ).toEqual({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full', repoId: 'repo-a' })
   })
 
+  it('parses a well-formed start frame carrying the voice flag', () => {
+    expect(
+      parseChatClientMsg(
+        JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'normal', voice: true }),
+      ),
+    ).toEqual({ type: 'start', model: 'sonnet', effort: 'medium', style: 'normal', voice: true })
+  })
+
+  it('ignores a non-true voice value (only literal true opts in)', () => {
+    expect(
+      parseChatClientMsg(
+        JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'normal', voice: 'yes' }),
+      ),
+    ).toEqual({ type: 'start', model: 'sonnet', effort: 'medium', style: 'normal' })
+  })
+
   it('parses a well-formed input frame', () => {
     expect(parseChatClientMsg(JSON.stringify({ type: 'input', text: 'hi' }))).toEqual({
       type: 'input',
@@ -158,6 +174,15 @@ describe('ChatManager.create (fake runner factory)', () => {
     expect(created[0].opts.cwd).toBe('/tmp/zmrng-test-projects')
   })
 
+  it('spawns with the spoken voice prompt (ignoring style) when voice is set', () => {
+    const mgr = new ChatManager(factory)
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'caveman-full', voice: true }, noopCallbacks())
+    const prompt = created[0].opts.systemPrompt ?? ''
+    // Voice prompt markers present; caveman skill directive absent despite the style.
+    expect(prompt).toContain('spoken')
+    expect(prompt).not.toContain('/caveman')
+  })
+
   it('routes send/interrupt/kill to the returned session', () => {
     const mgr = new ChatManager(factory)
     const session = mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
@@ -227,5 +252,26 @@ describe('chatSystemPrompt', () => {
     expect(prompt).not.toMatch(/ZMRNG_/)
     expect(prompt).not.toMatch(/pull request/i)
     expect(prompt).not.toMatch(/\bbranch\b/i)
+  })
+})
+
+describe('voiceSystemPrompt', () => {
+  it('scopes to the projects dir and frames a spoken assistant', () => {
+    const prompt = voiceSystemPrompt('/tmp/projects')
+    expect(prompt).toContain('/tmp/projects')
+    expect(prompt).toContain('spoken')
+  })
+
+  it('bans markdown/lists and never uses caveman (it is a fixed natural register)', () => {
+    const prompt = voiceSystemPrompt('/tmp/projects')
+    expect(prompt.toLowerCase()).toContain('markdown')
+    expect(prompt).not.toContain('/caveman')
+    expect(prompt).toMatch(/not caveman/i)
+  })
+
+  it('is conversational — no worker control tokens or branch/PR protocol', () => {
+    const prompt = voiceSystemPrompt('/tmp/projects')
+    expect(prompt).not.toMatch(/ZMRNG_/)
+    expect(prompt).not.toMatch(/pull request/i)
   })
 })

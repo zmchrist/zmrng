@@ -33,6 +33,45 @@ export function chatSystemPrompt(style: CaveStyle, projectsDir: string): string 
   ].join('\n')
 }
 
+/**
+ * The system prompt for the Local Voice Chat surface. Unlike `chatSystemPrompt`,
+ * this is a fixed *spoken* register — every reply is read aloud by a TTS engine,
+ * so the persona optimizes for the ear, not the eye. It deliberately does NOT
+ * take a `CaveStyle`: caveman is a text-compression register that sounds broken
+ * when spoken, so voice always uses this one warm, natural-speech voice. Same
+ * read/explore filesystem access and no-lifecycle framing as the text chat; only
+ * the delivery contract differs.
+ */
+export function voiceSystemPrompt(projectsDir: string): string {
+  return [
+    'You are a voice assistant embedded in zmrng. Every reply you write is spoken',
+    'aloud to the operator by a text-to-speech engine, so speak — do not write.',
+    `You have read and explore filesystem access to the operator's projects at \`${projectsDir}\`.`,
+    'This is a free-form spoken conversation: no tasks, phases, branches, PRs, or',
+    'control tokens. Just talk, explore, and help.',
+    '',
+    'HOW TO SPEAK:',
+    '- Warm, natural, concise — like a sharp colleague talking, not a document being read.',
+    '- Plain conversational prose ONLY. No markdown, asterisks, bullet or numbered',
+    '  lists, headings, tables, or code blocks — a TTS engine reads those symbols',
+    '  literally ("asterisk", "bullet") and it sounds broken.',
+    '- Keep turns short: one to three sentences by default. The operator can interrupt',
+    '  you, and a long monologue cannot be barged cleanly. If there is more to say,',
+    '  give the headline and offer to go deeper.',
+    '- Never read code, file contents, diffs, or long identifiers aloud. Summarize in',
+    '  words ("I changed the runner to strip the API key") and offer to show it on',
+    '  screen instead.',
+    '- Say numbers, paths, and symbols the way a person would: "port forty-five',
+    '  hundred", not "4500"; "the runner file", not "runner dot t s".',
+    '- Natural acknowledgments ("got it", "okay", "mm-hm") are good — they keep the',
+    '  conversation feeling alive.',
+    '- This is NOT caveman: speak in full, warm, natural sentences.',
+    '',
+    'Keep tool use purposeful and quiet: explore when it helps, but narrate only the',
+    'meaningful result in a sentence, never a play-by-play of every step.',
+  ].join('\n')
+}
+
 // ---- tolerant client-frame parsing -----------------------------------------
 
 function asRecord(v: unknown): Record<string, unknown> | undefined {
@@ -67,6 +106,7 @@ export function parseChatClientMsg(raw: string): ChatClientMsg | undefined {
         effort: obj.effort as EffortLevel,
         style: obj.style as CaveStyle,
         ...(typeof obj.repoId === 'string' ? { repoId: obj.repoId } : {}),
+        ...(obj.voice === true ? { voice: true } : {}),
       }
     }
     return undefined
@@ -96,6 +136,9 @@ export interface ChatConfig {
   /** Picks which registered repo the session's cwd is rooted at. A missing or
    *  unresolvable id falls back to `config.projectsDir` ("Projects root"). */
   repoId?: string
+  /** When true, spawn with `voiceSystemPrompt` (spoken register) instead of
+   *  `chatSystemPrompt`; `style` is then ignored. Set by the Voice surface. */
+  voice?: boolean
 }
 
 /**
@@ -120,7 +163,7 @@ export class ChatManager {
       cwd: root,
       model: cfg.model,
       effort: cfg.effort,
-      systemPrompt: chatSystemPrompt(cfg.style, root),
+      systemPrompt: cfg.voice ? voiceSystemPrompt(root) : chatSystemPrompt(cfg.style, root),
     }
     const session = this.factory(opts, {
       ...cb,
