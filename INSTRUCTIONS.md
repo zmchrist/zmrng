@@ -8,9 +8,21 @@ those locally. See `README.md` for what the app does; this file is just the
 
 ## Quick start (recommended) — the setup wizard
 
-**Double-click `setup.cmd`** in this folder. A guided wizard runs that checks
-each prerequisite, installs dependencies, writes your config, walks you through
-logging into GitHub + Claude, then launches zmrng and opens it in your browser.
+**Step 0 — EXTRACT the zip first.** Right-click the downloaded `.zip` →
+**Extract All…** → pick a real folder (e.g. `C:\Projects\zmrng`). Do **not**
+run anything from inside the zip preview window — Windows opens it read-only in
+a temporary location, and the wizard's install/config steps will fail there.
+Open the folder you extracted to before continuing.
+
+**Double-click `setup.cmd`** in that extracted folder. A guided wizard runs that
+checks each prerequisite, installs dependencies, writes your config, walks you
+through logging into GitHub + Claude, then launches zmrng and opens it in your
+browser.
+
+> **Expect a blue "Windows protected your PC" pop-up** the first time. That's
+> SmartScreen flagging a script downloaded from the internet — it's normal.
+> Click **More info**, then **Run anyway**. (The launcher already handles the
+> separate PowerShell execution-policy prompt, so you won't see that one.)
 
 The wizard is safe to re-run — if a prerequisite is missing it opens the right
 download page, tells you exactly what to do, and you re-run it when you're done.
