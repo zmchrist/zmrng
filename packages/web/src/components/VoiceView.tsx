@@ -16,7 +16,7 @@ import { initialTurn, reduce, type VoiceEvent, type VoiceState } from '../voiceT
 import { LocalVoiceBackend } from '../voice/localBackend'
 import type { VoiceBackend } from '../voice/backend'
 import { PcmPlayer } from '../voice/player'
-import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget, ServerConfig } from '../types'
+import type { EffortLevel, ModelAlias, RepoTarget, ServerConfig } from '../types'
 
 // Lazy imports for the mic VAD keep the (heavy) ONNX bundle out of the first
 // paint; the module is only pulled once the operator enables voice.
@@ -29,13 +29,6 @@ interface Props {
 
 const MODEL_OPTIONS: readonly ModelAlias[] = ['sonnet', 'opus']
 const EFFORT_OPTIONS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
-const STYLE_OPTIONS: readonly CaveStyle[] = [
-  'normal',
-  'caveman-lite',
-  'caveman-full',
-  'caveman-ultra',
-  'wenyan-full',
-]
 
 /** The VAD emits 16 kHz mono audio (its fixed output rate). */
 const VAD_SAMPLE_RATE = 16000
@@ -75,7 +68,6 @@ const TURN_LABEL: Record<VoiceState, string> = {
 export function VoiceView({ repos, config }: Props) {
   const [model, setModel] = useState<ModelAlias>('sonnet')
   const [effort, setEffort] = useState<EffortLevel>('medium')
-  const [style, setStyle] = useState<CaveStyle>('caveman-full')
   const [repoId, setRepoId] = useState<string>(config?.defaultRepoId ?? '')
   const [enabled, setEnabled] = useState(false)
   const [turn, setTurnState] = useState<VoiceState>(initialTurn())
@@ -167,7 +159,10 @@ export function VoiceView({ repos, config }: Props) {
     const ws = new WebSocket(`${proto}://${location.host}/ws/chat`)
     wsRef.current = ws
 
-    ws.onopen = () => ws.send(encodeStart(model, effort, style, repoId))
+    // Voice always uses the server's dedicated spoken register (`voice: true`),
+    // never a caveman `style` — a text-compression register sounds broken read
+    // aloud. `style` is sent as a placeholder the server ignores under `voice`.
+    ws.onopen = () => ws.send(encodeStart(model, effort, 'normal', repoId, true))
     ws.onmessage = (e) => {
       const msg = parseChatServerMsg(String(e.data))
       if (!msg) return
@@ -204,7 +199,7 @@ export function VoiceView({ repos, config }: Props) {
       wsRef.current = null
       ws.close()
     }
-  }, [enabled, model, effort, style, repoId, dispatch, speakSentence])
+  }, [enabled, model, effort, repoId, dispatch, speakSentence])
 
   // --- engine leg: backend + player + mic VAD while voice is enabled -------
   useEffect(() => {
@@ -378,22 +373,6 @@ export function VoiceView({ repos, config }: Props) {
           {EFFORT_OPTIONS.map((eff) => (
             <option key={eff} value={eff}>
               {eff}
-            </option>
-          ))}
-        </select>
-        <select
-          className={styles.select}
-          aria-label="Style"
-          value={style}
-          disabled={enabled}
-          onChange={(e) => {
-            setStyle(e.target.value as CaveStyle)
-            resetForConfigChange()
-          }}
-        >
-          {STYLE_OPTIONS.map((st) => (
-            <option key={st} value={st}>
-              {st}
             </option>
           ))}
         </select>

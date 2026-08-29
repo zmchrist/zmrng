@@ -422,7 +422,20 @@ export type TermServerMsg =
  * in-flight turn without killing the session.
  */
 export type ChatClientMsg =
-  | { type: 'start'; model: string; effort: EffortLevel; style: CaveStyle }
+  | {
+      type: 'start'
+      model: string
+      effort: EffortLevel
+      style: CaveStyle
+      repoId?: string
+      /**
+       * When true, the session uses the server's dedicated spoken
+       * `voiceSystemPrompt` (warm natural-speech register for TTS) instead of
+       * the text `chatSystemPrompt`; `style` is then ignored. Set only by the
+       * Local Voice Chat surface — the text Chat card leaves it unset.
+       */
+      voice?: boolean
+    }
   | { type: 'input'; text: string; attachments?: Attachment[] }
   | { type: 'interrupt' }
 
