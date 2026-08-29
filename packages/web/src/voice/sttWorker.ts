@@ -62,9 +62,13 @@ async function load(): Promise<Transcriber> {
     })
     return p as unknown as Transcriber
   } catch {
+    // WASM fallback: use fp32, NOT q8. The q8 whisper-tiny.en checkpoint packs its
+    // decoder as MatMulNBits block-quant weights, which the pinned onnxruntime-web
+    // dev build fails to load ("Missing required scale … TransposeDQWeightsForMatMulNBits").
+    // whisper-tiny.en is small enough that fp32 is fine, and it sidesteps the op entirely.
     const p = await pipeline('automatic-speech-recognition', STT_MODEL, {
       device: 'wasm',
-      dtype: 'q8',
+      dtype: 'fp32',
       progress_callback: onProgress,
     })
     return p as unknown as Transcriber
