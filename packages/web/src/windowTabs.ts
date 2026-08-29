@@ -116,12 +116,21 @@ export function hydrateTerminalTabs(stored?: TabsState<TerminalTabState> | null)
 
 /** Hydrate the Chat card's persisted tab list, seeding one default unlaunched
  *  tab when the doc has none (fresh install / older doc) — the first chat tab
- *  needs a Launch press too, same as every other one. */
-export function hydrateChatTabs(stored?: TabsState<ChatTabState> | null): TabsState<ChatTabState> {
+ *  needs a Launch press too, same as every other one.
+ *
+ *  `seedId` is the id of that fresh default tab. Callers pass a unique id
+ *  (e.g. `chat-<uuid>`) so a freshly-seeded default never reuses the
+ *  localStorage transcript key of a previously-closed tab — otherwise a new
+ *  "Chat 1" would reload the old chat's history. Defaults to `'chat-1'` for
+ *  deterministic tests. */
+export function hydrateChatTabs(
+  stored?: TabsState<ChatTabState> | null,
+  seedId = 'chat-1',
+): TabsState<ChatTabState> {
   if (stored && Array.isArray(stored.tabs) && stored.tabs.length > 0) {
     return repairActiveId({ tabs: stored.tabs, activeId: stored.activeId ?? null })
   }
-  return addChatTab(emptyTabs(), 'chat-1', 'Chat 1', {
+  return addChatTab(emptyTabs(), seedId, 'Chat 1', {
     model: 'sonnet',
     effort: 'medium',
     style: 'caveman-full',

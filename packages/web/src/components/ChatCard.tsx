@@ -12,6 +12,7 @@ import {
   type ChatTabState,
   type TabsState,
 } from '../windowTabs'
+import { removeChatThread } from '../chatPersistence'
 import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget } from '../types'
 
 interface Props {
@@ -58,7 +59,15 @@ export function ChatCard({ tabs, onTabsChange, repos }: Props) {
     onTabsChange(addChatTab(tabs, id, nextLabel('Chat', tabs), NEW_TAB_DEFAULTS))
   }, [tabs, onTabsChange])
 
-  const closeThisTab = useCallback((id: string) => onTabsChange(closeTab(tabs, id)), [tabs, onTabsChange])
+  const closeThisTab = useCallback(
+    (id: string) => {
+      // Purge the closed tab's saved transcript so its history can't leak into
+      // a later tab that happens to reuse the same id (e.g. a re-seeded default).
+      removeChatThread(id)
+      onTabsChange(closeTab(tabs, id))
+    },
+    [tabs, onTabsChange],
+  )
   const activate = useCallback((id: string) => onTabsChange(setActiveTab(tabs, id)), [tabs, onTabsChange])
   const launch = useCallback((id: string) => onTabsChange(launchChatTab(tabs, id)), [tabs, onTabsChange])
   const setConfig = useCallback(
