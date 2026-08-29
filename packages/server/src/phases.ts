@@ -157,11 +157,14 @@ export function systemPrompt(
   ].join('\n')
 }
 
-function clarifyKickoff(task: Task): string {
+/** Exported for prompt-contract tests (phase 3). */
+export function clarifyKickoff(task: Task): string {
   return [
     `Task title: ${task.title}`,
     `Task details: ${task.body}`,
-    'CLARIFY PHASE: ask the operator the questions you need to scope this task, in small batches. Do NOT write code or a plan yet. When you have enough to plan and implement fully autonomously, output the exact token ZMRNG_READY on its own line, followed by a one-paragraph scope summary.',
+    'CLARIFY PHASE: ask the operator the questions you need to scope this task, in small batches. Do NOT write code or a plan yet.',
+    'BE SKEPTICAL BY DEFAULT: the operator may be non-technical and give vague, thin, or under-scoped answers. Do NOT take a vague answer at face value and do NOT self-certify that you have "enough to plan". Keep probing every vague or thin answer with specific follow-up questions until the scope is concrete: what exactly should change, where, what the done state looks like, and what is explicitly out of scope. Do NOT emit ZMRNG_READY while any material part of the scope is still vague or unconfirmed.',
+    'RESTATE AND CONFIRM before finishing: once you believe the scope is concrete, first restate your understanding back to the operator — "here is what I understand you want: …" — covering the concrete change, the done state, and what is out of scope, then ask the operator to confirm. Wait for the operator to explicitly confirm. Only AFTER that explicit confirmation do you output the exact token ZMRNG_READY on its own line, followed by a one-paragraph scope summary.',
   ].join('\n')
 }
 

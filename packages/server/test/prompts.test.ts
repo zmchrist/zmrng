@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest'
 import {
   PR_BODY_FILE,
   PR_BODY_TEMPLATE,
+  clarifyKickoff,
   directKickoff,
   executeKickoff,
   planKickoff,
@@ -73,6 +74,41 @@ describe('systemPrompt', () => {
     expect(prompt).toMatch(/zmrng-code-reviewer/)
     expect(prompt).toMatch(/zmrng-doc-updater/)
     expect(prompt).toMatch(/guaranteed present/i)
+  })
+})
+
+describe('clarifyKickoff', () => {
+  const prompt = clarifyKickoff(task)
+
+  it('carries the task title and body as the interview subject', () => {
+    expect(prompt).toContain(task.title)
+    expect(prompt).toContain(task.body)
+  })
+
+  it('still names the clarify phase and forbids writing code/plan yet', () => {
+    expect(prompt).toMatch(/CLARIFY PHASE/)
+    expect(prompt).toMatch(/Do NOT write code or a plan yet/)
+  })
+
+  it('is skeptical by default — refuses ZMRNG_READY until scope is concrete', () => {
+    // The worker must keep probing thin/vague answers, not self-certify a
+    // premature READY on a layman's under-scoped reply (D3 skeptical-by-default).
+    expect(prompt).toMatch(/skeptical/i)
+    expect(prompt).toMatch(/vague|thin|underspecified|under-scoped/i)
+    // The refusal must be explicit: do NOT emit READY while scope is unclear.
+    expect(prompt).toMatch(/do NOT (emit|output).*ZMRNG_READY/i)
+    expect(prompt).toMatch(/concrete/i)
+  })
+
+  it('restates its understanding and waits for explicit confirmation before READY', () => {
+    // Before emitting READY the worker echoes back what it understood and waits
+    // for the operator to confirm (D3 restate-and-confirm).
+    expect(prompt).toMatch(/restate|echo|here is what I understand/i)
+    expect(prompt).toMatch(/confirm/i)
+    // The confirm must gate READY: restate happens BEFORE the token is emitted.
+    expect(prompt.search(/restate|echo|here is what I understand/i)).toBeLessThan(
+      prompt.lastIndexOf('ZMRNG_READY'),
+    )
   })
 })
 
