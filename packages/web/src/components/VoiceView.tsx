@@ -40,6 +40,9 @@ const STYLE_OPTIONS: readonly CaveStyle[] = [
 /** The VAD emits 16 kHz mono audio (its fixed output rate). */
 const VAD_SAMPLE_RATE = 16000
 
+/** Kokoro TTS emits 24 kHz PCM — used to pre-create the player in the gesture. */
+const TTS_SAMPLE_RATE = 24000
+
 // `@ricky0123/vad-web` is the THIRD onnxruntime-web instance in this feature
 // (after whisper's transformers.js and kokoro's nested transformers.js). It
 // bundles its own ORT for Silero VAD, so Vite/Rolldown pre-bundles its wasm into
@@ -117,8 +120,11 @@ export function VoiceView({ repos, config }: Props) {
         if (epoch !== epochRef.current) return
         await player.enqueue(pcm, backend.sampleRate)
       })
-      .catch(() => {
-        // A single sentence failing to synthesize should not break the stream.
+      .catch((err: unknown) => {
+        // A single sentence failing to synthesize should not break the stream,
+        // but surface it — a silent catch here is exactly what made a broken TTS
+        // leg look like "the agent replied but no voice came out".
+        setError(`Voice playback error: ${String(err)}`)
       })
   }, [])
 
@@ -184,7 +190,10 @@ export function VoiceView({ repos, config }: Props) {
     if (!enabled) return
     let cancelled = false
     const backend = new LocalVoiceBackend()
-    const player = new PcmPlayer(backend.sampleRate)
+    // Reuse the player pre-created + unlocked in the Start-Voice gesture (see
+    // `handleToggle`) so the AudioContext keeps its user-activation; only make a
+    // fresh one on a config-change respawn where the ref was cleared.
+    const player = playerRef.current ?? new PcmPlayer(backend.sampleRate)
     backendRef.current = backend
     playerRef.current = player
 
@@ -279,6 +288,18 @@ export function VoiceView({ repos, config }: Props) {
     })
   }, [setTurn])
 
+  // The Start-Voice click is the one guaranteed user gesture. Create + unlock
+  // the AudioContext here (synchronously in the gesture) so the agent's spoken
+  // reply — which arrives much later, in an async continuation — is not dropped
+  // by the browser's autoplay policy. The engine effect then reuses this player.
+  const handleToggle = useCallback(() => {
+    if (!enabled) {
+      if (!playerRef.current) playerRef.current = new PcmPlayer(TTS_SAMPLE_RATE)
+      void playerRef.current.unlock()
+    }
+    toggle()
+  }, [enabled, toggle])
+
   // A config change respawns the session — clear the visible transcript too.
   const resetForConfigChange = useCallback(() => {
     setThread(emptyThread())
@@ -362,7 +383,7 @@ export function VoiceView({ repos, config }: Props) {
         <button
           type="button"
           className={`${styles.talkBtn} ${enabled ? styles.talkBtnOn : ''}`}
-          onClick={toggle}
+          onClick={handleToggle}
           aria-pressed={enabled}
         >
           {enabled ? 'Stop voice' : 'Start voice'}

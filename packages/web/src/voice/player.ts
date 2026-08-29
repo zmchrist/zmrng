@@ -24,6 +24,28 @@ export class PcmPlayer {
   }
 
   /**
+   * Create and resume the AudioContext eagerly, from inside a user gesture (the
+   * Start-Voice click). Browsers block/suspend an AudioContext that is first
+   * created in an async continuation outside a gesture (autoplay policy), which
+   * silently drops later playback. Playing a one-sample silent buffer "unlocks"
+   * the context so subsequent `enqueue`s are audible. Best-effort — a failure
+   * here must not break enabling voice.
+   */
+  async unlock(): Promise<void> {
+    try {
+      const ctx = this.context()
+      if (ctx.state === 'suspended') await ctx.resume()
+      const buffer = ctx.createBuffer(1, 1, this.defaultRate)
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      source.connect(ctx.destination)
+      source.start(0)
+    } catch {
+      // autoplay still blocked / context unavailable — enqueue will retry resume
+    }
+  }
+
+  /**
    * Queue a mono PCM chunk for gapless playback. The AudioContext resamples the
    * buffer from `sampleRate` (defaults to the rate passed at construction).
    */
