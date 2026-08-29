@@ -105,10 +105,21 @@ describe('clarifyKickoff', () => {
     // for the operator to confirm (D3 restate-and-confirm).
     expect(prompt).toMatch(/restate|echo|here is what I understand/i)
     expect(prompt).toMatch(/confirm/i)
-    // The confirm must gate READY: restate happens BEFORE the token is emitted.
-    expect(prompt.search(/restate|echo|here is what I understand/i)).toBeLessThan(
-      prompt.lastIndexOf('ZMRNG_READY'),
-    )
+    // The confirm must GATE the token emission, in this order within the
+    // directive: restate → explicit-confirmation gate → emit ZMRNG_READY.
+    // Anchor on the specific emission instruction and the confirmation gate
+    // (not a bare ZMRNG_READY, which also appears in the skeptical refusal
+    // line "Do NOT emit ZMRNG_READY while…"), so a reordering that emits the
+    // token before requiring confirmation trips this test.
+    const restateIdx = prompt.search(/restate|here is what I understand/i)
+    const confirmGateIdx = prompt.search(/AFTER .*explicit confirmation/i)
+    const emitIdx = prompt.indexOf('output the exact token ZMRNG_READY')
+    expect(restateIdx).toBeGreaterThan(-1)
+    expect(confirmGateIdx).toBeGreaterThan(-1)
+    expect(emitIdx).toBeGreaterThan(-1)
+    // restate BEFORE the confirmation gate BEFORE the token emission.
+    expect(restateIdx).toBeLessThan(confirmGateIdx)
+    expect(confirmGateIdx).toBeLessThan(emitIdx)
   })
 })
 
