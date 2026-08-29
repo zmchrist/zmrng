@@ -7,12 +7,17 @@
   --bg: #090b13;
 
   /* ---- surfaces — translucent glass panels over the cosmic field -------- */
-  --surface: rgba(14, 18, 32, 0.5);
-  --surface-strong: rgba(16, 20, 34, 0.62);
+  /* --surface-opacity is a user-tunable multiplier (Settings → Window opacity):
+     1 = the authored alphas below, 0 = fully see-through glass. It scales only
+     the panel-background alphas, never text/icons/borders. Set at runtime on
+     the document root by opacity.ts. */
+  --surface-opacity: 1;
+  --surface: rgba(14, 18, 32, calc(0.5 * var(--surface-opacity)));
+  --surface-strong: rgba(16, 20, 34, calc(0.62 * var(--surface-opacity)));
   --surface-hover: rgba(255, 255, 255, 0.06);
   /* inset wells for fields / code */
-  --well: rgba(0, 0, 0, 0.3);
-  --well-strong: rgba(0, 0, 0, 0.46);
+  --well: rgba(0, 0, 0, calc(0.3 * var(--surface-opacity)));
+  --well-strong: rgba(0, 0, 0, calc(0.46 * var(--surface-opacity)));
 
   /* frosted glass is back: real backdrop blur on every panel */
   --blur: 20px;

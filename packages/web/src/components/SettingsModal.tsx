@@ -12,6 +12,7 @@ import {
   type ThemeMode,
 } from '../themes'
 import { loadStoredWorkspaceUrl, saveStoredWorkspaceUrl } from '../teamConfig'
+import { applyOpacity, loadStoredOpacity, saveStoredOpacity } from '../opacity'
 
 interface Props {
   open: boolean
@@ -38,10 +39,19 @@ export function SettingsModal({ open, onClose, connected }: Props) {
   // Per-teammate VPS team-workspace URL (localStorage; wins over the server
   // default surfaced via ServerConfig.workspaceUrl). Persisted on every edit.
   const [workspaceUrl, setWorkspaceUrl] = useState(() => loadStoredWorkspaceUrl())
+  // Surface (glass panel) opacity, 0–100%. Applied live on drag and persisted to
+  // localStorage; affects only the frosted-glass panel backgrounds, not text.
+  const [opacity, setOpacity] = useState(() => loadStoredOpacity())
 
   const onWorkspaceUrlChange = (value: string) => {
     setWorkspaceUrl(value)
     saveStoredWorkspaceUrl(value)
+  }
+
+  const onOpacityChange = (value: number) => {
+    setOpacity(value)
+    applyOpacity(value)
+    saveStoredOpacity(value)
   }
 
   useEffect(() => {
@@ -173,6 +183,27 @@ export function SettingsModal({ open, onClose, connected }: Props) {
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className={styles.section}>
+            <div className={styles.sectionHead}>
+              <span className={styles.sectionTitle}>Window opacity</span>
+              <span className={styles.opacityValue}>{opacity}%</span>
+            </div>
+            <p className={styles.rebootHint}>
+              Transparency of the frosted-glass panels only — text, icons, and borders stay fully
+              opaque. Lower it to let the desktop show through.
+            </p>
+            <input
+              type="range"
+              className={styles.opacitySlider}
+              aria-label="Window opacity"
+              min={0}
+              max={100}
+              step={1}
+              value={opacity}
+              onChange={(e) => onOpacityChange(Number(e.target.value))}
+            />
           </div>
 
           <div className={styles.section}>
