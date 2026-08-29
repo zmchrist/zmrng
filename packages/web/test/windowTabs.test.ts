@@ -180,6 +180,23 @@ describe('hydrateChatTabs', () => {
     expect(s.tabs[0].launched).toBe(false)
   })
 
+  it('uses the caller-supplied seed id for the fresh default tab', () => {
+    const s = hydrateChatTabs(undefined, 'chat-unique-xyz')
+    expect(ids(s)).toEqual(['chat-unique-xyz'])
+    expect(s.tabs[0].label).toBe('Chat 1')
+    expect(s.tabs[0].launched).toBe(false)
+  })
+
+  it('ignores the seed id when a persisted list already exists', () => {
+    const stored: TabsState<ChatTabState> = {
+      tabs: [
+        { id: 'c-9', label: 'Chat 9', model: 'opus', effort: 'low', style: 'normal', repoId: '', launched: true },
+      ],
+      activeId: 'c-9',
+    }
+    expect(ids(hydrateChatTabs(stored, 'chat-unique-xyz'))).toEqual(['c-9'])
+  })
+
   it('passes through a persisted non-empty list unchanged', () => {
     const stored: TabsState<ChatTabState> = {
       tabs: [
