@@ -11,12 +11,12 @@ import {
   pushUser,
   type ThreadState,
 } from '../chatThread'
-import { emptyBuffer, flush, push, type SentenceBuffer } from '../voiceSentences'
+import { emptyBuffer, flush, push, sanitizeForSpeech, type SentenceBuffer } from '../voiceSentences'
 import { initialTurn, reduce, type VoiceEvent, type VoiceState } from '../voiceTurn'
 import { LocalVoiceBackend } from '../voice/localBackend'
 import type { VoiceBackend } from '../voice/backend'
 import { PcmPlayer } from '../voice/player'
-import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget, ServerConfig } from '../types'
+import type { EffortLevel, ModelAlias, RepoTarget, ServerConfig } from '../types'
 
 // Lazy imports for the mic VAD keep the (heavy) ONNX bundle out of the first
 // paint; the module is only pulled once the operator enables voice.
@@ -29,16 +29,12 @@ interface Props {
 
 const MODEL_OPTIONS: readonly ModelAlias[] = ['sonnet', 'opus']
 const EFFORT_OPTIONS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max']
-const STYLE_OPTIONS: readonly CaveStyle[] = [
-  'normal',
-  'caveman-lite',
-  'caveman-full',
-  'caveman-ultra',
-  'wenyan-full',
-]
 
 /** The VAD emits 16 kHz mono audio (its fixed output rate). */
 const VAD_SAMPLE_RATE = 16000
+
+/** Kokoro TTS emits 24 kHz PCM — used to pre-create the player in the gesture. */
+const TTS_SAMPLE_RATE = 24000
 
 // `@ricky0123/vad-web` is the THIRD onnxruntime-web instance in this feature
 // (after whisper's transformers.js and kokoro's nested transformers.js). It
@@ -72,7 +68,6 @@ const TURN_LABEL: Record<VoiceState, string> = {
 export function VoiceView({ repos, config }: Props) {
   const [model, setModel] = useState<ModelAlias>('sonnet')
   const [effort, setEffort] = useState<EffortLevel>('medium')
-  const [style, setStyle] = useState<CaveStyle>('caveman-full')
   const [repoId, setRepoId] = useState<string>(config?.defaultRepoId ?? '')
   const [enabled, setEnabled] = useState(false)
   const [turn, setTurnState] = useState<VoiceState>(initialTurn())
@@ -106,19 +101,43 @@ export function VoiceView({ repos, config }: Props) {
   }, [])
 
   /** Queue one sentence for speech, dropping it if its turn was superseded. */
-  const speakSentence = useCallback((text: string, epoch: number) => {
+  const speakSentence = useCallback((rawText: string, epoch: number) => {
+    // Strip markdown noise (`*`, `_`, backtick, etc.) so the TTS engine never
+    // pronounces "asterisk"; the visible transcript keeps the original text.
+    const text = sanitizeForSpeech(rawText)
+    // Nothing speakable left after stripping (e.g. a lone "**") — skip synth.
+    if (!text) return
+    console.info('[voice] speakSentence queued:', JSON.stringify(text), 'epoch=', epoch)
     synthChainRef.current = synthChainRef.current
       .then(async () => {
-        if (epoch !== epochRef.current) return
+        if (epoch !== epochRef.current) {
+          console.warn('[voice] DROP before synth: epoch', epoch, '!=', epochRef.current, '-', JSON.stringify(text))
+          return
+        }
         const backend = backendRef.current
         const player = playerRef.current
-        if (!backend || !player) return
+        if (!backend || !player) {
+          console.warn('[voice] DROP: no backend/player', { backend: !!backend, player: !!player })
+          return
+        }
+        console.info('[voice] synth start:', JSON.stringify(text))
         const pcm = await backend.synthesize(text)
-        if (epoch !== epochRef.current) return
+        console.info('[voice] synth done: samples=', pcm.length)
+        if (epoch !== epochRef.current) {
+          console.warn('[voice] DROP after synth: epoch', epoch, '!=', epochRef.current)
+          return
+        }
         await player.enqueue(pcm, backend.sampleRate)
       })
-      .catch(() => {
-        // A single sentence failing to synthesize should not break the stream.
+      .catch((err: unknown) => {
+        const msg = String(err)
+        // A "voice backend disposed" rejection is a benign teardown race (the
+        // engine effect tearing down on disable / a dev HMR reload rejects any
+        // in-flight synth) — NOT a real failure, so don't alarm the operator.
+        // Surface only genuine synth/playback errors. A single sentence failing
+        // should also not break the rest of the stream.
+        if (/disposed/i.test(msg)) return
+        setError(`Voice playback error: ${msg}`)
       })
   }, [])
 
@@ -140,7 +159,10 @@ export function VoiceView({ repos, config }: Props) {
     const ws = new WebSocket(`${proto}://${location.host}/ws/chat`)
     wsRef.current = ws
 
-    ws.onopen = () => ws.send(encodeStart(model, effort, style, repoId))
+    // Voice always uses the server's dedicated spoken register (`voice: true`),
+    // never a caveman `style` — a text-compression register sounds broken read
+    // aloud. `style` is sent as a placeholder the server ignores under `voice`.
+    ws.onopen = () => ws.send(encodeStart(model, effort, 'normal', repoId, true))
     ws.onmessage = (e) => {
       const msg = parseChatServerMsg(String(e.data))
       if (!msg) return
@@ -177,16 +199,20 @@ export function VoiceView({ repos, config }: Props) {
       wsRef.current = null
       ws.close()
     }
-  }, [enabled, model, effort, style, repoId, dispatch, speakSentence])
+  }, [enabled, model, effort, repoId, dispatch, speakSentence])
 
   // --- engine leg: backend + player + mic VAD while voice is enabled -------
   useEffect(() => {
     if (!enabled) return
     let cancelled = false
     const backend = new LocalVoiceBackend()
-    const player = new PcmPlayer(backend.sampleRate)
+    // The player is owned OUTSIDE this effect (created + unlocked in the
+    // Start-Voice gesture, closed on disable/unmount). We only ensure one
+    // exists; we deliberately never close it here, so a spurious effect re-run
+    // (e.g. a dev HMR reload) can't discard the gesture-unlocked AudioContext
+    // and leave later playback silently suspended.
+    if (!playerRef.current) playerRef.current = new PcmPlayer(backend.sampleRate)
     backendRef.current = backend
-    playerRef.current = player
 
     const onSpeechStart = () => {
       if (turnRef.current === 'speaking') {
@@ -261,8 +287,9 @@ export function VoiceView({ repos, config }: Props) {
       epochRef.current++
       void vadRef.current?.destroy()
       vadRef.current = null
-      void playerRef.current?.close()
-      playerRef.current = null
+      // NOTE: the player is intentionally NOT closed here — it is owned by the
+      // gesture/disable/unmount path so its unlocked AudioContext survives a
+      // spurious effect re-run. Only the backend (workers) is released here.
       backendRef.current?.dispose()
       backendRef.current = null
       sentBufRef.current = emptyBuffer()
@@ -278,6 +305,32 @@ export function VoiceView({ repos, config }: Props) {
       return !prev
     })
   }, [setTurn])
+
+  // The Start-Voice click is the one guaranteed user gesture. Create + unlock
+  // the AudioContext here (synchronously in the gesture) so the agent's spoken
+  // reply — which arrives much later, in an async continuation — is not dropped
+  // by the browser's autoplay policy. The player is owned here (gesture) and
+  // torn down on disable/unmount, NOT inside the enabled effect, so a spurious
+  // effect re-run never discards the unlocked context.
+  const handleToggle = useCallback(() => {
+    if (!enabled) {
+      if (!playerRef.current) playerRef.current = new PcmPlayer(TTS_SAMPLE_RATE)
+      void playerRef.current.unlock()
+    } else {
+      void playerRef.current?.close()
+      playerRef.current = null
+    }
+    toggle()
+  }, [enabled, toggle])
+
+  // Release the player's AudioContext if the component ever fully unmounts
+  // (the enabled effect only releases the ML backend/workers, never the player).
+  useEffect(() => {
+    return () => {
+      void playerRef.current?.close()
+      playerRef.current = null
+    }
+  }, [])
 
   // A config change respawns the session — clear the visible transcript too.
   const resetForConfigChange = useCallback(() => {
@@ -325,22 +378,6 @@ export function VoiceView({ repos, config }: Props) {
         </select>
         <select
           className={styles.select}
-          aria-label="Style"
-          value={style}
-          disabled={enabled}
-          onChange={(e) => {
-            setStyle(e.target.value as CaveStyle)
-            resetForConfigChange()
-          }}
-        >
-          {STYLE_OPTIONS.map((st) => (
-            <option key={st} value={st}>
-              {st}
-            </option>
-          ))}
-        </select>
-        <select
-          className={styles.select}
           aria-label="Repo"
           value={repoId}
           disabled={enabled}
@@ -362,7 +399,7 @@ export function VoiceView({ repos, config }: Props) {
         <button
           type="button"
           className={`${styles.talkBtn} ${enabled ? styles.talkBtnOn : ''}`}
-          onClick={toggle}
+          onClick={handleToggle}
           aria-pressed={enabled}
         >
           {enabled ? 'Stop voice' : 'Start voice'}

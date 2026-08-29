@@ -35,6 +35,26 @@ describe('client encoders', () => {
     })
   })
 
+  it('encodeStart carries the voice flag when set (voice surface opts in)', () => {
+    expect(JSON.parse(encodeStart('sonnet', 'medium', 'normal', 'repo-a', true))).toEqual({
+      type: 'start',
+      model: 'sonnet',
+      effort: 'medium',
+      style: 'normal',
+      repoId: 'repo-a',
+      voice: true,
+    })
+  })
+
+  it('encodeStart omits voice when falsy — byte-identical to the pre-voice frame', () => {
+    expect(encodeStart('sonnet', 'medium', 'caveman-full')).toBe(
+      JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full' }),
+    )
+    expect(encodeStart('sonnet', 'medium', 'caveman-full', '', false)).toBe(
+      JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full' }),
+    )
+  })
+
   it('encodeInput produces an input frame carrying the text', () => {
     expect(JSON.parse(encodeInput('hello agent'))).toEqual({ type: 'input', text: 'hello agent' })
   })

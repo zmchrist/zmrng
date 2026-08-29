@@ -9,11 +9,25 @@ import type { Attachment, CaveStyle, ChatServerMsg, EffortLevel } from './types'
  * Encode a client `start` frame — (re)spawn a session with the chosen controls.
  * `repoId` picks which registered repo the session's cwd is rooted at; omit it
  * (or pass `''`) for "Projects root" (`config.projectsDir`, the default).
+ * `voice` opts the session into the server's spoken `voiceSystemPrompt` (set
+ * only by the Local Voice Chat surface); when falsy the frame is byte-identical
+ * to the pre-voice one, so the text chat path is unchanged.
  */
-export function encodeStart(model: string, effort: EffortLevel, style: CaveStyle, repoId?: string): string {
-  return repoId
-    ? JSON.stringify({ type: 'start', model, effort, style, repoId })
-    : JSON.stringify({ type: 'start', model, effort, style })
+export function encodeStart(
+  model: string,
+  effort: EffortLevel,
+  style: CaveStyle,
+  repoId?: string,
+  voice?: boolean,
+): string {
+  return JSON.stringify({
+    type: 'start',
+    model,
+    effort,
+    style,
+    ...(repoId ? { repoId } : {}),
+    ...(voice ? { voice: true } : {}),
+  })
 }
 
 /** Encode a client `input` frame (one operator turn -> server), optionally with attachments. */
