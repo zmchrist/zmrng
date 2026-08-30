@@ -45,6 +45,9 @@ interface Props {
   /** Lift a "Send to my zmrng" handoff up to App: switch to Workspace and seed
    *  the local new-task box with this brief (T3, decision D6). */
   onSendToZmrng: (prefill: HandoffPrefill) => void
+  /** Bubble a `new-version` frame's sha up to App (WS-B / D3). TeamView owns the
+   *  socket but NOT the update banner — the phase-gate needs App's `tasks`. */
+  onNewVersion?: (sha: string) => void
 }
 
 const PING_MS = 25000
@@ -67,7 +70,7 @@ function channelLabel(name: string): string {
  * channel-thread reducers, and config resolution it composes are each
  * unit-tested in isolation.
  */
-export function TeamView({ workspaceUrl, botHandle, repos, onSendToZmrng }: Props) {
+export function TeamView({ workspaceUrl, botHandle, repos, onSendToZmrng, onNewVersion }: Props) {
   const resolvedUrl = resolveWorkspaceUrl(workspaceUrl)
   const socketUrl = workspaceSocketUrl(resolvedUrl)
   // The VPS http origin for channel REST (list/create/scrollback). Channel data
@@ -103,6 +106,12 @@ export function TeamView({ workspaceUrl, botHandle, repos, onSendToZmrng }: Prop
   useEffect(() => {
     openIdRef.current = openId
   }, [openId])
+  // Keep the latest `onNewVersion` readable inside the stable socket closure
+  // (the socket effect only re-runs on handle/url change), mirroring openIdRef.
+  const onNewVersionRef = useRef(onNewVersion)
+  useEffect(() => {
+    onNewVersionRef.current = onNewVersion
+  }, [onNewVersion])
   // Thread auto-scroll: jumps to the bottom on new content only if the user
   // was already at/near the bottom (never yanks them away from scrollback);
   // `scrollToBottom` force-scrolls regardless, used for our own posts and on
@@ -156,6 +165,10 @@ export function TeamView({ workspaceUrl, botHandle, repos, onSendToZmrng }: Prop
           }
         } else if (msg.type === 'channels') {
           setChannels(msg.channels)
+        } else if (msg.type === 'new-version') {
+          // Bubble UP to App — it owns `tasks` (for the D3a phase-gate) and the
+          // global update banner. TeamView just relays the signal.
+          onNewVersionRef.current?.(msg.sha)
         } else {
           setRoster((prev) => applyWorkspaceMsg(prev, msg))
         }
