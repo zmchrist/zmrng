@@ -12,6 +12,7 @@ import {
 } from '../workspaceProtocol'
 import { emptyRoster, applyWorkspaceMsg } from '../roster'
 import { emptyThread, appendMessage, loadScrollback } from '../channelThread'
+import { useAutoScroll } from '../useAutoScroll'
 import { api } from '../api'
 import { buildHandoffPrefill, type HandoffPrefill } from '../teamHandoff'
 import {
@@ -83,6 +84,19 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
   useEffect(() => {
     openIdRef.current = openId
   }, [openId])
+  // Thread auto-scroll: jumps to the bottom on new content only if the user
+  // was already at/near the bottom (never yanks them away from scrollback);
+  // `scrollToBottom` force-scrolls regardless, used for our own posts and on
+  // channel switch.
+  const {
+    ref: threadRef,
+    onScroll: onThreadScroll,
+    scrollToBottom,
+    notifyContentChanged: notifyThreadChanged,
+  } = useAutoScroll<HTMLUListElement>()
+  useEffect(() => {
+    notifyThreadChanged()
+  }, [thread, notifyThreadChanged])
 
   /** Send a pre-encoded frame if the socket is live (dropped otherwise). */
   const sendFrame = (data: string): void => {
@@ -191,6 +205,7 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
   /** Switch the open channel, clearing the previous channel's thread. */
   const openChannelId = (id: number): void => {
     if (id === openId) return
+    scrollToBottom()
     setThread(emptyThread())
     setOpenId(id)
   }
@@ -217,6 +232,7 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
     if (!body || openId === null) return
     // Posted human message returns via the channel fan-out (we are subscribed),
     // so it appears in the thread through the live socket — no optimistic append.
+    scrollToBottom()
     sendFrame(encodeMessage(openId, handle, body))
     setComposer('')
   }
@@ -407,7 +423,8 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
                   <span className={styles.channelRepo}>{openChannel.repoId}</span>
                 )}
               </div>
-              <ul className={styles.thread}>
+              <ul className={styles.thread} ref={threadRef} onScroll={onThreadScroll}>
+
                 {thread.length === 0 && <li className={styles.threadEmpty}>No messages yet.</li>}
                 {thread.map((m) => (
                   <li
