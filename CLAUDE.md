@@ -155,6 +155,16 @@ non-ff); delete the branch with `git branch -d` only (a squash/rebase-merged PR'
 is *kept*, never force-deleted). Each step emits a `local sync — …` note to the operator
 log. Never force-push, never stash, never touch uncommitted work.
 
+### SQLite migrations are ADDITIVE-ONLY (never lose VPS chats)
+Migrations in `db.ts` (`ensureColumns()`) may **only** `ALTER … ADD COLUMN` /
+`CREATE … IF NOT EXISTS` — **never** drop/rename a column or table, and **never** rewrite
+existing rows. The VPS team-workspace instance redeploys in place
+(`scripts/autoupdate-workspace.sh` reopens the same populated `zmrng.db` under
+`ZMRNG_DATA_DIR`, untouched by the checkout `reset --hard`), so a destructive or rewriting
+migration is the **one** thing that could lose live channels/messages/members across a
+redeploy. A genuine column drop/rename needs an explicit, reviewed migration path — not the
+best-effort idempotent reopen. (D2a of `.agents/plans/instance-update-distribution-grill.md`.)
+
 ### TypeScript / logging
 TS strict, no `any` (use the tolerant `asRecord`/`asString` helpers in `runner.ts` for
 untyped stream-json). Pino structured logging (`app.log.info({ code }, 'msg')`) — never
