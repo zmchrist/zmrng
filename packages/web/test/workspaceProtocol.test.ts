@@ -159,6 +159,22 @@ describe('parseWorkspaceServerMsg', () => {
     })
   })
 
+  it('decodes a new-version frame carrying a string sha', () => {
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'new-version', sha: 'deadbeef' })),
+    ).toEqual({ type: 'new-version', sha: 'deadbeef' })
+  })
+
+  it('rejects a new-version frame with a missing or non-string sha', () => {
+    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'new-version' }))).toBeUndefined()
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'new-version', sha: 42 })),
+    ).toBeUndefined()
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'new-version', sha: null })),
+    ).toBeUndefined()
+  })
+
   it('returns undefined for near-miss cases and never throws', () => {
     expect(parseWorkspaceServerMsg('{not json')).toBeUndefined()
     expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'nope' }))).toBeUndefined()

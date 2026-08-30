@@ -555,12 +555,17 @@ export type WsWorkspaceClientMsg =
  * subscribed sockets (never history — scrollback comes over REST); `channels`
  * is an optional full channel-list snapshot (the client normally lists channels
  * over REST, but the frame exists so the server can push list changes).
+ * `new-version` advertises the latest-known origin/main sha (WS-B / D3): sent as
+ * a live broadcast when the version poller sees origin/main move ahead, and once
+ * on connect as a boot safety-net seed when a newer sha is already known. The
+ * client compares it to its own `headSha` and offers a one-click self-update.
  */
 export type WsWorkspaceServerMsg =
   | { type: 'roster'; members: WorkspaceMember[] }
   | { type: 'pong' }
   | { type: 'message'; message: Message }
   | { type: 'channels'; channels: Channel[] }
+  | { type: 'new-version'; sha: string }
 
 /**
  * Max length of a self-asserted display-name handle, measured after trimming.

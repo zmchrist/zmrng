@@ -138,6 +138,8 @@ export function parseWorkspaceServerMsg(raw: string): WsWorkspaceServerMsg | und
         .filter((c): c is Channel => c !== undefined)
       return { type: 'channels', channels }
     }
+    case 'new-version':
+      return typeof obj.sha === 'string' ? { type: 'new-version', sha: obj.sha } : undefined
     default:
       return undefined
   }
