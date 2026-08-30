@@ -82,6 +82,33 @@ if ($here.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase) -o
   exit 1
 }
 
+# Guard: refuse to run somewhere the current account can't write. The most
+# common case on Windows is the project sitting under C:\Users\Default — a
+# system profile template, not a real user's home directory — which silently
+# rejects writes for every other account. Left undetected, `npm install`
+# fails a stage later with a confusing EPERM mkdir error that looks like a
+# missing C++ Build Tools problem but isn't. Catch it up front instead.
+try {
+  # Probe with a DIRECTORY, not a file: on the C:\Users\Default case, ACLs let
+  # this account create files but deny creating subfolders - exactly what
+  # `npm install` needs to do for `node_modules`. A file-only probe would miss it.
+  $probe = Join-Path $here ".zmrng-write-test-$PID"
+  New-Item -ItemType Directory -Path $probe -ErrorAction Stop | Out-Null
+  Remove-Item $probe -Recurse -Force -ErrorAction SilentlyContinue
+} catch {
+  Write-Host ''
+  Write-Bad "This folder isn't writable by your account: $here"
+  Write-Info "A common cause on Windows: the project lives under C:\Users\Default"
+  Write-Info "(a system profile template, not a real user account) or another"
+  Write-Info "restricted/system directory."
+  Write-Info "Fix: copy this folder to somewhere under your own profile, e.g."
+  Write-Info "  C:\Users\$env:USERNAME\Documents\zmrng-main"
+  Write-Info "then double-click setup.cmd in THAT folder."
+  Write-Host ''
+  Read-Host "  Press Enter to exit" | Out-Null
+  exit 1
+}
+
 # ---------------------------------------------------------------------------
 # 1. Node.js 20.11 - 22.x
 # ---------------------------------------------------------------------------
@@ -169,8 +196,13 @@ try {
 } catch {
   Write-Bad "npm install failed."
   Write-Info $_.Exception.Message
-  Write-Info "Most common cause: missing Python / C++ Build Tools (see step 3 above)."
-  Write-Info "Install those, then re-run this wizard."
+  Write-Info "Common causes:"
+  Write-Info "  - Missing Python / C++ Build Tools (see step 3 above)"
+  Write-Info "  - EPERM/EACCES on mkdir/rmdir: this folder isn't writable by your"
+  Write-Info "    account (e.g. it's under C:\Users\Default) - move the project"
+  Write-Info "    under your own profile (C:\Users\$env:USERNAME\...) and re-run"
+  Write-Info "  - ECONNRESET / network aborted: a transient network error - just"
+  Write-Info "    re-run this wizard, npm install alone often succeeds on retry"
   Read-Host "  Press Enter to exit" | Out-Null
   exit 1
 }

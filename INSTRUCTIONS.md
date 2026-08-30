@@ -118,6 +118,18 @@ setup from step 1.
 
 ## 6. Common errors
 
+- **`npm error EPERM: operation not permitted, mkdir '...\node_modules'`** —
+  the project folder isn't writable by your account. This happens if you
+  extracted the zip under `C:\Users\Default` (a system profile template, not a
+  real user account) or another restricted/system directory. Fix: move the
+  extracted folder under your own profile (e.g.
+  `C:\Users\<you>\Documents\zmrng-main`) and re-run `setup.cmd` from there. The
+  wizard now checks for this up front (see step 4 of the checklist above) and
+  will tell you directly instead of failing partway through `npm install`.
+- **`npm error code ECONNRESET` / `network aborted` during `npm install`** — a
+  transient network blip while downloading a package, not a real problem with
+  the project. Just re-run `npm install` (or the wizard); it usually succeeds
+  on the next attempt.
 - **`NODE_MODULE_VERSION … ERR_DLOPEN_FAILED`** — you're running the server
   on a different Node major than the one `npm install` ran under. Fix:
   `nvm use && npm rebuild better-sqlite3`.
