@@ -309,6 +309,7 @@ export default function App() {
           >
             <TeamView
               workspaceUrl={cfg?.workspaceUrl ?? ''}
+              botHandle={cfg?.botHandle ?? '@agent'}
               repos={repos}
               onSendToZmrng={onSendToZmrng}
             />
