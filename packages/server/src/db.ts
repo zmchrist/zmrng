@@ -340,6 +340,16 @@ export class Db {
   /**
    * Idempotently add columns introduced after the original schema. `CREATE TABLE
    * IF NOT EXISTS` won't alter an existing `zmrng.db`, so migrate explicitly.
+   *
+   * MIGRATION POLICY — ADDITIVE ONLY (D2a of
+   * .agents/plans/instance-update-distribution-grill.md). Only ever `ALTER … ADD
+   * COLUMN` / `CREATE … IF NOT EXISTS` here. NEVER drop or rename a column/table
+   * and NEVER rewrite existing rows in a migration. The VPS team-workspace
+   * instance redeploys in place (scripts/autoupdate-workspace.sh reopens the same
+   * populated `zmrng.db`), so a destructive/rewriting migration is the ONE thing
+   * that could lose live channels/messages/members across a redeploy. A genuine
+   * column drop/rename needs an explicit, reviewed migration path — not this
+   * best-effort reopen.
    */
   private ensureColumns(): void {
     const cols = new Set(
