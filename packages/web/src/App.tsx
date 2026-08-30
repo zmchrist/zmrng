@@ -205,15 +205,13 @@ export default function App() {
   )
   const onPrefillConsumed = useCallback(() => setHandoffPrefill(null), [])
 
-  // A `new-version` frame from the workspace socket (relayed by TeamView). Only
-  // surface the banner when the advertised sha is genuinely ahead of ours (both
-  // known and differing) — the pure `updateAvailable` gate decides.
-  const onNewVersion = useCallback(
-    (sha: string) => {
-      if (updateAvailable(cfg?.headSha, sha)) setUpdateSha(sha)
-    },
-    [cfg?.headSha],
-  )
+  // A `new-version` frame from the workspace socket (relayed by TeamView). Store
+  // the advertised sha unconditionally; whether it is genuinely ahead of ours is
+  // decided at render by the pure `updateAvailable` gate. Deferring the compare
+  // to render (rather than gating here) closes a race where a frame arrives on
+  // the on-connect seed before `cfg` (async `getConfig`) has resolved — the
+  // banner then appears the moment `cfg.headSha` loads, instead of being dropped.
+  const onNewVersion = useCallback((sha: string) => setUpdateSha(sha), [])
 
   const selected = selectedId ? tasks[selectedId] : undefined
 
@@ -233,7 +231,7 @@ export default function App() {
   return (
     <div className={styles.app} data-native={isNativeApp || undefined}>
       <AuthBanner />
-      {updateSha && (
+      {updateAvailable(cfg?.headSha, updateSha ?? undefined) && (
         <UpdateBanner
           tasks={tasks}
           connected={connected}

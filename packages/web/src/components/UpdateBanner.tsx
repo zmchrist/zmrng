@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import styles from './UpdateBanner.module.css'
 import { api } from '../api'
 import type { Task } from '../types'
-import { liveTaskCount } from '../updateGate'
+import { liveTaskCount, shouldBlockUpdate } from '../updateGate'
 
 interface Props {
   /** Local tasks (App's map or list), fed to the D3a live-task phase-gate. */
@@ -40,7 +40,7 @@ export function UpdateBanner({ tasks, connected, onDismiss }: Props) {
   const runUpdate = async () => {
     // D3a: block-with-confirm while a local task is live. First click on a
     // live workspace arms the confirm; only the second click proceeds.
-    if (live > 0 && !confirming) {
+    if (shouldBlockUpdate(tasks) && !confirming) {
       setConfirming(true)
       return
     }
