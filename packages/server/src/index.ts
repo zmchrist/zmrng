@@ -16,6 +16,7 @@ import { WorkspaceManager, ChannelManager, parseWorkspaceClientMsg } from './wor
 import { AgentResponder, resolveBotAgent } from './agentResponder.js'
 import { sanitizeAttachments } from './runner.js'
 import { listWorktreeFiles, selfUpdate } from './worktree.js'
+import { startVersionPoller } from './versionPoller.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
 import { parseStreamedText } from './chat.js'
@@ -171,6 +172,9 @@ app.get('/api/config', () => ({
       ? 'API key (ANTHROPIC_API_KEY billed per task)'
       : 'Max OAuth (ANTHROPIC_API_KEY stripped from workers)',
   authModeKind: config.authMode,
+  // This instance's HEAD sha, so a client can compare it to a `new-version`
+  // frame and decide whether a self-update is actually available (WS-B / D3).
+  headSha: config.headSha,
   // Whether the dev-only restart endpoint is available (tsx watch supervising).
   dev: IS_DEV,
 }))
@@ -733,6 +737,10 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
 // socket so they drop off the roster. The socket joins the 'workspace' room so it
 // receives every roster re-broadcast. NO history replay.
 const WORKSPACE_HEARTBEAT_MS = 30000
+// Latest-known origin/main sha, set by the version poller (WS-B / D3) when it
+// sees origin/main move ahead of this instance's HEAD. Held in memory only (no
+// DB); '' until the poller reports one. Read on connect to seed late joiners.
+let latestKnownVersionSha = ''
 app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
   hub.join('workspace', socket)
   let joined = false
@@ -819,6 +827,14 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
   // Seed the fresh socket with the current roster before it says hello, so a
   // late joiner immediately sees who is already present.
   send({ type: 'roster', members: workspace.roster() })
+
+  // Boot safety-net seed (WS-B / D3): if the poller already knows of a newer
+  // origin/main sha than this instance is running, tell this client immediately
+  // so a late joiner learns about the update without waiting for the next live
+  // broadcast. Unifies the seed + live-push into ONE client mechanism.
+  if (latestKnownVersionSha && latestKnownVersionSha !== config.headSha) {
+    send({ type: 'new-version', sha: latestKnownVersionSha })
+  }
 })
 
 // ---- static (production) ----
@@ -883,6 +899,25 @@ function shutdown(signal: string): void {
 }
 process.on('SIGINT', () => shutdown('SIGINT'))
 process.on('SIGTERM', () => shutdown('SIGTERM'))
+
+// Version poller (WS-B / D3). Disabled by default (versionPollMs === 0) so
+// laptops never background-fetch; the VPS opts in via ZMRNG_VERSION_POLL_MS.
+// When origin/main moves ahead of this HEAD it records the sha and broadcasts a
+// `new-version` frame to every socket in the 'workspace' room.
+startVersionPoller({
+  repoRoot: config.repoRoot,
+  localSha: config.headSha,
+  intervalMs: config.versionPollMs,
+  onNewVersion: (sha) => {
+    latestKnownVersionSha = sha
+    app.log.info({ sha }, 'origin/main advanced — broadcasting new-version to workspace')
+    hub.broadcastRoom(
+      'workspace',
+      JSON.stringify({ type: 'new-version', sha } as WsWorkspaceServerMsg),
+    )
+  },
+  onError: (err) => app.log.error({ err }, 'version poll cycle failed'),
+})
 
 try {
   await app.listen({ host: '0.0.0.0', port: config.port })

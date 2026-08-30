@@ -19,7 +19,9 @@ import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
 import { Board } from './components/Board'
 import { TeamView } from './components/TeamView'
+import { UpdateBanner } from './components/UpdateBanner'
 import { SettingsModal } from './components/SettingsModal'
+import { updateAvailable } from './updateGate'
 import { useUiState } from './uiState'
 import { nextRailState } from './railState'
 import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState, type TerminalTabState } from './windowTabs'
@@ -83,6 +85,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   // One-shot "Send to my zmrng" pre-fill from the Team tab (T3).
   const [handoffPrefill, setHandoffPrefill] = useState<HandoffPrefill | null>(null)
+  // WS-B / D3: the newer origin/main sha the workspace socket advertised, once
+  // it differs from this instance's headSha. Drives the global update banner.
+  const [updateSha, setUpdateSha] = useState<string | null>(null)
   const selectedIdRef = useRef<string | null>(null)
 
   const onWs = useCallback((e: WsEvent) => {
@@ -200,6 +205,16 @@ export default function App() {
   )
   const onPrefillConsumed = useCallback(() => setHandoffPrefill(null), [])
 
+  // A `new-version` frame from the workspace socket (relayed by TeamView). Only
+  // surface the banner when the advertised sha is genuinely ahead of ours (both
+  // known and differing) — the pure `updateAvailable` gate decides.
+  const onNewVersion = useCallback(
+    (sha: string) => {
+      if (updateAvailable(cfg?.headSha, sha)) setUpdateSha(sha)
+    },
+    [cfg?.headSha],
+  )
+
   const selected = selectedId ? tasks[selectedId] : undefined
 
   // ---- persistent title-bar breadcrumb + status-bar metrics ----
@@ -218,6 +233,13 @@ export default function App() {
   return (
     <div className={styles.app} data-native={isNativeApp || undefined}>
       <AuthBanner />
+      {updateSha && (
+        <UpdateBanner
+          tasks={tasks}
+          connected={connected}
+          onDismiss={() => setUpdateSha(null)}
+        />
+      )}
 
       <div className={styles.frame}>
         {/* title bar (persistent) */}
@@ -312,6 +334,7 @@ export default function App() {
               botHandle={cfg?.botHandle ?? '@agent'}
               repos={repos}
               onSendToZmrng={onSendToZmrng}
+              onNewVersion={onNewVersion}
             />
           </div>
         </div>

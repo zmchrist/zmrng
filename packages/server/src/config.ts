@@ -139,6 +139,19 @@ export interface Config {
   workspaceScrollback: number
   /** Per-request timeout (ms) for the team-agent fetch; caps a hung upstream. */
   workspaceAgentTimeoutMs: number
+  /**
+   * This instance's HEAD sha (`git rev-parse HEAD` at boot), or '' when it could
+   * not be resolved. Advertised in `GET /api/config` so a client can compare it
+   * to a `new-version` frame and decide whether a self-update is available (D3).
+   */
+  headSha: string
+  /**
+   * Version-poll cadence in ms (`ZMRNG_VERSION_POLL_MS`). DEFAULT 0 = disabled,
+   * so ordinary laptops never background-fetch; only the VPS opts in. When > 0 a
+   * poller `git fetch`es origin and broadcasts a `new-version` frame over
+   * /ws/workspace when origin/main moves ahead of this HEAD (WS-B / D3).
+   */
+  versionPollMs: number
 }
 
 export type AuthMode = 'oauth' | 'apikey'
@@ -428,6 +441,22 @@ function resolveSelfRepo(): RepoTarget | undefined {
   return undefined
 }
 
+/**
+ * Current HEAD sha of the zmrng checkout at `repoRoot`, or '' on any failure
+ * (missing git, detached/bare state, packaged app with no checkout). Never
+ * throws — resolving the sha must never block boot. Mirrors the `execFileSync`
+ * shape used by `isGitRepoRoot`/`resolveSelfRepo`.
+ */
+function readHeadSha(repoRoot: string): string {
+  try {
+    return execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim()
+  } catch {
+    return ''
+  }
+}
+
 /** Raised when no drivable repo can be resolved AND no usable fallback root exists. */
 export class RegistryError extends Error {
   constructor(message: string) {
@@ -546,6 +575,8 @@ function buildConfig(): Config {
     workspaceBotHandle: process.env.ZMRNG_WORKSPACE_BOT_HANDLE?.trim() || '@agent',
     workspaceScrollback: Number(process.env.ZMRNG_WORKSPACE_SCROLLBACK ?? 20),
     workspaceAgentTimeoutMs: Number(process.env.ZMRNG_WORKSPACE_AGENT_TIMEOUT_MS ?? 60000),
+    headSha: readHeadSha(REPO_ROOT),
+    versionPollMs: Number(process.env.ZMRNG_VERSION_POLL_MS ?? 0),
   }
 }
 
