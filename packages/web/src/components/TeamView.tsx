@@ -1,7 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import styles from './TeamView.module.css'
 import type { Channel, Message, RepoTarget, WorkspaceMember } from '../types'
 import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from '../types'
+import {
+  mentionCandidates,
+  activeMention,
+  filterCandidates,
+  applyMention,
+  parseMentions,
+  type MentionCandidate,
+} from '../mentions'
 import {
   encodeHello,
   encodePing,
@@ -26,6 +34,10 @@ interface Props {
   /** Optional server-side default VPS URL (ServerConfig.workspaceUrl). The
    *  per-teammate localStorage value wins over this when set. */
   workspaceUrl: string
+  /** The shared team-agent bot handle (default `@agent`), surfaced via
+   *  GET /api/config so the `@`-mention autocomplete + highlighter know the
+   *  agent's name. Visual only — the server reply trigger is unchanged. */
+  botHandle: string
   /** The teammate's OWN local repo registry (GET /api/repos), used to populate
    *  the create-channel repo select — a channel repo id is a free-text tag. */
   repos: RepoTarget[]
@@ -54,7 +66,7 @@ function channelLabel(name: string): string {
  * channel-thread reducers, and config resolution it composes are each
  * unit-tested in isolation.
  */
-export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
+export function TeamView({ workspaceUrl, botHandle, repos, onSendToZmrng }: Props) {
   const resolvedUrl = resolveWorkspaceUrl(workspaceUrl)
   const socketUrl = workspaceSocketUrl(resolvedUrl)
   // The VPS http origin for channel REST (list/create/scrollback). Channel data
@@ -70,6 +82,13 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
   const [openId, setOpenId] = useState<number | null>(null)
   const [thread, setThread] = useState<Message[]>(emptyThread)
   const [composer, setComposer] = useState('')
+  // `@`-mention autocomplete state for the channel composer. `mentionStart` is
+  // the index of the active `@`; `mentionMatches` is the live-filtered candidate
+  // list (empty ⇒ dropdown closed); `mentionIndex` is the highlighted row.
+  const [mentionStart, setMentionStart] = useState<number | null>(null)
+  const [mentionMatches, setMentionMatches] = useState<MentionCandidate[]>([])
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const composerRef = useRef<HTMLInputElement | null>(null)
   // Create-channel affordance state (T3). The list itself refreshes via the
   // server's `channels` broadcast over the shared socket.
   const [creating, setCreating] = useState(false)
@@ -211,6 +230,82 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
     setThread(emptyThread())
   }
 
+  // ---- `@`-mention autocomplete (visual only; the agent trigger is server-side) ----
+  // Candidates = roster displayNames + the agent (bot handle minus a leading @);
+  // `mentionNames` drives the in-thread pill highlighter.
+  const candidates = useMemo(() => mentionCandidates(roster, botHandle), [roster, botHandle])
+  const mentionNames = useMemo(() => candidates.map((c) => c.name), [candidates])
+
+  /** Recompute the dropdown from the composer's current value + caret. */
+  const refreshMention = (value: string, caret: number): void => {
+    const active = activeMention(value, caret)
+    if (!active) {
+      setMentionStart(null)
+      setMentionMatches([])
+      return
+    }
+    const matches = filterCandidates(candidates, active.query)
+    setMentionStart(matches.length ? active.start : null)
+    setMentionMatches(matches)
+    setMentionIndex(0)
+  }
+
+  const closeMention = (): void => {
+    setMentionStart(null)
+    setMentionMatches([])
+  }
+
+  const onComposerChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const el = e.currentTarget
+    setComposer(el.value)
+    refreshMention(el.value, el.selectionStart ?? el.value.length)
+  }
+
+  /** Track caret moves (click, arrow keys while closed) so `@` context stays fresh. */
+  const onComposerSelect = (e: React.SyntheticEvent<HTMLInputElement>): void => {
+    const el = e.currentTarget
+    refreshMention(el.value, el.selectionStart ?? el.value.length)
+  }
+
+  /** Insert the chosen candidate, replacing the active `@query`, and restore caret. */
+  const chooseMention = (cand: MentionCandidate): void => {
+    if (mentionStart === null) return
+    const el = composerRef.current
+    const caret = el?.selectionStart ?? composer.length
+    const { text, caret: nextCaret } = applyMention(composer, mentionStart, caret, cand.name)
+    setComposer(text)
+    closeMention()
+    requestAnimationFrame(() => {
+      const node = composerRef.current
+      if (!node) return
+      node.focus()
+      node.setSelectionRange(nextCaret, nextCaret)
+    })
+  }
+
+  const onComposerKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (mentionMatches.length === 0) return // closed → let Enter submit as usual
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        setMentionIndex((i) => (i + 1) % mentionMatches.length)
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        setMentionIndex((i) => (i - 1 + mentionMatches.length) % mentionMatches.length)
+        break
+      case 'Enter':
+      case 'Tab':
+        e.preventDefault()
+        chooseMention(mentionMatches[mentionIndex] ?? mentionMatches[0])
+        break
+      case 'Escape':
+        e.preventDefault()
+        closeMention()
+        break
+    }
+  }
+
   const onSend = (e: React.FormEvent) => {
     e.preventDefault()
     const body = composer.trim()
@@ -219,6 +314,7 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
     // so it appears in the thread through the live socket — no optimistic append.
     sendFrame(encodeMessage(openId, handle, body))
     setComposer('')
+    closeMention()
   }
 
   // Create a channel over REST (T3). The server broadcasts the refreshed list to
@@ -428,20 +524,58 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
                         Send to my zmrng
                       </button>
                     </span>
-                    <span className={styles.messageBody}>{m.body}</span>
+                    <span className={styles.messageBody}>
+                      {parseMentions(m.body, mentionNames).map((seg, idx) =>
+                        seg.type === 'mention' ? (
+                          <span key={idx} className={styles.mention}>
+                            {seg.text}
+                          </span>
+                        ) : (
+                          <span key={idx}>{seg.text}</span>
+                        ),
+                      )}
+                    </span>
                   </li>
                 ))}
               </ul>
               <form className={styles.composer} onSubmit={onSend}>
-                <input
-                  className={styles.input}
-                  type="text"
-                  value={composer}
-                  onChange={(e) => setComposer(e.target.value)}
-                  placeholder={`Message ${channelLabel(openChannel.name)}`}
-                  maxLength={MAX_MESSAGE_BODY_LEN}
-                  disabled={!connected}
-                />
+                <div className={styles.composerWrap}>
+                  {mentionMatches.length > 0 && (
+                    <ul className={styles.mentionMenu}>
+                      {mentionMatches.map((cand, idx) => (
+                        <li key={`${cand.kind}:${cand.name}`}>
+                          <button
+                            type="button"
+                            className={`${styles.mentionItem} ${
+                              idx === mentionIndex ? styles.mentionItemActive : ''
+                            }`}
+                            // Keep composer focus (avoid the input's blur closing the menu first).
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => chooseMention(cand)}
+                          >
+                            <span>{cand.name}</span>
+                            {cand.kind === 'agent' && (
+                              <span className={styles.mentionTag}>agent</span>
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <input
+                    ref={composerRef}
+                    className={styles.input}
+                    type="text"
+                    value={composer}
+                    onChange={onComposerChange}
+                    onKeyDown={onComposerKeyDown}
+                    onSelect={onComposerSelect}
+                    onBlur={closeMention}
+                    placeholder={`Message ${channelLabel(openChannel.name)}`}
+                    maxLength={MAX_MESSAGE_BODY_LEN}
+                    disabled={!connected}
+                  />
+                </div>
                 <button
                   type="submit"
                   className={styles.joinBtn}
