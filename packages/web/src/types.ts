@@ -527,13 +527,16 @@ export type WsWorkspaceClientMsg =
  * presence-roster snapshot; `pong` answers a client `ping`; `message` delivers
  * ONE newly-posted channel message live to subscribed sockets (never history —
  * scrollback comes over REST); `channels` is an optional full channel-list
- * snapshot. Mirror of `packages/server/src/types.ts`.
+ * snapshot; `new-version` advertises the latest-known origin/main sha (WS-B / D3)
+ * so the client can offer a one-click self-update. Mirror of
+ * `packages/server/src/types.ts`.
  */
 export type WsWorkspaceServerMsg =
   | { type: 'roster'; members: WorkspaceMember[] }
   | { type: 'pong' }
   | { type: 'message'; message: Message }
   | { type: 'channels'; channels: Channel[] }
+  | { type: 'new-version'; sha: string }
 
 /**
  * Max length of a self-asserted display-name handle, measured after trimming.
@@ -578,6 +581,10 @@ export interface ServerConfig {
   authMode: string
   /** Machine-readable form of the same setting. */
   authModeKind: AuthMode
+  /** This instance's current HEAD sha (from `git rev-parse HEAD` at boot), or ''
+   *  when it could not be resolved. The client compares a `new-version` frame's
+   *  sha against this to decide whether a self-update is actually available. */
+  headSha: string
   /** True under `npm run dev` (tsx watch) — the Settings reboot button is
    *  always shown, but the server-side restart step (after git pull + build)
    *  only fires when this is true; a built deploy has no supervisor to restart. */
