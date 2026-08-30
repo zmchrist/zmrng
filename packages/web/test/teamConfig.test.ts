@@ -6,6 +6,7 @@ import {
   saveStoredHandle,
   resolveWorkspaceUrl,
   workspaceSocketUrl,
+  workspaceHttpOrigin,
 } from '../src/teamConfig'
 
 beforeEach(() => {
@@ -66,7 +67,42 @@ describe('workspaceSocketUrl', () => {
     )
   })
 
+  it('coerces http → ws and https → wss', () => {
+    expect(workspaceSocketUrl('http://100.92.187.96:4500')).toBe(
+      'ws://100.92.187.96:4500/ws/workspace',
+    )
+    expect(workspaceSocketUrl('https://vps.example')).toBe('wss://vps.example/ws/workspace')
+  })
+
+  it('defaults a scheme-less host to ws://', () => {
+    expect(workspaceSocketUrl('100.92.187.96:4500')).toBe(
+      'ws://100.92.187.96:4500/ws/workspace',
+    )
+  })
+
   it('returns empty for an empty base', () => {
     expect(workspaceSocketUrl('   ')).toBe('')
+  })
+})
+
+describe('workspaceHttpOrigin', () => {
+  it('keeps an http(s) base as its origin, dropping a /ws/workspace suffix', () => {
+    expect(workspaceHttpOrigin('http://100.92.187.96:4500')).toBe('http://100.92.187.96:4500')
+    expect(workspaceHttpOrigin('https://vps.example/ws/workspace')).toBe('https://vps.example')
+  })
+
+  it('coerces ws → http and wss → https', () => {
+    expect(workspaceHttpOrigin('ws://100.92.187.96:4500/ws/workspace')).toBe(
+      'http://100.92.187.96:4500',
+    )
+    expect(workspaceHttpOrigin('wss://vps.example')).toBe('https://vps.example')
+  })
+
+  it('defaults a scheme-less host to http://', () => {
+    expect(workspaceHttpOrigin('100.92.187.96:4500')).toBe('http://100.92.187.96:4500')
+  })
+
+  it('returns empty for an empty base', () => {
+    expect(workspaceHttpOrigin('   ')).toBe('')
   })
 })

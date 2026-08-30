@@ -133,6 +133,25 @@ const agentResponder = botAgent
 
 await app.register(websocket)
 
+// ---- CORS (team-workspace cross-origin REST) ----
+// A teammate's browser/desktop app talks to THIS server's channel REST surface
+// (/api/channels …) from a different origin than the local one it was served
+// from. Without permissive CORS those cross-origin fetches are blocked and the
+// Team tab silently falls back to (or fails against) the wrong server. The
+// workspace port is Tailscale-perimeter only (see CLAUDE.md), so reflecting any
+// origin is acceptable here; there are no cookies/credentials to protect.
+app.addHook('onRequest', (req, reply, done) => {
+  reply.header('access-control-allow-origin', req.headers.origin ?? '*')
+  reply.header('access-control-allow-methods', 'GET,POST,PUT,DELETE,OPTIONS')
+  reply.header('access-control-allow-headers', 'content-type')
+  reply.header('vary', 'origin')
+  if (req.method === 'OPTIONS') {
+    reply.code(204).send()
+    return
+  }
+  done()
+})
+
 // ---- REST ----
 
 app.get('/api/config', () => ({
