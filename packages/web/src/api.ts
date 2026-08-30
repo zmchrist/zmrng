@@ -202,30 +202,41 @@ export const api = {
   deleteTask: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}`, { method: 'DELETE' }),
   restart: () => req<{ ok: true; restarted: boolean }>('/api/restart', { method: 'POST' }),
-  /** Team-workspace channel list (box 2). */
-  listChannels: () => req<Channel[]>('/api/channels'),
+  /**
+   * Team-workspace channel list (box 2). Channel data lives on the VPS server,
+   * so `origin` (the VPS http origin from `workspaceHttpOrigin`) MUST be passed
+   * to target it — a blank origin falls back to the local server (wrong for the
+   * team feature, kept only for back-compat/tests).
+   */
+  listChannels: (origin = '') => req<Channel[]>(`${origin}/api/channels`),
   /**
    * Create a channel (T3). Pass a `repoId` to repo-scope it (a free-text
    * suggestion tag for the "Send to my zmrng" handoff); omit/null for an
    * untied channel like #general. The server broadcasts the refreshed list to
-   * every connected teammate over the workspace socket.
+   * every connected teammate over the workspace socket. `origin` targets the
+   * VPS (see listChannels).
    */
-  createChannel: (name: string, repoId?: string | null) =>
-    req<Channel>('/api/channels', {
+  createChannel: (name: string, repoId?: string | null, origin = '') =>
+    req<Channel>(`${origin}/api/channels`, {
       method: 'POST',
       body: JSON.stringify({ name, repoId: repoId ?? null }),
     }),
   /**
    * Paginated scrollback for one channel (box 4). Pass the oldest loaded
    * message id as `before` to page backwards; the socket delivers newer live
-   * messages separately (no history replay over the socket).
+   * messages separately (no history replay over the socket). `origin` targets
+   * the VPS (see listChannels).
    */
-  getChannelMessages: (channelId: number, opts?: { before?: number; limit?: number }) => {
+  getChannelMessages: (
+    channelId: number,
+    opts?: { before?: number; limit?: number },
+    origin = '',
+  ) => {
     const params = new URLSearchParams()
     if (opts?.before !== undefined) params.set('before', String(opts.before))
     if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
     const qs = params.toString()
-    return req<Message[]>(`/api/channels/${channelId}/messages${qs ? `?${qs}` : ''}`)
+    return req<Message[]>(`${origin}/api/channels/${channelId}/messages${qs ? `?${qs}` : ''}`)
   },
   getUiState: () => req<UiState>('/api/ui-state'),
   putUiState: (state: UiState) =>
