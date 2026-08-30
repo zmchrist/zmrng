@@ -19,6 +19,7 @@ import {
   saveStoredHandle,
   resolveWorkspaceUrl,
   workspaceSocketUrl,
+  workspaceHttpOrigin,
 } from '../teamConfig'
 
 interface Props {
@@ -54,7 +55,13 @@ function channelLabel(name: string): string {
  * unit-tested in isolation.
  */
 export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
-  const socketUrl = workspaceSocketUrl(resolveWorkspaceUrl(workspaceUrl))
+  const resolvedUrl = resolveWorkspaceUrl(workspaceUrl)
+  const socketUrl = workspaceSocketUrl(resolvedUrl)
+  // The VPS http origin for channel REST (list/create/scrollback). Channel data
+  // lives on the VPS, not the teammate's local server, so these calls MUST be
+  // origin-prefixed — otherwise a channel is created in the local SQLite and no
+  // teammate ever sees it.
+  const httpOrigin = workspaceHttpOrigin(resolvedUrl)
   const [handle, setHandle] = useState<string>(() => loadStoredHandle())
   const [draft, setDraft] = useState('')
   const [roster, setRoster] = useState<WorkspaceMember[]>(emptyRoster)
@@ -145,7 +152,7 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
     if (!handle || !connected) return
     let cancelled = false
     api
-      .listChannels()
+      .listChannels(httpOrigin)
       .then((list) => {
         if (cancelled) return
         setChannels(list)
@@ -157,7 +164,7 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
     return () => {
       cancelled = true
     }
-  }, [handle, connected])
+  }, [handle, connected, httpOrigin])
 
   // ---- open a channel: REST scrollback + subscribe to live fan-out ----
   // The thread is reset in the channel-switch handlers (not here) to keep this
@@ -167,7 +174,7 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
     if (!connected || openId === null) return
     let cancelled = false
     api
-      .getChannelMessages(openId, { limit: SCROLLBACK_LIMIT })
+      .getChannelMessages(openId, { limit: SCROLLBACK_LIMIT }, httpOrigin)
       .then((page) => {
         if (!cancelled) setThread((prev) => loadScrollback(prev, page))
       })
@@ -179,7 +186,7 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
       cancelled = true
       sendFrame(encodeUnsubscribe(openId))
     }
-  }, [connected, openId])
+  }, [connected, openId, httpOrigin])
 
   /** Switch the open channel, clearing the previous channel's thread. */
   const openChannelId = (id: number): void => {
@@ -224,7 +231,7 @@ export function TeamView({ workspaceUrl, repos, onSendToZmrng }: Props) {
     setCreateBusy(true)
     setCreateError(null)
     try {
-      const created = await api.createChannel(name, newRepo || null)
+      const created = await api.createChannel(name, newRepo || null, httpOrigin)
       setNewName('')
       setNewRepo('')
       setCreating(false)
