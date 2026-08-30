@@ -160,8 +160,74 @@ If all four pass over the tailnet, D2 is done.
   restarts). `zmrng.db` in `ZMRNG_DATA_DIR` is untouched.
 - **Rollback:** `ZMRNG_BRANCH=<tag-or-sha> bash scripts/deploy-workspace.sh` (the script
   `reset --hard`s to `origin/<branch>`; pass a branch/tag that points at the good commit).
+
+### Auto-update on a timer (D2 — conditional poll, no blind restarts)
+
+To keep the VPS collab bus current without a manual redeploy after every merge, run
+`scripts/autoupdate-workspace.sh` on a timer. It `git fetch`es the tracked branch and
+re-runs `deploy-workspace.sh` **only when `origin/<branch>` is ahead of the local HEAD** —
+when already current it exits 0 silently, so a tight tick never churns a rebuild or drops
+the ~1s `/ws/workspace` reconnect blip. A redeploy is data-safe: `zmrng.db` in
+`ZMRNG_DATA_DIR` is never touched (see the additive-only migration policy in `CLAUDE.md`),
+and every message is persisted before fan-out so the auto-reconnecting sockets recover
+scrollback over REST with zero loss.
+
+**systemd timer** (preferred — logs land in the journal). As root, write the two units,
+substituting the run user + any `ZMRNG_*` overrides:
+
+```ini
+# /etc/systemd/system/zmrng-autoupdate.service
+[Unit]
+Description=zmrng team-workspace conditional auto-update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=<run-user>
+WorkingDirectory=/opt/zmrng-workspace
+# Reuse the same env the workspace service loads (ZMRNG_INSTALL_DIR/_BRANCH/etc.).
+EnvironmentFile=-/etc/zmrng/workspace.env
+ExecStart=/usr/bin/env bash /opt/zmrng-workspace/scripts/autoupdate-workspace.sh
+```
+
+```ini
+# /etc/systemd/system/zmrng-autoupdate.timer
+[Unit]
+Description=Poll for new zmrng commits every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable it and watch the log:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now zmrng-autoupdate.timer
+systemctl list-timers zmrng-autoupdate.timer
+journalctl -u zmrng-autoupdate.service -n 50 --no-pager   # only prints on a real redeploy
+```
+
+**crontab alternative** (if you'd rather not manage units). As the run user
+(`crontab -e`), poll every 5 minutes and append output to a log:
+
+```cron
+*/5 * * * * ZMRNG_INSTALL_DIR=/opt/zmrng-workspace ZMRNG_BRANCH=main /usr/bin/env bash /opt/zmrng-workspace/scripts/autoupdate-workspace.sh >> /var/log/zmrng-autoupdate.log 2>&1
+```
+
+Adjust `OnUnitActiveSec` / the cron interval to taste — the lag between a merge and the VPS
+picking it up is at most one tick.
+
 - **Stop / remove:** `sudo systemctl disable --now zmrng-workspace` and delete
-  `/etc/systemd/system/zmrng-workspace.service`.
+  `/etc/systemd/system/zmrng-workspace.service`. If you enabled the auto-update timer, also
+  `sudo systemctl disable --now zmrng-autoupdate.timer` and delete its `.service`/`.timer`
+  units.
 
 ---
 
