@@ -131,3 +131,17 @@ no persisted tabs, no `GlobalUiState` change. New deps (`packages/web` only):
 vendoring the ML models + ORT WASM into the Tauri `.app` (`web/dist`), a
 WebGPU-in-WKWebView investigation, and `desktop:build` support — until then Local Voice
 Chat only works in the browser dev/build target, not the shipped desktop app.
+
+## Team chat @-mention autocomplete + highlight (2026-08-30)
+Frontend-only UX layer on top of T4's shared `@agent` team agent, plus one small backend
+passthrough. New web-only pure module `mentions.ts`: `mentionCandidates(members, botHandle)`,
+`activeMention(text, caret)` (word-boundary matching mirrors the server's `detectMention`),
+`filterCandidates(candidates, query)`, `applyMention(text, start, caretEnd, name)`,
+`parseMentions(body, names)`; types `MentionCandidate`/`MentionSegment`. `TeamView`'s channel
+composer gained a live `@`-mention autocomplete dropdown (arrow keys, Enter/Tab, Esc, click),
+and thread message bodies now render `@name` tokens as colored pills via `parseMentions` —
+person and agent mentions styled identically, person mentions purely visual. `GET /api/config`
+gained `botHandle: string` (`config.workspaceBotHandle`) so the candidate list includes the
+bot; mirrored into `ServerConfig` in `packages/web/src/types.ts` (the server has no
+`ServerConfig` type — the route returns an inline literal). No DB or wire-protocol change; the
+server-side `@agent` reply trigger (`detectMention` in `agentResponder.ts`) is unchanged.

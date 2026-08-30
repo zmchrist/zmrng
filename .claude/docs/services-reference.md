@@ -259,7 +259,8 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   at construction (`Fastify({ logger: true, bodyLimit: ... })`) so a POST body carrying
   base64-encoded image/PDF attachments (up to `MAX_ATTACHMENTS` × `MAX_ATTACHMENT_BYTES`
   each) doesn't hit `FST_ERR_CTP_BODY_TOO_LARGE`.
-- **REST:** `GET /api/config` (model, maxLanes, targetRepo, defaultRepoId, authMode),
+- **REST:** `GET /api/config` (model, maxLanes, targetRepo, defaultRepoId, authMode; also
+  `workspaceUrl` and `botHandle` for the Team tab — see Team workspace below),
   `GET /api/repos` (the registry), `GET /api/tasks`, `POST /api/tasks`
   (title/body/model/effort/style/repoId/flow/**attachments**), `GET /api/tasks/:id/events`,
   `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`.
@@ -551,6 +552,19 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
   (20)/`workspaceAgentTimeoutMs` (60000). No agents configured → responder disabled, mentions a
   graceful no-op. Live checkout path + bot agent id are orchestrator/operator-owned deployment
   config.
+- **`@`-mention autocomplete + highlight (frontend-only)**: `GET /api/config` gained
+  `botHandle: string` (`config.workspaceBotHandle`, mirrored in `ServerConfig` on both sides —
+  no server `ServerConfig` type exists, the route returns an inline literal). New web-only pure
+  module `mentions.ts`: `mentionCandidates(members, botHandle)` (roster + bot),
+  `activeMention(text, caret)` (word-boundary-anchored, mirrors `agentResponder.ts`'s
+  `detectMention`), `filterCandidates(candidates, query)`, `applyMention(text, start, caretEnd,
+  name)` (splice the picked name into composer text, returns the new caret position),
+  `parseMentions(body, names)` (splits a posted body into plain-text/mention segments for pill
+  rendering); types `MentionCandidate`/`MentionSegment`. `TeamView`'s composer opens a
+  keyboard-navigable dropdown (arrow keys, Enter/Tab to pick, Esc to dismiss, click) on an active
+  `@query`; thread message bodies render `@name` tokens as colored pills. Purely visual for
+  person mentions — no server behavior change; the actual `@agent` reply trigger
+  (`detectMention` in `agentResponder.ts`) is untouched.
 - **POC security precondition** (doc-only, no app code): the VPS workspace port is
   **Tailscale-only** — the tailnet is the perimeter and the access control. Self-asserted
   handle, no verification. Public exposure is gated on GitHub OAuth + org/repo allowlist +
