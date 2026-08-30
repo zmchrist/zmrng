@@ -48,57 +48,16 @@ website. Always finish by re-bundling the app so the `.app` ships the new code.
 ```
 zmrng/
 ├── packages/
-│   ├── server/
-│   │   └── src/
-│   │       ├── index.ts        — Fastify bootstrap: REST routes + WS + static serve
-│   │       ├── config.ts       — env parsing, repo registry (config/repos.json → env → legacy)
-│   │       ├── db.ts           — SQLite schema, prepared statements, idempotent migrations
-│   │       ├── types.ts        — Task/Phase/WsEvent/usage/WorkspaceLayout/Attachment types (SOURCE OF TRUTH); also `ALLOWED_MEDIA_TYPES`/`MAX_ATTACHMENTS`/`MAX_ATTACHMENT_BYTES` consts for the image/PDF drop-paste feature
-│   │       ├── runner.ts       — spawn + parse the claude child (stream-json), strip API key; `buildUserMessage(text, attachments?)` builds the multimodal stream-json user turn (image/document blocks before the text block), `sanitizeAttachments(raw)` is the tolerant allow-list/size/count guard shared by the REST routes and `/ws/chat`
-│   │       ├── terminal.ts     — TerminalManager: spawns node-pty shells for the Workspace bottom-dock terminal (GET /ws/terminal), strips API key under oauth
-│   │       ├── chatAgent.ts    — ChatManager: owns live standalone-chat `claude` Runners (GET /ws/chat) via the same RunnerFactory seam as TaskManager; chatSystemPrompt() (conversational, non-worker prompt) + parseChatClientMsg() (tolerantly accepts an `attachments` field on `input` frames, via `sanitizeAttachments`)
-│   │       ├── phases.ts       — phase state machine + system/kickoff prompts + lane queue; holds new-task-box attachments in a `pendingAttachments` Map, consumed once at the first clarify send in `start()`; `executeKickoff` carries a conditional UI-screenshot step (UI-touching diffs → capture the changed view(s) via Playwright MCP, commit PNG(s) under `.github/pr-screenshots/<branch-slug>/`, post a separate `gh pr comment` before the final PR-URL line; best-effort, skipped not blocked when the browser tools are absent)
-│   │       ├── worktree.ts     — git worktree create/remove per task
-│   │       └── ws.ts           — WebSocket broadcast hub
-│   └── web/
-│       └── src/
-│           ├── main.tsx        — React root
-│           ├── App.tsx         — layout: topbar (drag region + mode tabs) over two top-level modes, **Workspace** (default home) and **Board**; the standalone Tasks pane is merged into Workspace (legacy `'tasks'` mode value still accepted from persisted UI state and migrated → `'workspace'`; selecting a task from the Board routes to Workspace). App owns tasks/selection/WS wiring; sources the card-grid layout from `GlobalUiState.grid` via `hydrateGrid` and persists it via `patchGlobal({grid})`, threads `connected` down (the retired pane/dock/rail/notes/split props are no longer threaded)
-│           ├── theme.css       — frosted-glass design tokens
-│           ├── api.ts          — REST client
-│           ├── useWs.ts        — auto-reconnect WebSocket hook
-│           ├── types.ts        — MANUAL MIRROR of server/src/types.ts (incl. GridCardId/GridDensity/GridCardStyle/GridInteraction/GridCardGeo/GridState + the `grid?: GridState` field on GlobalUiState — server round-trips it, never validates; also ChatTabMeta/TerminalTabMeta + the `chatTabs?`/`terminalTabs?` fields on GlobalUiState for the Chat/Terminal cards' per-card tab strips — same round-trip-only pattern)
-│           ├── status.ts       — statusColor() + actorColor() helpers (backed by --status-* / --actor-* tokens)
-│           ├── workspaceLayout.ts — pure reducer for the Workspace mode's per-task Zed-style tab-pane layout (emptyLayout/hydrateLayout/openFile/focusTab/closeTab/openPanel/moveTab/splitWith/setLogMinimized/pruneFileTabs/dropIntent); enforces panes.length ∈ {1,2} and a single split axis; still owned by WorkspaceView, now fed into the Viewers card
-│           ├── gridLayout.ts   — pure, React-free 12-column grid reducer + DOM-free geometry for the Workspace card grid (`COLS=12`, `defaultCards`/`CARD_IDS` 9-card seed, `collide`/`compact`, `applyMove`/`applyResize` under reflow|swap|free interaction modes, `hideCard`/`showCard`/`toggleMinimize`, `normalizeGrid`/`hydrateGrid` tolerant merge, `cellSize`/`cardRectPx`/`contentHeightPx`); geometry is in 12-col CELL units (screen-width-independent). Mirrors the pure-reducer style of workspaceLayout.ts / terminalDock.ts
-│           ├── dashboardData.ts — pure derivations feeding the 3 data cards: `pipelineCounts(tasks)`, `concurrency(tasks, maxLanes)`, `reviewQueue(tasks)`
-│           ├── cardMeta.ts     — `CARD_TITLES` + `CARD_ACCENTS` (per-card `var(--*)` accent token) string maps, shared by WorkspaceGrid and BottomNav
-│           ├── terminalDock.ts — pure reducer for the bottom-dock terminal's ephemeral tab list (emptyDock/addTerminal/closeTerminal/setActive) — only open/height persist, tabs never do (module retained; TerminalDock.tsx now orphaned, no importer)
-│           ├── windowTabs.ts   — pure reducers for the Chat/Terminal cards' own per-card tab strips (same style as terminalDock.ts, but each card owns an independent `TabsState<T>` — not a shared dock): `emptyTabs`/`closeTab`/`setActiveTab`/`nextLabel`/`addTerminalTab`/`addChatTab`/`launchChatTab`/`setChatTabConfig`/`hydrateTerminalTabs`/`hydrateChatTabs`. Terminal tabs auto-spawn their PTY on add; chat tabs start `launched: false` (a picker + Launch button gate the `/ws/chat` session) until `launchChatTab` flips it. Tab id/label/config metadata round-trips through `GlobalUiState.chatTabs`/`terminalTabs`; the live PTY/chat sessions themselves stay ephemeral
-│           ├── terminalProtocol.ts — pure wire-protocol helpers for `/ws/terminal` (encodeInput/encodeResize/parseServerMsg)
-│           ├── chatProtocol.ts — pure wire-protocol helpers for `/ws/chat` (encodeStart/encodeInput/encodeInterrupt/parseChatServerMsg)
-│           ├── chatThread.ts   — React-free bubble-thread reducer for the standalone chat pane (emptyThread/pushUser/appendPartial/finalizeAssistant/pushToolNote/endTurn/resetThread)
-│           ├── attachments.ts  — pure DOM-free-ish helpers for image/PDF drop-paste: mimeToKind/validateFile (mirrors server ALLOWED_MEDIA_TYPES/MAX_ATTACHMENT_BYTES)/fileToAttachment (FileReader → base64, no data-URL prefix)/filesFromPaste/filesFromDrop
-│           ├── useAttachments.ts — shared attachment state + paste/drop handlers for the three composers (NewTaskForm, ClarifyChat, ChatPane): addFiles (validate + read, capped at MAX_ATTACHMENTS)/remove/clear/error/onPaste/onDrop
-│           ├── voiceSentences.ts — pure, DOM-free sentence buffer for the Local Voice Chat feature (`emptyBuffer`/`push`/`flush`/`SentenceBuffer`): buffers streamed `/ws/chat` `partial` deltas into whole sentences for TTS
-│           ├── voiceTurn.ts    — pure turn state machine for Local Voice Chat (`initialTurn`/`reduce`/`VoiceState` `idle|listening|transcribing|thinking|speaking`/`VoiceEvent`): encodes the freeze rule (ignore `speechEnd` while speaking) + barge-in/stop interrupt semantics
-│           ├── voice/          — the swappable local STT/TTS seam (frontend-only, no server counterpart): `backend.ts` (`VoiceBackend` interface — transcribe/synthesize/warmup/ready/sampleRate/dispose), `localBackend.ts` (`LocalVoiceBackend` — transformers.js Whisper STT + kokoro-js Kokoro-82M TTS, each in its own Web Worker, WebGPU→WASM fallback; not unit-tested, ML/worker glue, same policy as Terminal.tsx), `sttWorker.ts`/`ttsWorker.ts` (the two Web Workers), `workerProtocol.ts` (pure shared worker message types), `player.ts` (`PcmPlayer` — Web-Audio PCM playback queue with `stop()` for barge-in)
-│           ├── usePanelMount.ts — hook that keeps a conditionally-rendered panel mounted for `--panel-duration` past a toggle-to-closed, so its CSS closing (minimize) animation can play before unmount; used by every toggleable "window" (Files sidebar, Workspace center pane, task rail, terminal dock body, Settings modal)
-│           ├── themes.ts       — theme catalog (11 themes: one per color + black/white/grey) + pure helpers (`buildThemeVars`/`applyTheme`/`loadStoredTheme`/`saveStoredTheme`); each theme has a dark + light accent pair, swapped via CSS custom properties set on the document root; persisted to localStorage only (`zmrng-theme` key), no server involvement
-│           ├── opacity.ts      — Window-opacity control (Settings → Window opacity): pure helpers (`clampOpacity`/`loadStoredOpacity`/`saveStoredOpacity`/`applyOpacity`) that set the `--surface-opacity` multiplier on the document root, scaling ONLY the frosted-glass panel-background alphas (`--surface`/`--surface-strong`/`--well`/`--well-strong` in theme.css, authored as `rgba(… calc(<alpha> * var(--surface-opacity)))`) — text/icons/borders stay opaque. Range 0–100% (default 100), persisted to localStorage only (`zmrng-opacity` key), applied at boot in `main.tsx`; same localStorage-only pattern as themes.ts, no server, no `types.ts` change
-│           ├── mentions.ts     — pure, DOM-free helpers for the Team chat `@`-mention UX: `mentionCandidates(members, botHandle)` (roster display names + the bot), `activeMention(text, caret)` (word-boundary-anchored, mirrors the server's `detectMention` rule), `filterCandidates(candidates, query)`, `applyMention(text, start, caretEnd, name)` (splice the picked name into the composer text), `parseMentions(body, names)` (splits a posted message body into plain-text/mention segments for pill rendering); types `MentionCandidate`/`MentionSegment`. Frontend-only — visual autocomplete + highlight, no change to the server's `@agent` reply trigger
-│           └── components/      — TaskList (list of all tasks; clicking a row selects it AND expands that row in place to reveal its lifecycle action buttons (Start/Resume/Stop/Cancel/Delete/Mark-done/Open-PR, status-driven visibility), an inline error banner, the autonomous/queued/blocked status text, and a collapsible metadata dropdown (repo/flow/model/effort/style/branch/plan-path/body/token-usage) — folded in from the old standalone `activetask` card; reuses the action-button/details styling from `TaskActions.module.css`), NewTaskForm (title/body + drop/paste image-PDF attachments via `useAttachments` + `AttachmentTray`; an image-only task is valid — title still required), ClarifyChat (live composer with `placeholder` prop; same drop/paste attachment wiring as NewTaskForm), AttachmentTray (thumbnail strip for pending attachments — inline image previews, a generic PDF chip, per-item remove + a validation-error line; purely presentational, state lives in `useAttachments`), WorkerLog (read-only tool/subagent/subagent_result rows color-coded by actor), WorkerLogPanel (WorkerLog + the ClarifyChat steer composer, shown in live phases — the channel that replaced TaskDetail's inline composer; forwards `attachments` through its `onMessage` to `message()`; its only home is the `log` tab inside WorkspaceTabs — there is no standalone top-level Worker Log card in the grid), WorkspaceView (the merged home, now reduced to composing `<WorkspaceGrid/>` + `<BottomNav/>`; still owns the per-task `WorkspaceLayout` (hydrate/openFile/prune) + the file-tree fetch + the agents fetch, fed into the Files + Viewers cards via a card content map. The old locked-left Files sidebar / center pane / right task rail / Files-Notes split / TerminalDock plumbing was removed from this component), WorkspaceGrid (the card-grid host: a `ResizeObserver` tracks grid width and pointer move/resize handlers call the pure `gridLayout.ts` reducer; renders a drag ghost + scroll spacer and each non-hidden card. Cards that own a live socket/session — terminal, chat, viewers — stay MOUNTED while hidden (`display:none`), never unmounted, so the session survives hide→show. Intentionally NOT unit-tested — pointer/RO glue, same policy as the other drag handlers), GridCard (presentational card chrome: ⠿ drag-handle header + title + minimize/hide buttons + corner resize handle + body; body always mounted, `display:none` when minimized), BottomNav (`BottomNav.module.css`) (the static bottom nav bar: Cards show/hide menu, density/card-style/interaction `<select>`s, Settings toggle, connection dot), PipelineCard / ConcurrencyCard / ReviewQueueCard (`DashboardCards.module.css`) (the 3 data cards, fed by `dashboardData.ts`), WorkspaceTabs (draggable tabs for file Viewers/WorkerLogPanel/Notes/Chat — max 2 panes, single split axis, native HTML5 drag-and-drop; now rendered inside the Viewers card; the reopen-buttons bar above the tab strip lost its "Panels" label text — the Worker Log/Chat reopen buttons themselves stay), TerminalDock (`terminalDock.ts`/`NotesPanel` likewise remain in the tree but are now orphaned — no importer — with their tests still passing, kept per the plan), TabStrip (presentational tab strip shared by ChatCard/TerminalCard: click-to-focus tabs + `×` close + a trailing `+` add button; state lives in the caller), ChatCard (wraps the Chat card's `windowTabs.ts` state in a `TabStrip` + per-tab body; a new tab starts unlaunched — shows a model/effort/style picker + Launch button — and only mounts `ChatPane` once Launch is pressed, including the first/default tab; all tabs stay mounted `display:none` when inactive so a launched session survives a tab switch), TerminalCard (wraps the Terminal card's `windowTabs.ts` state in a `TabStrip` + per-tab body; a new tab auto-spawns its PTY immediately on `+`, no gating; same stay-mounted-while-hidden policy as ChatCard), ChatPane (the standalone agent-chat bubble thread rendered inside a ChatCard tab once launched — one WebSocket per instance to `/ws/chat`, mirrors Terminal.tsx not the useWs hub; takes optional `initialModel`/`initialEffort`/`initialStyle` props seeded from the launching tab's picker (defaults sonnet/medium/caveman-full when omitted); a config change respawns the session + resets the thread; Stop button while a turn is in flight; ephemeral, no DB persistence; same drop/paste attachment wiring as NewTaskForm/ClarifyChat, sent via `encodeInput(text, attachments)`), SettingsModal (ephemeral focused overlay with a dimmed backdrop, animates open/close via `usePanelMount`; a theme dropdown selector (native `<select>` of the 11 theme names + a live preview swatch) + sun/moon dark/light toggle backed by `themes.ts` and persisted to localStorage, a Window-opacity range slider (0–100%) backed by `opacity.ts` that scales the frosted-glass panel alphas live and persists to localStorage, plus a Reboot control — `POST /api/restart` ff-only `git pull`s zmrng's own repo to `origin/main`, runs `npm run build`, then (dev only) touches the server entry to trigger a tsx-watch respawn; always visible, no `cfg?.dev` gate), Terminal (xterm.js glue rendered inside a TerminalCard tab — one WebSocket per instance to `/ws/terminal`, theme-token colors, ResizeObserver fit), VoiceView (`VoiceView.tsx`/`VoiceView.module.css`) (the Local Voice Chat shell, opened from a 5th `'voice'` Worker-pane tab in `WorkspaceView`'s `PaneTab` union/`PANE_TABS` — stays mounted `display:none` alongside the Terminal/Chat panes so an enabled session survives a pane-tab switch; owns one `/ws/chat` WebSocket per enabled session — own-socket pattern mirroring ChatPane/Terminal, not the `useWs` hub — reusing `chatProtocol.ts`/`chatThread.ts` unchanged, plus the mic VAD (`@ricky0123/vad-web` MicVAD) and the `voice/` ML backend seam; self-contained, no persisted tabs, no `GlobalUiState` change), TeamView (the Team-mode tab: owns the `/ws/workspace` socket — glue, like `Terminal.tsx` — renders the presence roster, the channels rail (create-channel affordance, repo-tied accent dot), the open channel's REST-scrollback-plus-live thread, and the composer; the composer wires `mentions.ts` for a live `@`-mention autocomplete dropdown (arrow keys / Enter–Tab / Esc / click, candidates = roster names + the configured bot handle from `cfg.botHandle`), and thread message bodies render `@name` tokens as colored pills via `parseMentions` — person and agent mentions styled identically; person-mention highlighting is purely visual, the server's `@agent` reply trigger is unchanged; also renders the per-message "Send to my zmrng" handoff button)
-│   └── desktop/                — Tauri desktop shell (wraps the server as a sidecar)
-│       ├── scripts/bundle-sidecar.mjs  — esbuild server + vendor sqlite/node + web/dist
-│       ├── splash/index.html   — galaxy-warp canvas loader (vanilla JS, no build); click/Enter → warp-dive → white-bloom → navigate to app; two-signal boot handshake: splash emits `splash-ready`, Rust emits `engine-ready {port}` once both sidecar + splash are ready; requires `withGlobalTauri: true` in tauri.conf.json
-│       └── src-tauri/          — Rust shell: Cargo.toml (`macos-private-api` feature), tauri.conf.json (`withGlobalTauri`, `macOSPrivateApi`, `titleBarStyle: "Overlay"`, `hiddenTitle: true` — overlay traffic lights, no title strip), src/main.rs (Boot handshake, Emitter/Listener)
-├── config/
-│   ├── repos.json              — repo registry (gitignored; machine-specific paths)
-│   └── repos.example.json      — committed template
-├── worktrees/                  — per-task git worktrees (gitignored)
-├── .claude/                    — this harness (rules, commands, agents, skills, docs, files)
-└── .agents/                    — PIV artifacts (plans, tasks, reviews, handoffs) + loop.sh
+│   ├── server/     — Fastify + SQLite + the claude runner (source of truth for types)
+│   ├── web/        — React frontend (types.ts is a MANUAL MIRROR of the server's)
+│   └── desktop/    — Tauri shell wrapping the server as a sidecar
+├── config/         — repo registry (repos.json gitignored, repos.example.json committed)
+├── worktrees/      — per-task git worktrees (gitignored)
+├── .claude/        — this harness (rules, commands, agents, skills, docs, files)
+└── .agents/        — PIV artifacts (plans, tasks, reviews, handoffs) + loop.sh
 ```
+**Annotated per-file map: `.claude/docs/codemap.md`** — read it before hunting for
+where something lives, rather than grepping the tree.
 
 ## Inherits the universal Projects harness
 zmrng lives inside a universal Projects workspace and **inherits** the universal
@@ -171,83 +130,10 @@ untyped stream-json). Pino structured logging (`app.log.info({ code }, 'msg')`) 
 string interpolation, never `console.log` in server code.
 
 ## Key services
-See `.claude/docs/services-reference.md` for full method signatures and behavior.
-
-- **Runner** (`packages/server/src/runner.ts`) — wraps one `claude` child per task;
-  spawns with stream-json in/out, parses session/assistant/partial/result/tool_use/tool_result
-  lines, exposes `send(text, attachments?)`/`interrupt()`/`kill()`; strips
-  `ANTHROPIC_API_KEY`. Two new callbacks: `onToolUse(name, summary, isSubagent,
-  subagentType?)` (main-worker tool calls and Task spawns) and `onSubagentResult(subagentType,
-  summary, isError)` (Task results via a bounded `pendingTasks` map). `interrupt()` writes a
-  `control_request`/`interrupt` stream-json envelope to stdin without killing the child.
-  Exported `buildUserMessage(text, attachments?)` builds the outbound stream-json `user`
-  message — image/document content blocks (from operator drop/paste attachments) ahead of
-  the text block — and exported `sanitizeAttachments(raw)` is the tolerant allow-list
-  (`ALLOWED_MEDIA_TYPES`) + per-file size (`MAX_ATTACHMENT_BYTES`, 8MB) + count
-  (`MAX_ATTACHMENTS`, 10) guard shared by the REST create/message routes and the
-  `/ws/chat` input frame; a bad entry is dropped, never a 500. Attachments are transient —
-  never written to disk or the DB.
-- **TaskManager / phases** (`packages/server/src/phases.ts`) — phase state machine
-  (backlog→clarify→planning→executing→validating→review→done/failed, plus `blocked`),
-  per-phase fresh sessions + kickoff prompts, control-token detection (`ZMRNG_READY`,
-  `ZMRNG_PLAN_READY`, `ZMRNG_VALIDATING`, `ZMRNG_BLOCKED`, PR-URL), execute-lane cap + queue.
-  `message()` gate lifted to all live phases (`clarify|planning|executing|validating`).
-  New public `interrupt(taskId)` hard-stops the current turn (ESC-style); a private
-  `interrupting` Set suppresses the interrupted turn's `result` from triggering a task
-  failure. `interrupting` is cleaned up in `fail/done/cancel/onPr`. `createTask(...)` takes
-  an optional trailing `attachments?: Attachment[]` (a new-task-box image/PDF drop/paste),
-  held in a `pendingAttachments` Map and consumed once — at the first clarify send inside
-  `start()` — so a re-start after a fail never double-injects them. `message(taskId, text,
-  attachments?)` also takes an optional `attachments?: Attachment[]`, forwarded to
-  `runner.send()` and logged with a `[n attachment(s)]` suffix. `executeKickoff` (plan
-  flow only, not `directKickoff`) also instructs a conditional final-state UI screenshot:
-  UI-touching diffs capture the changed view(s) with the Playwright MCP browser tools,
-  commit the PNG(s) under `.github/pr-screenshots/<branch-slug>/`, and post them as a
-  separate `gh pr comment` before printing the PR URL — best-effort (skipped and noted
-  under Testing, never `ZMRNG_BLOCKED`, when the browser tools are unavailable).
-- **Db** (`packages/server/src/db.ts`) — SQLite (WAL), `tasks` + `events` schema,
-  prepared statements, idempotent `ensureColumns()` migration, atomic `addUsage()`.
-- **Config** (`packages/server/src/config.ts`) — env + repo registry: explicit
-  (config/repos.json → `ZMRNG_REPOS` env → legacy `ZMRNG_TARGET_REPO`) merged with an
-  auto-scan of `ZMRNG_PROJECTS_DIR` (every git-repo-root under it) plus a zmrng self
-  entry; default repo is zmrng unless `ZMRNG_DEFAULT_REPO` pins another. `repoById()`.
-- **Worktree** (`packages/server/src/worktree.ts`) — `git worktree add` per task, base
-  ref resolved `origin/<branch>` → local `<branch>` → `HEAD` for local-only repos.
-- **WsHub** (`packages/server/src/ws.ts`) — fan-out broadcast of task + claude events.
-- **TerminalManager** (`packages/server/src/terminal.ts`) — owns the Workspace bottom-dock
-  PTY sessions; `create(cb)` spawns a shell at `config.projectsDir` with `config.shell` via
-  a swappable `PtyFactory` (mirrors the runner-factory test seam), strips
-  `ANTHROPIC_API_KEY` under oauth mode, self-removes from the tracked `Set` on exit;
-  `killAll()` tears every session down on shutdown. Pure `parseClientMsg()` tolerantly
-  decodes client `input`/`resize` frames.
-- **ChatManager** (`packages/server/src/chatAgent.ts`) — owns the live standalone
-  agent-chat sessions behind `GET /ws/chat`, one per socket; `create(cfg, cb)` spawns a
-  conversational `claude` at `config.projectsDir` via the same `RunnerFactory` seam
-  `TaskManager` uses (so tests never spawn a real `claude`), self-removes from the
-  tracked `Set` on exit; `killAll()` tears every session down on shutdown.
-  `chatSystemPrompt(style, projectsDir)` is a deliberately non-worker prompt — no task,
-  branch, PR, or control-token protocol, just a helpful assistant with read/explore
-  filesystem access, reusing the exported `styleDirective` from `phases.ts` for the
-  caveman register. `parseChatClientMsg()` tolerantly decodes client `start`/`input`/
-  `interrupt` frames (mirrors `terminal.ts`'s `parseClientMsg`); an `input` frame's
-  `attachments` field is run through `sanitizeAttachments()` too, so a malformed/oversized
-  entry is silently dropped rather than reaching the runner. Distinct from the
-  existing per-task `/api/tasks/:id/chat` REST chat (`chat.ts`) — this one is
-  task-independent and never touches the DB.
-- **Fastify server** (`packages/server/src/index.ts`) — REST surface includes
-  `GET /api/config`, `GET /api/repos`, `GET /api/tasks`, `POST /api/tasks`,
-  `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`, `GET /api/tasks/:id/events`
-  (see `.claude/docs/services-reference.md` for the full, current route list — it has grown
-  since this line was last trimmed). `bodyLimit` is raised to 32MB (from Fastify's 1MB
-  default) so base64 image/PDF attachments fit in a POST body; `POST /api/tasks` and
-  `POST /api/tasks/:id/message` both run `body.attachments` through `sanitizeAttachments()`
-  — a title-only or image-only task/message is valid (no text required once an attachment
-  is present). WS: `GET /ws` (task/claude event fan-out),
-  `GET /ws/terminal` (one PTY per socket, via `TerminalManager`), and `GET /ws/chat` (one
-  standalone chat `claude` session per socket, via `ChatManager`). Static serve of
-  `web/dist`. `shutdown()` calls `manager.shutdown()`, `terminals.killAll()`, and
-  `chats.killAll()`.
-- **useWs** (`packages/web/src/useWs.ts`) — auto-reconnect WebSocket hook (1s→30s backoff).
+Full method signatures, callbacks, wire types, and per-service behavior live in
+**`.claude/docs/services-reference.md`** (server: runner, phases, terminal, chatAgent,
+db, config, worktree, ws, index; frontend: `packages/web/src/`; team workspace).
+Read that file when touching a service — it is the reference, not this file.
 
 ## Commands
 ```bash
@@ -307,61 +193,24 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
 4. **End-of-session doc sync** — run the `sync-docs` skill before any non-trivial commit.
 
 ## Context architecture
-- **Tier 1 — this file.** Always loaded: structure, commands, conventions.
+- **Tier 1 — this file.** Always loaded, and kept deliberately small: conventions,
+  commands, and pointers. Detail belongs in Tier 3, not here — when a section grows
+  past a screen, move it to `.claude/docs/` and leave a one-line pointer.
 - **Tier 2 — auto-loading rules** (`.claude/rules/`): `backend-typescript.md`,
   `frontend-react.md`, `error-handling.md`, `testing.md`, `planning-workflow.md`,
   `worktree-location.md`, `coding-lifecycle.md`.
-- **Tier 3 — reference docs** (`.claude/docs/`): `services-reference.md`,
-  `implementation-history.md`. Plus `.claude/files/` (PROJECT_CONTEXT, FUTURE_IDEAS) and
+- **Tier 3 — reference docs** (`.claude/docs/`): `codemap.md` (annotated file tree —
+  where things live), `services-reference.md` (method signatures + behavior),
+  `resolved-decisions.md` (settled calls, don't re-ask), `implementation-history.md`.
+  Plus `.claude/files/` (PROJECT_CONTEXT, FUTURE_IDEAS) and
   `.claude/errors.md` (known gotchas — check before debugging).
 
-## Team workspace (POC) — exposure precondition
-The optional **Team** mode tab connects to a VPS-hosted team-workspace server (the
-same server binary, run on a VPS) over ONE multiplexed WebSocket at
-`GET /ws/workspace`. Teammates self-assert a free-text display-name handle (no
-password, no verification — stored as a `members` row) and appear in a live,
-workspace-wide presence roster driven by connection lifecycle plus a periodic
-ping/pong heartbeat. The VPS URL is a per-teammate client setting in Settings
-(localStorage `zmrng-workspace-url`), with an optional server default via
-`ZMRNG_WORKSPACE_URL` surfaced through `GET /api/config` (`workspaceUrl`).
-
-On top of that shell, **channels + live messaging** (T2): `channels` (a fixed
-`#general` plus optional repo-tied ones) and `messages` (`kind ∈ human|agent`)
-live in the same `zmrng.db`. The same multiplexed socket gains `subscribe`/
-`unsubscribe`/`message` frames; a `ChannelManager`'s `Map<channel_id, Set<socket>>`
-fans a posted message out ONLY to sockets subscribed to that channel (no history
-replay). Scrollback loads over the paginated `GET /api/channels/:id/messages`; the
-socket carries only new messages from then on. **A client `message` frame carries
-no `kind`** — a socket post is always persisted as `human`, so a human client
-cannot forge an `agent` message; the `agent` kind is server-controlled (the future
-T4 @mention agent posts server-side). Open membership — every workspace member is
-implicitly in every channel, no per-channel join/invite/ACL.
-
-**Repo-scoped channels + the planning→execution handoff** (T3): `POST /api/channels`
-creates a channel (optionally repo-tied via nullable `repo_id`) and broadcasts the
-new list. A per-message **"Send to my zmrng"** button opens the teammate's LOCAL
-new-task box pre-filled (title/body + a `From team channel #<name> (message #<id>)`
-provenance line) and — for a repo-tied channel — a *suggested* repo, resolved ONLY
-against the teammate's OWN local registry (`resolveSuggestedRepoId`), so **no
-VPS-supplied repoId is auto-bound** (D6). The task is created via the existing local
-`POST /api/tasks` → **backlog**, human clicks Start; no git round-trip, no auto-start.
-
-**@mention shared team agent** (T4): a teammate `@agent`s the bot in a channel; the
-server (one shared `AgentResponder` instance, D8/D4) `git pull`s a read-only reference
-checkout, relays the mention + last-N scrollback to the configured bot `AgentTarget`
-via the U4 `fetch(agent.url)` adapter (bounded by an abort timeout), and posts the
-reply back as a server-controlled `kind='agent'` message. The agent **talks and plans
-only — never executes code** (D1): no worktrees, no runners. Unmentioned messages do
-nothing (no always-listening). The live checkout path + which `AgentTarget` is the bot
-are operator-owned deployment config (`ZMRNG_WORKSPACE_REPO_PATH`/`_BOT_AGENT`/
-`_BOT_HANDLE`/`_SCROLLBACK`/`_AGENT_TIMEOUT_MS`).
-
-The channel composer also has a live **`@`-mention autocomplete + highlight** (frontend-only,
-new pure module `mentions.ts`): typing `@` opens a dropdown filtered against the roster plus
-the bot handle (`GET /api/config` gained `botHandle`, mirroring `ZMRNG_WORKSPACE_BOT_HANDLE`),
-and posted message bodies render `@name` tokens as colored pills. This is visual-only sugar —
-person mentions carry no server behavior, and the actual `@agent` reply trigger (`detectMention`
-in `agentResponder.ts`) is unchanged.
+## Team workspace (POC)
+Optional **Team** mode tab talking to a VPS-hosted instance of the same server binary
+over one multiplexed WebSocket (`GET /ws/workspace`): presence roster, channels, live
+messaging, repo-scoped channels with a "Send to my zmrng" handoff, and one shared
+`@agent` that plans but never executes. Architecture detail is in
+`.claude/docs/codemap.md`; the deploy runbook is `docs/team-workspace-deploy.md`.
 
 > **POC exposure precondition (Tailscale is the perimeter):** the VPS
 > workspace port MUST be reachable **only over Tailscale** — firewall it to the
@@ -371,104 +220,10 @@ in `agentResponder.ts`) is unchanged.
 > precondition documented here **only** — there is deliberately **no app-code
 > gate, no server bind change, and no auth** in the T1 scope.
 
-## Resolved (don't re-ask)
-- Engine is the real `claude` binary via `child_process` (ToS-compliant; never proxy the token).
-- Team workspace (T1): workspace data lives in the SAME server's SQLite (no new package). The
-  `members` table + `/ws/workspace` route + presence live in `packages/server`; the Team tab +
-  VPS-URL config + roster in `packages/web`. Local task execution (tasks/worktrees/runner/phases,
-  `/ws`, `/ws/terminal`, `/ws/chat`) is UNTOUCHED. ONE multiplexed socket per user carries
-  channel-tagged frames (`hello`/`ping` client, `roster`/`pong` server); `WsHub` gained a room
-  routing dimension (`join`/`leaveAll`/`broadcastRoom`) rather than a rewrite. Presence is
-  connection-based + heartbeat (online while holding a live socket; ping/pong evicts a dead one).
-- Team workspace (T2): channels + live messaging. `channels`/`messages` tables (`kind ∈
-  human|agent`) in the same SQLite; the multiplexed socket gained `subscribe`/`unsubscribe`/
-  `message` frames + a `message`/`channels` server frame; a dedicated `ChannelManager`
-  `Map<channel_id, Set<socket>>` (NOT `WsHub` rooms) does per-channel fan-out. REST scrollback
-  (`GET /api/channels`, `GET /api/channels/:id/messages` paginated) + WS-live split, no history
-  replay. Open membership (no per-channel ACL). A client `message` frame carries no `kind` —
-  socket posts are always `human`; the `agent` kind is server-controlled (T4). Deferred to #86:
-  reconnect scrollback gap >1 page + backward-pagination UI.
-- Team workspace (T3): repo-scoped channels + the planning→execution handoff (D6). `POST
-  /api/channels` (create + broadcast the list; dup name → existing row, never 500). "Send to my
-  zmrng" pre-fills the LOCAL new-task box (title/body + `From team channel #<name> (message
-  #<id>)` provenance) and a *suggested* repo resolved ONLY against the teammate's own registry
-  (`teamHandoff.ts`/`resolveSuggestedRepoId`) — no VPS repoId auto-bound; task → backlog, human
-  Starts. `NewTaskForm` gained a one-shot `prefill` + `onPrefillConsumed` (dropped after seed so
-  a card hide/show can't re-seed). No new shared type (`Channel.repoId` pre-existed).
-- Team workspace (T4): the ONE shared @mention team agent (D8/D4), server-only. `agentResponder.ts`
-  (`detectMention` word-boundary, `buildAgentMessages`, `parseAgentReply`, `resolveBotAgent`, the
-  injectable `AgentResponder`) is wired once by `index.ts`; a mention fires `handleMention` async
-  from the `/ws/workspace` handler AFTER the human post — `git pull --ff-only`s a read-only
-  reference checkout (best-effort), relays last-N scrollback to the bot `AgentTarget` via the U4
-  `fetch(agent.url)` adapter (AbortController timeout), posts the reply as server-controlled
-  `kind='agent'`. Talks/plans only, never executes code (D1). Config keys `workspaceRepoPath`/
-  `workspaceBotAgentId`/`workspaceBotHandle`(`@agent`)/`workspaceScrollback`(20)/
-  `workspaceAgentTimeoutMs`(60000); no agents → graceful no-op. Live checkout path + bot id are
-  operator-owned. Deferred to #92: bound @mention concurrency.
-- Team workspace — `@`-mention autocomplete + highlight (frontend-only, on top of T4): new pure
-  module `mentions.ts` (`mentionCandidates`/`activeMention`/`filterCandidates`/`applyMention`/
-  `parseMentions`) drives a live dropdown in `TeamView`'s composer and renders `@name` tokens as
-  pills in thread bodies. `GET /api/config` gained `botHandle` (mirrors
-  `ZMRNG_WORKSPACE_BOT_HANDLE`) so the autocomplete's candidate list includes the bot; no new DB
-  column, no change to the server-side `detectMention` reply trigger.
-- Max OAuth only — `ANTHROPIC_API_KEY` stripped from worker env.
-- No shared package — server↔web types are a manual mirror.
-- Frosted-glass theme; Vitest across both workspaces (typecheck+lint+test+build is validation).
-- Worktrees live under the **target repo's own** `worktrees/` dir (e.g. `<repo.path>/worktrees/<shortId>`), not a global dir. That dir should be gitignored in each target repo.
-- Build-lane cap via `ZMRNG_MAX_LANES` (default 2); extra READY tasks queue.
-- Workspace mode is a **customizable 12-column draggable/resizable card grid** (9-card
-  roster: pipeline, concurrency, reviewqueue, newtask, tasklist, files,
-  viewers, chat, terminal — the Worker Log lives only inside the Viewers card's `log`
-  tab, not as its own top-level card, and the active-task controls live inline in the
-  selected TaskList row rather than a standalone card). Grid geometry is in 12-col CELL units
-  (screen-width-independent), persisted globally in `GlobalUiState.grid` (server
-  round-trips, never validates). The pure reducer + geometry live in
-  `packages/web/src/gridLayout.ts`; interaction modes are reflow|swap|free. All 9 cards,
-  including Terminal + Chat, seed visible so their tab-strip `+` affordance is discoverable
-  without opening the Cards show/hide menu first; cards that own a live socket/session
-  (terminal/chat/viewers) stay mounted (`display:none`) while hidden so the session
-  survives hide→show. The retired
-  GlobalUiState pane/dock/rail/split fields are kept in the type for back-compat with
-  already-persisted docs; `TerminalDock.tsx`/`terminalDock.ts` and `NotesPanel.tsx` remain
-  as orphaned modules (no importer, tests still pass).
-- Workspace bottom-dock terminal shells are ephemeral (never persisted) — only the dock's
-  `open`/`height` chrome round-trips through `GlobalUiState.terminalDock`. Desktop-sidecar
-  vendoring of `node-pty`'s native binding is an explicit out-of-scope follow-up (the
-  public-readiness plan's web-only override applies here too).
-- Standalone chat-panel sessions (`/ws/chat`, `ChatManager`) are equally ephemeral — no
-  DB persistence, no task lifecycle — and independent of the pre-existing per-task
-  `/api/tasks/:id/chat` REST chat (`chat.ts`); the two are separate features that happen
-  to share the word "chat".
-- The Workspace grid's Chat and Terminal cards each have their own per-card tab strip
-  (`windowTabs.ts` + `TabStrip`/`ChatCard`/`TerminalCard`), independent of the orphaned
-  bottom-dock terminal above. Only the tab **metadata** (id/label, and for chat the
-  picked model/effort/style + `launched` flag) round-trips through
-  `GlobalUiState.chatTabs`/`terminalTabs` (server round-trips, never validates, same
-  pattern as `grid`) — the live PTY/`/ws/chat` sessions the tabs host stay ephemeral, so
-  a reload always respawns terminal tabs fresh and leaves chat tabs unlaunched again.
-- Image/PDF drop-paste attachments (`Attachment`/`AttachmentKind` in `types.ts`) are
-  equally ephemeral — never written to disk or the DB, held only long enough to build one
-  outbound stream-json `user` message (`buildUserMessage`), then discarded. The
-  allow-list/size/count limits (`ALLOWED_MEDIA_TYPES`/`MAX_ATTACHMENT_BYTES`/
-  `MAX_ATTACHMENTS`) live once in `packages/server/src/types.ts` and are mirrored into
-  `packages/web/src/types.ts` like every other shared type; `sanitizeAttachments()` is the
-  single server-side enforcement point (REST + `/ws/chat`), `validateFile()` in
-  `packages/web/src/attachments.ts` is the client-side mirror for fast feedback before a
-  file is even uploaded.
-- Local Voice Chat (Phase 1, frontend-only): a hands-free spoken conversation with the
-  SAME standalone `/ws/chat` agent the text Chat pane drives — a pure I/O shell layered
-  on the existing socket, reusing `chatProtocol.ts`/`chatThread.ts` unchanged. ZERO
-  server changes, ZERO `types.ts` change. STT/TTS run locally in the browser
-  (`@huggingface/transformers` Whisper, `kokoro-js` Kokoro-82M, `@ricky0123/vad-web`
-  MicVAD) behind the swappable `voice/backend.ts` seam, each model in its own Web
-  Worker. New pure modules `voiceSentences.ts` (streamed-delta → sentence buffering for
-  TTS) and `voiceTurn.ts` (the `idle|listening|transcribing|thinking|speaking` state
-  machine, freeze + barge-in rules) are unit-tested; `voice/localBackend.ts` and
-  `VoiceView.tsx` are not (ML/worker/mic glue, same policy as Terminal.tsx). **Phase 2
-  (not done, deferred):** vendoring the ML models + ORT WASM into the Tauri `.app`
-  (`web/dist`), a WebGPU-in-WKWebView investigation, and `desktop:build` support — until
-  then Local Voice Chat only works in the browser dev/build target, not the shipped
-  desktop app.
+## Resolved decisions
+Settled calls that should not be re-litigated live in
+**`.claude/docs/resolved-decisions.md`**. Read it before proposing a change that
+revisits engine choice, the team-workspace T1–T4 scope, or migration strategy.
 
 ## Agent skills
 
