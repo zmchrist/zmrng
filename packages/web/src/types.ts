@@ -570,6 +570,10 @@ export interface ServerConfig {
    *  ZMRNG_WORKSPACE_URL). Empty when unset; the per-teammate localStorage
    *  value wins over this when present. */
   workspaceUrl: string
+  /** The shared team-agent bot handle (default `@agent`), from
+   *  ZMRNG_WORKSPACE_BOT_HANDLE. Used by the Team chat's mention autocomplete +
+   *  highlighter — visual only; the server-side reply trigger is unchanged. */
+  botHandle: string
   /** Human-readable display string (back-compat with the existing badge). */
   authMode: string
   /** Machine-readable form of the same setting. */

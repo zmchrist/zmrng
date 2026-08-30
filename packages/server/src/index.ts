@@ -162,6 +162,10 @@ app.get('/api/config', () => ({
   // Optional server-side default VPS workspace-server URL for the Team tab. The
   // per-teammate localStorage value (client-side) wins over this when set.
   workspaceUrl: config.workspaceUrl,
+  // The shared team-agent bot handle (default `@agent`), surfaced so the Team
+  // chat's mention autocomplete/highlighter know the agent's name. Visual only —
+  // the server-side reply trigger (`detectMention`) is unchanged.
+  botHandle: config.workspaceBotHandle,
   authMode:
     config.authMode === 'apikey'
       ? 'API key (ANTHROPIC_API_KEY billed per task)'
