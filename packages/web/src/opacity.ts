@@ -1,14 +1,25 @@
 // Surface opacity — a runtime multiplier applied to the frosted-glass panel
-// backgrounds only (the --surface / --surface-strong / --well / --well-strong
+// backgrounds (the --surface / --surface-strong / --well / --well-strong
 // tokens in theme.css, which are authored as rgba(... calc(<base-alpha> *
-// var(--surface-opacity)))). Text, icons, and borders keep their own opaque
-// tokens and are untouched. The multiplier is exposed on the document root as
-// the --surface-opacity custom property, so lowering it makes every glass panel
-// more see-through (the desktop/wallpaper shows through) while everything drawn
-// on top stays fully legible.
+// var(--surface-opacity)))) and, inside the native Tauri desktop app, the
+// window's own root/body background too. Text, icons, and borders keep their
+// own opaque tokens and are untouched. The multiplier is exposed on the
+// document root as the --surface-opacity custom property, so lowering it
+// makes every glass panel more see-through.
+//
+// The desktop app's window is already configured native-transparent
+// (`transparent: true` in tauri.conf.json), but the webview still paints an
+// opaque `body { background: var(--bg) }` over that by default — fading it
+// in lockstep with --surface-opacity is what actually lets the real desktop
+// show through at low opacity. Gated on isTauriRuntime() (via the
+// `data-native-transparent` attribute theme.css reads) so the plain browser
+// dev target — which has no native window to show through — keeps its
+// existing opaque background regardless of the slider.
 //
 // Persisted to localStorage only (`zmrng-opacity`), mirroring themes.ts — no
 // server involvement, no types.ts change.
+
+import { isTauriRuntime } from './runtime'
 
 /** 0 = fully see-through glass, 100 = today's authored alphas untouched. */
 export const DEFAULT_OPACITY = 100
@@ -44,9 +55,16 @@ export function saveStoredOpacity(pct: number): void {
 /**
  * Applies a surface-opacity percentage to the document root by setting the
  * --surface-opacity multiplier the surface tokens compose into. 100% → 1
- * (authored alphas), 0% → 0 (fully see-through glass).
+ * (authored alphas), 0% → 0 (fully see-through glass). Inside the native
+ * Tauri desktop app this also flips `data-native-transparent`, which
+ * theme.css uses to fade the window's own root/body background — so the
+ * whole window, not just the panels, goes see-through toward 0%.
  */
 export function applyOpacity(pct: number): void {
   const multiplier = clampOpacity(pct) / 100
-  document.documentElement.style.setProperty('--surface-opacity', String(multiplier))
+  const root = document.documentElement
+  root.style.setProperty('--surface-opacity', String(multiplier))
+  if (isTauriRuntime()) {
+    root.dataset.nativeTransparent = 'true'
+  }
 }
