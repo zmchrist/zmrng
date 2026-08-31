@@ -128,6 +128,17 @@ body {
   overflow: hidden;
 }
 
+/* Desktop (Tauri) window opacity: the window itself is already native-
+   transparent (tauri.conf.json `transparent: true`), but this opaque body
+   background paints over that. Inside the app only (data-native-transparent,
+   set by opacity.ts via isTauriRuntime()), fade it in lockstep with
+   --surface-opacity so the real desktop shows through toward 0%. The plain
+   browser dev target has no native window to show through, so it keeps the
+   solid background above untouched. */
+[data-native-transparent='true'] body {
+  background: color-mix(in srgb, var(--bg) calc(var(--surface-opacity) * 100%), transparent);
+}
+
 /* App content sits above the fixed cosmic backdrop layers. */
 #root {
   position: relative;
