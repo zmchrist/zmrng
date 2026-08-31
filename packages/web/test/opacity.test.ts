@@ -77,4 +77,21 @@ describe('applyOpacity', () => {
     applyOpacity(200)
     expect(document.documentElement.style.getPropertyValue('--surface-opacity')).toBe('1')
   })
+
+  it('does not mark native-transparent in the plain browser (no __TAURI__ global)', () => {
+    delete document.documentElement.dataset.nativeTransparent
+    applyOpacity(50)
+    expect(document.documentElement.dataset.nativeTransparent).toBeUndefined()
+  })
+
+  it('marks native-transparent when running inside the Tauri desktop app', () => {
+    delete document.documentElement.dataset.nativeTransparent
+    ;(window as unknown as { __TAURI__: unknown }).__TAURI__ = {}
+    try {
+      applyOpacity(50)
+      expect(document.documentElement.dataset.nativeTransparent).toBe('true')
+    } finally {
+      delete (window as unknown as { __TAURI__?: unknown }).__TAURI__
+    }
+  })
 })
