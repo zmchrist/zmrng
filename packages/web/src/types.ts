@@ -253,6 +253,13 @@ export interface GlobalUiState {
 export interface TerminalTabMeta {
   id: string
   label: string
+  /**
+   * Server-assigned id of the live PTY this tab last attached to. Lets a full
+   * page reload reattach to the same shell (within the grace window) instead of
+   * spawning a fresh one. Absent on older docs / a never-attached tab — the
+   * client then attaches without an id and the server spawns a new session.
+   */
+  sessionId?: string
 }
 
 /** Persisted metadata for one Chat-card tab: id/label plus the picked
@@ -406,11 +413,13 @@ export type WsEvent =
 
 /** client -> server terminal frames (over GET /ws/terminal). */
 export type TermClientMsg =
+  | { type: 'attach'; sessionId?: string; cols: number; rows: number }
   | { type: 'input'; data: string }
   | { type: 'resize'; cols: number; rows: number }
 
 /** server -> client terminal frames. */
 export type TermServerMsg =
+  | { type: 'session'; sessionId: string }
   | { type: 'data'; data: string }
   | { type: 'exit'; code: number | null }
 

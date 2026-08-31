@@ -10,6 +10,7 @@ import {
   nextLabel,
   setActiveTab,
   setChatTabConfig,
+  setTerminalTabSession,
   type ChatTabState,
   type TabsState,
   type TerminalTabState,
@@ -87,6 +88,21 @@ describe('setChatTabConfig', () => {
     let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'normal', repoId: '' })
     s = setChatTabConfig(s, 'chat-1', { model: 'opus', effort: 'xhigh', repoId: 'repo-a' })
     expect(s.tabs[0]).toMatchObject({ model: 'opus', effort: 'xhigh', style: 'normal', repoId: 'repo-a', launched: false })
+  })
+})
+
+describe('setTerminalTabSession', () => {
+  it('records the session id on the targeted tab only', () => {
+    let s = addTerminalTab(emptyTabs(), 'term-1', 'Terminal 1')
+    s = addTerminalTab(s, 'term-2', 'Terminal 2')
+    s = setTerminalTabSession(s, 'term-1', 'sess-abc')
+    expect(s.tabs.find((t) => t.id === 'term-1')?.sessionId).toBe('sess-abc')
+    expect(s.tabs.find((t) => t.id === 'term-2')?.sessionId).toBeUndefined()
+  })
+
+  it('is a no-op for an unknown id', () => {
+    const s = addTerminalTab(emptyTabs(), 'term-1', 'Terminal 1')
+    expect(setTerminalTabSession(s, 'ghost', 'sess-x')).toEqual(s)
   })
 })
 
