@@ -20,7 +20,7 @@ packages/server/src/
   db.ts        — SQLite schema, prepared statements, idempotent migrations
   types.ts     — Task/WsEvent/usage/RepoTarget types (SOURCE OF TRUTH)
   runner.ts    — spawn + parse the claude child (stream-json); strip API key; buildUserMessage()/sanitizeAttachments() for multimodal image/PDF attachments
-  terminal.ts  — TerminalManager: node-pty shells for the Workspace bottom-dock terminal
+  terminal.ts  — TerminalManager: server-owned node-pty sessions (keyed by id) for the Workspace terminal; attach/detach survive a transient socket drop within a grace window
   chatAgent.ts — ChatManager: standalone chat `claude` Runners (GET /ws/chat), same RunnerFactory seam as TaskManager
   phases.ts    — phase state machine + system/kickoff prompts + lane queue
   worktree.ts  — git worktree create/remove per task
@@ -43,7 +43,7 @@ const env = { ...process.env }
 delete env.ANTHROPIC_API_KEY
 spawn('claude', args, { cwd, env })
 ```
-`terminal.ts`'s `TerminalManager.create()` mirrors this same strip (gated on
+`terminal.ts`'s `TerminalManager.attach()` mirrors this same strip (gated on
 `config.authMode === 'oauth'`) before handing the child env to its `PtyFactory`, so a
 `claude` launched inside the Workspace terminal is Max-OAuth-only too. `chatAgent.ts`'s
 `ChatManager` does **not** repeat the strip — it spawns through the same `RunnerFactory`

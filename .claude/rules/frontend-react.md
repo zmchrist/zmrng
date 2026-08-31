@@ -58,7 +58,12 @@ stream into the live log; persisted events arrive as `event`.
 instance — it does **not** go through `useWs`/the `/ws` fan-out hub, since each
 terminal owns a dedicated PTY rather than sharing task/claude event broadcast state.
 Frames are encoded/decoded with the pure helpers in `terminalProtocol.ts`
-(`encodeInput`/`encodeResize`/`parseServerMsg`), never hand-rolled JSON inline.
+(`encodeAttach`/`encodeInput`/`encodeResize`/`parseServerMsg`), never hand-rolled JSON
+inline. The PTY itself now survives a transient socket drop: `Terminal.tsx` runs a
+reconnect loop with backoff and always sends `attach` with its stored `sessionId` (from
+`localStorage`, `zmrng-term-<tabId>`) first, so a reconnect within the server's grace
+window reattaches to the same session and replays missed output rather than spawning a
+fresh shell.
 
 ### Chat WebSocket (same own-socket pattern as Terminal)
 `ChatPane.tsx` opens its own `WebSocket` directly to `/ws/chat` per mounted instance,

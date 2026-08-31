@@ -72,6 +72,17 @@ export function addTerminalTab(
   return appendTab(state, { id, label })
 }
 
+/** Record the server-assigned PTY session id on a terminal tab so a full page
+ *  reload can reattach to the same shell. A no-op for an absent id. */
+export function setTerminalTabSession(
+  state: TabsState<TerminalTabState>,
+  id: string,
+  sessionId: string,
+): TabsState<TerminalTabState> {
+  if (!state.tabs.some((t) => t.id === id)) return state
+  return { ...state, tabs: state.tabs.map((t) => (t.id === id ? { ...t, sessionId } : t)) }
+}
+
 /** Append a chat tab, unlaunched, seeded with the given default config, and focus it. */
 export function addChatTab(
   state: TabsState<ChatTabState>,
