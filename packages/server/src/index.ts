@@ -606,9 +606,16 @@ app.get('/ws', { websocket: true }, (socket: WebSocket) => {
   hub.send(socket, { type: 'snapshot', tasks: db.listTasks() })
 })
 
-// Bidirectional PTY channel for the Workspace bottom-dock terminal. One socket
-// owns exactly one shell: socket close ⇒ PTY killed (ephemeral by construction).
+// Bidirectional PTY channel for the Workspace terminal. A socket ATTACHES to a
+// server-owned session (keyed by id) rather than owning the shell: socket close
+// ⇒ the session is DETACHED (kept alive for a grace window), so a lock/unlock, a
+// network blip, or a page reload can reattach to the same shell and replay its
+// recent output. The client's first frame is `attach` (carrying its stored
+// sessionId, if any); the server answers with the resolved `session` id and the
+// bytes to replay.
 app.get('/ws/terminal', { websocket: true }, (socket: WebSocket) => {
+  let sessionId: string | null = null
+
   const send = (msg: TermServerMsg): void => {
     try {
       socket.send(JSON.stringify(msg))
@@ -616,34 +623,44 @@ app.get('/ws/terminal', { websocket: true }, (socket: WebSocket) => {
       // socket closed mid-send
     }
   }
-  try {
-    const session = terminals.create({
-      onData: (data) => send({ type: 'data', data }),
-      onExit: (code) => {
-        send({ type: 'exit', code })
-        socket.close()
-      },
-    })
-    socket.on('message', (raw) => {
-      try {
-        const msg = parseClientMsg(String(raw))
-        if (msg?.type === 'input') session.write(msg.data)
-        else if (msg?.type === 'resize') session.resize(msg.cols, msg.rows)
-      } catch (err) {
-        app.log.error({ err }, 'terminal message handler failed')
-        socket.close()
-      }
-    })
-    socket.on('close', () => session.kill())
-    socket.on('error', () => session.kill())
-  } catch (err) {
-    app.log.error({ err }, 'terminal spawn failed')
+
+  socket.on('message', (raw) => {
     try {
+      const msg = parseClientMsg(String(raw))
+      if (!msg) return
+      if (msg.type === 'attach') {
+        // First (or a repeated) attach: resolve-or-spawn the session, then replay.
+        if (sessionId) return // already attached on this socket — ignore
+        const result = terminals.attach(msg.sessionId, {
+          onData: (data) => send({ type: 'data', data }),
+          onExit: (code) => {
+            send({ type: 'exit', code })
+            socket.close()
+          },
+        })
+        sessionId = result.sessionId
+        send({ type: 'session', sessionId })
+        if (result.replay) send({ type: 'data', data: result.replay })
+        terminals.resize(sessionId, msg.cols, msg.rows)
+      } else if (sessionId && msg.type === 'input') {
+        terminals.write(sessionId, msg.data)
+      } else if (sessionId && msg.type === 'resize') {
+        terminals.resize(sessionId, msg.cols, msg.rows)
+      }
+    } catch (err) {
+      app.log.error({ err }, 'terminal message handler failed')
       socket.close()
-    } catch {
-      // already closed
     }
-  }
+  })
+
+  // Detach (not kill) so the shell survives a transient drop; the grace timer
+  // reaps it if nothing reattaches.
+  socket.on('close', () => {
+    if (sessionId) terminals.detach(sessionId)
+  })
+  socket.on('error', () => {
+    if (sessionId) terminals.detach(sessionId)
+  })
 })
 
 // Bidirectional chat channel for the bottom-dock standalone agent chat. One

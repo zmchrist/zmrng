@@ -145,3 +145,21 @@ gained `botHandle: string` (`config.workspaceBotHandle`) so the candidate list i
 bot; mirrored into `ServerConfig` in `packages/web/src/types.ts` (the server has no
 `ServerConfig` type — the route returns an inline literal). No DB or wire-protocol change; the
 server-side `@agent` reply trigger (`detectMention` in `agentResponder.ts`) is unchanged.
+
+## Terminal reattach — PTY sessions survive a transient socket drop (2026-08-31)
+`TerminalManager` (`terminal.ts`) rebuilt around server-owned sessions keyed by id
+(`Map<sessionId, TermSession>`, each with a bounded ring buffer for replay) instead of a
+socket-owned `Set`. `create(cb)` is gone; `attach(sessionId?, cb)` resolve-or-spawns (a
+known id reattaches — cancels its grace timer, swaps callbacks, replays buffered output;
+an unknown/omitted id spawns fresh), `write`/`resize` route to a session's PTY, and
+`detach(sessionId)` on socket close starts a grace timer (`config.terminalGraceMs`,
+default 10min) instead of killing the shell — reaped only if nothing reattaches in time.
+New config: `terminalGraceMs`/`terminalBufferBytes` (`ZMRNG_TERMINAL_GRACE_MS`/
+`ZMRNG_TERMINAL_BUFFER_BYTES`). The `/ws/terminal` route now attaches rather than owns:
+first client frame is `attach`, server replies `{type:'session', sessionId}` + replay.
+Wire types gained `TermClientMsg.attach` and `TermServerMsg.session`; `TerminalTabMeta`
+gained an optional `sessionId` that round-trips through `GlobalUiState.terminalTabs`.
+`Terminal.tsx` gained a reconnect loop (backoff) that re-sends the stored session id on
+every (re)connect and persists the server-assigned id to `localStorage`
+(`zmrng-term-<tabId>`). A PTY is still reaped on grace-timer expiry or server restart —
+not durable across a restart, just resilient to a lock/blip/reload.
