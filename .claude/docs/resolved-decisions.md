@@ -62,8 +62,14 @@ that revisits one of these.
   GlobalUiState pane/dock/rail/split fields are kept in the type for back-compat with
   already-persisted docs; `TerminalDock.tsx`/`terminalDock.ts` and `NotesPanel.tsx` remain
   as orphaned modules (no importer, tests still pass).
-- Workspace bottom-dock terminal shells are ephemeral (never persisted) — only the dock's
-  `open`/`height` chrome round-trips through `GlobalUiState.terminalDock`. Desktop-sidecar
+- Workspace bottom-dock terminal shells are ephemeral chrome-wise (never persisted) —
+  only the dock's `open`/`height` round-trips through `GlobalUiState.terminalDock`. The
+  underlying PTY session itself, however, now survives a transient socket drop (machine
+  lock, network blip, page reload): `TerminalManager` (`terminal.ts`) owns sessions
+  keyed by id and detaches (not kills) on socket close, starting a grace timer
+  (`config.terminalGraceMs`, default 10 min); a reconnect within the window reattaches
+  and replays a bounded ring buffer of missed output. A PTY is still reaped on
+  grace-timer expiry or server restart — it is not durable across a restart. Desktop-sidecar
   vendoring of `node-pty`'s native binding is an explicit out-of-scope follow-up (the
   public-readiness plan's web-only override applies here too).
 - Standalone chat-panel sessions (`/ws/chat`, `ChatManager`) are equally ephemeral — no
@@ -72,11 +78,14 @@ that revisits one of these.
   to share the word "chat".
 - The Workspace grid's Chat and Terminal cards each have their own per-card tab strip
   (`windowTabs.ts` + `TabStrip`/`ChatCard`/`TerminalCard`), independent of the orphaned
-  bottom-dock terminal above. Only the tab **metadata** (id/label, and for chat the
-  picked model/effort/style + `launched` flag) round-trips through
+  bottom-dock terminal above. The tab **metadata** (id/label, and for chat the picked
+  model/effort/style + `launched` flag) round-trips through
   `GlobalUiState.chatTabs`/`terminalTabs` (server round-trips, never validates, same
-  pattern as `grid`) — the live PTY/`/ws/chat` sessions the tabs host stay ephemeral, so
-  a reload always respawns terminal tabs fresh and leaves chat tabs unlaunched again.
+  pattern as `grid`) — chat sessions themselves stay ephemeral, so a reload always
+  leaves chat tabs unlaunched again. Terminal tabs are the exception: `TerminalTabMeta`
+  also carries an optional `sessionId`, so `Terminal.tsx` re-sends the stored id on
+  every (re)connect and a reload reattaches to a still-live server-owned PTY session
+  (within `terminalGraceMs`) instead of always spawning fresh.
 - Image/PDF drop-paste attachments (`Attachment`/`AttachmentKind` in `types.ts`) are
   equally ephemeral — never written to disk or the DB, held only long enough to build one
   outbound stream-json `user` message (`buildUserMessage`), then discarded. The

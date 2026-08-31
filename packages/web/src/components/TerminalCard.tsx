@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import styles from './WindowTabs.module.css'
 import { TabStrip } from './TabStrip'
 import { Terminal } from './Terminal'
-import { addTerminalTab, closeTab, nextLabel, setActiveTab, type TabsState, type TerminalTabState } from '../windowTabs'
+import { addTerminalTab, closeTab, nextLabel, setActiveTab, setTerminalTabSession, type TabsState, type TerminalTabState } from '../windowTabs'
 
 interface Props {
   tabs: TabsState<TerminalTabState>
@@ -24,6 +24,10 @@ export function TerminalCard({ tabs, onTabsChange }: Props) {
 
   const closeThisTab = useCallback((id: string) => onTabsChange(closeTab(tabs, id)), [tabs, onTabsChange])
   const activate = useCallback((id: string) => onTabsChange(setActiveTab(tabs, id)), [tabs, onTabsChange])
+  const rememberSession = useCallback(
+    (id: string, sessionId: string) => onTabsChange(setTerminalTabSession(tabs, id, sessionId)),
+    [tabs, onTabsChange],
+  )
 
   return (
     <div className={styles.card}>
@@ -39,7 +43,7 @@ export function TerminalCard({ tabs, onTabsChange }: Props) {
         {tabs.tabs.length === 0 && <div className={styles.empty}>No terminal tabs. Click + to open one.</div>}
         {tabs.tabs.map((t) => (
           <div key={t.id} className={styles.tabBody} style={{ display: t.id === tabs.activeId ? 'flex' : 'none' }}>
-            <Terminal id={t.id} />
+            <Terminal id={t.id} sessionId={t.sessionId} onSession={(s) => rememberSession(t.id, s)} />
           </div>
         ))}
       </div>

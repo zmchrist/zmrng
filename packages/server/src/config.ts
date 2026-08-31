@@ -114,6 +114,19 @@ export interface Config {
   /** Login shell for the workspace terminal (SHELL env, else a sane default). */
   shell: string
   /**
+   * Grace window (ms) a detached terminal PTY is kept alive after its socket
+   * drops, so a lock/unlock, a network blip, or a page reload can reattach to
+   * the same live shell (`ZMRNG_TERMINAL_GRACE_MS`, default 10 min). The PTY is
+   * reaped if nothing reattaches before it elapses.
+   */
+  terminalGraceMs: number
+  /**
+   * Max bytes of recent PTY output retained per session for replay on reattach
+   * (`ZMRNG_TERMINAL_BUFFER_BYTES`, default 256 KiB). Oldest bytes are dropped
+   * first — this bounds memory, not full scrollback.
+   */
+  terminalBufferBytes: number
+  /**
    * Optional server-side default URL of the VPS team-workspace server, surfaced
    * through `GET /api/config` so a machine can pre-seed the Team tab's default.
    * Empty when `ZMRNG_WORKSPACE_URL` is unset; the per-teammate localStorage
@@ -569,6 +582,8 @@ function buildConfig(): Config {
     authMode: resolveAuthMode(process.env),
     projectsDir: PROJECTS_DIR,
     shell: process.env.SHELL?.trim() || '/bin/sh',
+    terminalGraceMs: Number(process.env.ZMRNG_TERMINAL_GRACE_MS ?? 600000),
+    terminalBufferBytes: Number(process.env.ZMRNG_TERMINAL_BUFFER_BYTES ?? 262144),
     workspaceUrl: process.env.ZMRNG_WORKSPACE_URL?.trim() || '',
     workspaceRepoPath: process.env.ZMRNG_WORKSPACE_REPO_PATH?.trim() || '',
     workspaceBotAgentId: process.env.ZMRNG_WORKSPACE_BOT_AGENT?.trim() || '',

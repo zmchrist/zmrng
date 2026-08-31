@@ -1,5 +1,24 @@
 import { describe, it, expect } from 'vitest'
-import { encodeInput, encodeResize, parseServerMsg } from '../src/terminalProtocol'
+import { encodeAttach, encodeInput, encodeResize, parseServerMsg } from '../src/terminalProtocol'
+
+describe('encodeAttach', () => {
+  it('includes the session id when reattaching', () => {
+    expect(JSON.parse(encodeAttach('sess-1', 80, 24))).toEqual({
+      type: 'attach',
+      sessionId: 'sess-1',
+      cols: 80,
+      rows: 24,
+    })
+  })
+
+  it('omits sessionId for a brand-new tab', () => {
+    expect(JSON.parse(encodeAttach(undefined, 100, 30))).toEqual({
+      type: 'attach',
+      cols: 100,
+      rows: 30,
+    })
+  })
+})
 
 describe('encodeInput', () => {
   it('produces the exact input frame the server parses', () => {
@@ -26,6 +45,17 @@ describe('encodeResize', () => {
 })
 
 describe('parseServerMsg', () => {
+  it('accepts a session frame', () => {
+    expect(parseServerMsg('{"type":"session","sessionId":"sess-1"}')).toEqual({
+      type: 'session',
+      sessionId: 'sess-1',
+    })
+  })
+
+  it('rejects a session frame with a non-string sessionId', () => {
+    expect(parseServerMsg('{"type":"session","sessionId":42}')).toBeUndefined()
+  })
+
   it('accepts a data frame', () => {
     expect(parseServerMsg('{"type":"data","data":"hello"}')).toEqual({ type: 'data', data: 'hello' })
   })

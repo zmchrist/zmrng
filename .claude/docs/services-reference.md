@@ -128,9 +128,11 @@ The phase state machine and orchestration.
 
 ## Terminal — `packages/server/src/terminal.ts`
 
-Owns the PTY sessions backing the Workspace bottom-dock terminal (one shell per
-`GET /ws/terminal` WebSocket). Mirrors `runner.ts`'s factory-seam pattern so tests never
-spawn a real shell.
+Owns the PTY sessions backing the Workspace Terminal card (`GET /ws/terminal`). Sessions
+are **server-owned and keyed by id**, not tied 1:1 to a socket — a transient socket drop
+(machine lock, network blip, page reload) no longer kills the shell; the session survives
+under a grace timer and a reconnecting client reattaches to it. Mirrors `runner.ts`'s
+factory-seam pattern so tests never spawn a real shell.
 
 - **`PtySession`** — `write(data)` / `resize(cols, rows)` / `kill()`; a node-pty handle
   satisfies this, and so can a test double.
@@ -142,18 +144,30 @@ spawn a real shell.
   events onto `PtyCallbacks`; `kill()` is wrapped in try/catch for an already-exited shell.
 - **`parseClientMsg(raw: string): TermClientMsg | undefined`** — pure, tolerant parse of one
   client→server frame: malformed JSON, a non-object, an unknown `type`, or an ill-typed
-  field all yield `undefined` rather than throwing. Accepts `{type:'input', data:string}`
-  and `{type:'resize', cols:number, rows:number}`.
-- **`TerminalManager`** — tracks live sessions in a `Set<PtySession>`.
-  - **`create(cb: PtyCallbacks): PtySession`** — copies `process.env`, deletes
-    `ANTHROPIC_API_KEY` when `config.authMode === 'oauth'` (mirrors the runner so a
-    `claude` launched inside the terminal uses Max OAuth, never the metered API), spawns
-    via the injected `factory` at `cwd: config.projectsDir` / `shell: config.shell`, wraps
-    `onExit` to self-remove the session from the tracked set *before* notifying the caller
-    (so a later `killAll()` never double-kills an already-exited shell), and tracks the
-    result.
-  - **`killAll(): void`** — best-effort `kill()` (try/catch) on every tracked session, then
-    clears the set. Called from `index.ts`'s `shutdown()` alongside `manager.shutdown()`.
+  field all yield `undefined` rather than throwing. Accepts `{type:'attach', sessionId?:
+  string, cols:number, rows:number}`, `{type:'input', data:string}`, and
+  `{type:'resize', cols:number, rows:number}`.
+- **`TerminalManager`** — tracks live sessions in a `Map<sessionId, TermSession>` (each
+  `TermSession` wraps the `PtySession` + a bounded byte-capped ring buffer of recent
+  output + a pending grace-timer handle). Two extra injectable seams alongside
+  `PtyFactory`: a `TimerFns` (`setTimeout`/`clearTimeout`, default the real globals) and
+  an id factory (default `randomUUID`) — both swappable so tests can fast-forward grace
+  expiry without real timers.
+  - **`attach(sessionId: string | undefined, cb: PtyCallbacks): { sessionId: string;
+    replay: string }`** — resolve-or-spawn. A known, still-live id cancels its pending
+    grace timer, swaps in the new socket's callbacks, and returns its ring-buffered
+    output as `replay` so the reattaching client can catch up. An unknown, expired, or
+    omitted id spawns a fresh PTY under a newly-generated id (same env-strip-under-oauth
+    + `cwd`/`shell` spawn as before) and returns an empty `replay`.
+  - **`write(sessionId, data)` / `resize(sessionId, cols, rows)`** — route to the
+    session's PTY; a no-op (never throws) if `sessionId` is unknown.
+  - **`detach(sessionId): void`** — called on socket close. Does **not** kill the PTY;
+    starts a grace timer (`config.terminalGraceMs`, default 600000ms/10min via
+    `ZMRNG_TERMINAL_GRACE_MS`). If nothing calls `attach()` with that id before the timer
+    fires, the session is reaped (`kill()` + removed from the map).
+  - **`killAll(): void`** — best-effort `kill()` (try/catch) on every tracked session,
+    clears all pending grace timers, then clears the map. Called from `index.ts`'s
+    `shutdown()` alongside `manager.shutdown()`.
 
 ## ChatManager — `packages/server/src/chatAgent.ts`
 
@@ -223,7 +237,11 @@ Env parsing + repo registry.
   Support/zmrng` in the bundled app), `dbPath`, `webDist`, `authMode` (`'oauth'` default
   strips `ANTHROPIC_API_KEY` from worker/terminal child envs; `'apikey'` preserves it),
   **`projectsDir`** (root dir for the workspace terminal's PTY, == `PROJECTS_DIR`),
-  **`shell`** (login shell for the workspace terminal — `SHELL` env, else `/bin/sh`).
+  **`shell`** (login shell for the workspace terminal — `SHELL` env, else `/bin/sh`),
+  **`terminalGraceMs`** (`ZMRNG_TERMINAL_GRACE_MS`, default 600000/10min — how long a
+  detached terminal PTY stays alive waiting for a reattach before `TerminalManager`
+  reaps it), **`terminalBufferBytes`** (`ZMRNG_TERMINAL_BUFFER_BYTES`, default
+  262144/256KiB — cap on each session's replay ring buffer).
   (`worktreesDir` was removed — each task derives the worktrees dir from
   `path.join(repo.path, 'worktrees')` at spawn time.)
 - **`resolveAuthMode(env)`** — pure: any `ZMRNG_AUTH_MODE` other than `'apikey'`
@@ -278,11 +296,17 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   fuller pass is owed here, tracked as a doc-sync gap rather than documented speculatively
   in this change.)
 - **WS:** `GET /ws` — adds the socket to the hub, sends a `snapshot`. `GET /ws/terminal` —
-  one PTY per socket via `TerminalManager.create()`; forwards PTY output as
-  `{type:'data', data}` frames and relays the exit code as `{type:'exit', code}` before
-  closing the socket; client `input`/`resize` frames are parsed with the tolerant
-  `parseClientMsg()` from `terminal.ts`. Spawn failures and mid-session errors close the
-  socket rather than throwing. `GET /ws/chat` — one socket owns at most one live chat
+  the socket ATTACHES to a server-owned session rather than owning the shell outright.
+  The first client frame is `attach` (carrying the stored `sessionId` if the client has
+  one); the server resolves-or-spawns via `TerminalManager.attach()`, replies with a
+  `{type:'session', sessionId}` frame, then replays any buffered output before streaming
+  live PTY output as `{type:'data', data}` frames and relaying the exit code as
+  `{type:'exit', code}` before closing the socket. Client `input`/`resize` frames are
+  parsed with the tolerant `parseClientMsg()` from `terminal.ts` and routed via
+  `write`/`resize`. Socket **close calls `terminals.detach(sessionId)`, NOT kill** — the
+  PTY survives under a grace timer for a reconnecting client to reattach to. Spawn
+  failures and mid-session errors close the socket rather than throwing. `GET /ws/chat` —
+  one socket owns at most one live chat
   session; a `start` frame (re)spawns via `ChatManager.create()` (killing any prior
   session on the socket first, so a config change respawns cleanly), an `input` frame
   sends a turn (`session.send(msg.text, msg.attachments)` — the frame's already-sanitized
@@ -420,10 +444,11 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   neighbor, or `null` once empty — kind-agnostic despite the name), `setActive(state,
   id)` (kind-agnostic). Ids are always caller-supplied (never `Math.random`/`Date.now`
   inside the module) so it stays pure and deterministic to test.
-- **terminalProtocol.ts** — `encodeInput(data)` / `encodeResize(cols, rows)` produce exactly
-  the frames the server's `parseClientMsg` accepts; `parseServerMsg(raw)` tolerantly parses
-  a server→client `TermServerMsg` (`data` | `exit`), returning `undefined` on anything
-  malformed rather than throwing.
+- **terminalProtocol.ts** — `encodeAttach(sessionId, cols, rows)` / `encodeInput(data)` /
+  `encodeResize(cols, rows)` produce exactly the frames the server's `parseClientMsg`
+  accepts; `parseServerMsg(raw)` tolerantly parses a server→client `TermServerMsg`
+  (`session` | `data` | `exit`), returning `undefined` on anything malformed rather than
+  throwing.
 - **chatProtocol.ts** — `encodeStart(model, effort, style)` / `encodeInput(text,
   attachments?)` (omits the `attachments` field entirely when the array is empty/absent) /
   `encodeInterrupt()` produce exactly the frames the server's `parseChatClientMsg`
