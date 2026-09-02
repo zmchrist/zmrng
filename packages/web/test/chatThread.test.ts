@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  MAX_THREAD_ITEMS,
   appendPartial,
   emptyThread,
   endTurn,
@@ -87,5 +88,26 @@ describe('endTurn', () => {
 describe('resetThread', () => {
   it('yields a fresh empty thread', () => {
     expect(resetThread()).toEqual({ items: [], busy: false })
+  })
+})
+
+describe('item cap (idle memory bound)', () => {
+  it('caps the thread at MAX_THREAD_ITEMS, dropping the oldest', () => {
+    let s = emptyThread()
+    // Push tool notes (each a distinct item that never merges) past the cap.
+    for (let i = 0; i < MAX_THREAD_ITEMS + 50; i++) {
+      s = pushToolNote(s, { name: 'Read', summary: `f${i}.ts`, actor: 'main' })
+    }
+    expect(s.items).toHaveLength(MAX_THREAD_ITEMS)
+    // Oldest 50 dropped: the first retained item is f50.
+    const first = s.items[0]
+    expect(first.kind === 'tool' && first.summary).toBe('f50.ts')
+  })
+
+  it('a streaming bubble that extends in place does not count toward the cap', () => {
+    let s = pushUser(emptyThread(), 'hi')
+    for (let i = 0; i < MAX_THREAD_ITEMS * 2; i++) s = appendPartial(s, 'x')
+    // user bubble + one streaming agent bubble — well under the cap.
+    expect(s.items).toHaveLength(2)
   })
 })

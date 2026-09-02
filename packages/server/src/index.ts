@@ -667,6 +667,7 @@ app.get('/ws/terminal', { websocket: true }, (socket: WebSocket) => {
 // socket owns at most one conversational `claude` session: a `start` frame
 // (re)spawns it, `input` sends an operator turn, `interrupt` cuts the in-flight
 // turn. The session is ephemeral — socket close ⇒ session killed.
+const CHAT_HEARTBEAT_MS = 30000
 app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
   let session: ReturnType<ChatManager['create']> | null = null
 
@@ -677,6 +678,27 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
       // socket closed mid-send
     }
   }
+
+  // ws-level heartbeat: a half-open socket (browser tab killed, laptop slept,
+  // network dropped) never fires 'close', so without this its `claude` child
+  // would linger forever as a zombie holding memory. If a ping goes unanswered
+  // between ticks, terminate the socket — the close handler then kills the child.
+  let alive = true
+  socket.on('pong', () => {
+    alive = true
+  })
+  const heartbeat = setInterval(() => {
+    if (!alive) {
+      socket.terminate()
+      return
+    }
+    alive = false
+    try {
+      socket.ping()
+    } catch {
+      // socket already gone
+    }
+  }, CHAT_HEARTBEAT_MS)
 
   const startSession = (
     model: string,
@@ -742,8 +764,12 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
       socket.close()
     }
   })
-  socket.on('close', () => session?.kill())
-  socket.on('error', () => session?.kill())
+  const cleanup = (): void => {
+    clearInterval(heartbeat)
+    session?.kill()
+  }
+  socket.on('close', cleanup)
+  socket.on('error', cleanup)
 })
 
 // ONE multiplexed team-workspace socket per teammate. Frames are channel-tagged
