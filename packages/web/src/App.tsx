@@ -38,6 +38,14 @@ const RAIL: ReadonlyArray<{ id: WorkspaceMode; glyph: string; label: string }> =
 // Read once — the runtime never changes mid-session.
 const isNativeApp = isTauriRuntime()
 
+// Idle-memory caps. A long-open task streaming for hours would otherwise grow
+// the worker-log event array (and its DOM) and the single-turn `live` string
+// without bound — the core idle leak. Trim both to a generous ceiling; older
+// events are still on the server (re-fetched on reselect) and the trimmed head
+// of a live turn is transient token noise finalized into an `event` anyway.
+const MAX_EVENTS = 2000
+const MAX_LIVE_CHARS = 200_000
+
 export default function App() {
   const [tasks, setTasks] = useState<Record<string, Task>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -103,14 +111,20 @@ export default function App() {
         break
       case 'event':
         if (e.taskId !== selectedIdRef.current) return
-        setEvents((prev) => [...prev, e.event])
+        setEvents((prev) => {
+          const next = [...prev, e.event]
+          return next.length > MAX_EVENTS ? next.slice(next.length - MAX_EVENTS) : next
+        })
         if (e.event.kind === 'claude' && e.event.payload.sub === 'assistant') {
           setLive('')
         }
         break
       case 'partial':
         if (e.taskId !== selectedIdRef.current) return
-        setLive((prev) => prev + e.text)
+        setLive((prev) => {
+          const next = prev + e.text
+          return next.length > MAX_LIVE_CHARS ? next.slice(next.length - MAX_LIVE_CHARS) : next
+        })
         break
       case 'task-removed':
         setTasks((prev) => {

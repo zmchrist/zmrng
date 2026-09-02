@@ -16,6 +16,18 @@ export interface ThreadState {
   busy: boolean
 }
 
+/**
+ * Hard cap on how many items one thread retains in memory. A long-lived chat
+ * would otherwise grow the item list (and its DOM) without bound, a real idle
+ * memory leak — so the oldest items are dropped once the cap is exceeded.
+ */
+export const MAX_THREAD_ITEMS = 1000
+
+/** Drop the oldest items so the list never exceeds `MAX_THREAD_ITEMS`. */
+function capItems(items: ThreadItem[]): ThreadItem[] {
+  return items.length > MAX_THREAD_ITEMS ? items.slice(items.length - MAX_THREAD_ITEMS) : items
+}
+
 /** The default thread: empty, idle. */
 export function emptyThread(): ThreadState {
   return { items: [], busy: false }
@@ -23,7 +35,7 @@ export function emptyThread(): ThreadState {
 
 /** Append an operator bubble and mark the thread busy (a turn has begun). */
 export function pushUser(state: ThreadState, text: string): ThreadState {
-  return { items: [...state.items, { kind: 'user', text }], busy: true }
+  return { items: capItems([...state.items, { kind: 'user', text }]), busy: true }
 }
 
 /** True when the last item is an open (streaming) agent bubble. */
@@ -43,7 +55,7 @@ export function appendPartial(state: ThreadState, delta: string): ThreadState {
     items[items.length - 1] = { ...last, text: last.text + delta }
     return { ...state, items }
   }
-  return { ...state, items: [...state.items, { kind: 'agent', text: delta, streaming: true }] }
+  return { ...state, items: capItems([...state.items, { kind: 'agent', text: delta, streaming: true }]) }
 }
 
 /**
@@ -56,7 +68,7 @@ export function finalizeAssistant(state: ThreadState, text: string): ThreadState
     items[items.length - 1] = { kind: 'agent', text, streaming: false }
     return { ...state, items }
   }
-  return { ...state, items: [...state.items, { kind: 'agent', text, streaming: false }] }
+  return { ...state, items: capItems([...state.items, { kind: 'agent', text, streaming: false }]) }
 }
 
 /** Insert a slim tool-use note row. */
@@ -66,7 +78,7 @@ export function pushToolNote(
 ): ThreadState {
   return {
     ...state,
-    items: [...state.items, { kind: 'tool', name: note.name, summary: note.summary, actor: note.actor }],
+    items: capItems([...state.items, { kind: 'tool', name: note.name, summary: note.summary, actor: note.actor }]),
   }
 }
 

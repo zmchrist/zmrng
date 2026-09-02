@@ -210,6 +210,11 @@ export class Runner {
   private child: ChildProcessWithoutNullStreams
   private buf = ''
   private sessionSeen = false
+  /** Pending SIGKILL escalation timer (armed by kill(), cleared on exit). */
+  private killTimer: ReturnType<typeof setTimeout> | undefined
+
+  /** Grace after SIGTERM before escalating to SIGKILL for a wedged child. */
+  private static readonly SIGKILL_GRACE_MS = 5000
   /** tool_use_id → subagent_type, for matching a Task spawn to its tool_result. */
   private pendingTasks = new Map<string, string>()
 
@@ -251,7 +256,14 @@ export class Runner {
     this.child.stderr.on('data', () => {
       // claude writes progress/diagnostics to stderr; intentionally ignored
     })
-    this.child.on('exit', (code, signal) => this.cb.onExit(code, signal))
+    this.child.on('exit', (code, signal) => {
+      // The child is gone — drop any pending SIGKILL escalation.
+      if (this.killTimer) {
+        clearTimeout(this.killTimer)
+        this.killTimer = undefined
+      }
+      this.cb.onExit(code, signal)
+    })
   }
 
   private onStdout(chunk: string): void {
@@ -383,7 +395,12 @@ export class Runner {
     }
   }
 
-  /** Close stdin and terminate the child process. */
+  /**
+   * Close stdin and terminate the child. SIGTERM first; if the child is still
+   * alive after a grace window (a wedged `claude` that ignores SIGTERM would
+   * otherwise linger forever as a zombie holding memory), escalate to SIGKILL.
+   * The exit handler clears the timer, so a clean exit never fires the escalation.
+   */
   kill(): void {
     try {
       this.child.stdin.end()
@@ -395,6 +412,17 @@ export class Runner {
     } catch {
       // already exited
     }
+    if (this.killTimer) return
+    this.killTimer = setTimeout(() => {
+      this.killTimer = undefined
+      try {
+        this.child.kill('SIGKILL')
+      } catch {
+        // already exited
+      }
+    }, Runner.SIGKILL_GRACE_MS)
+    // Don't let the escalation timer keep the event loop (or a test) alive.
+    this.killTimer.unref?.()
   }
 }
 
