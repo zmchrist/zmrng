@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { emptyThread, appendMessage, loadScrollback } from '../src/channelThread'
+import { MAX_CHANNEL_MESSAGES, emptyThread, appendMessage, loadScrollback } from '../src/channelThread'
 import type { Message } from '../src/types'
 
 const msg = (id: number, body: string, kind: Message['kind'] = 'human'): Message => ({
@@ -55,5 +55,14 @@ describe('channelThread reducer', () => {
     // scrollback fetch returns an older page that overlaps on id 4
     state = loadScrollback(state, [msg(2, 'b'), msg(3, 'c'), msg(4, 'd')])
     expect(state.map((m) => m.id)).toEqual([2, 3, 4])
+  })
+
+  it('caps the thread at MAX_CHANNEL_MESSAGES, keeping the newest by id', () => {
+    const page = Array.from({ length: MAX_CHANNEL_MESSAGES + 100 }, (_, i) => msg(i + 1, `m${i + 1}`))
+    const state = loadScrollback(emptyThread(), page)
+    expect(state).toHaveLength(MAX_CHANNEL_MESSAGES)
+    // Oldest 100 trimmed: lowest retained id is 101.
+    expect(state[0].id).toBe(101)
+    expect(state.at(-1)?.id).toBe(MAX_CHANNEL_MESSAGES + 100)
   })
 })
