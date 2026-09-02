@@ -7,6 +7,7 @@
 // `claude` process is gone and will respawn fresh on the next message.
 
 import type { ThreadItem } from './chatThread'
+import { MAX_THREAD_ITEMS } from './chatThread'
 
 const STORAGE_KEY = 'zmrng-chat-sessions'
 
@@ -63,10 +64,15 @@ export function loadChatThread(id: string): ThreadItem[] {
   return loadSessions().threads[id] ?? []
 }
 
-/** Persist one chat tab's transcript. */
+/**
+ * Persist one chat tab's transcript, capped to the newest `MAX_THREAD_ITEMS`.
+ * Without the cap the on-disk transcript grows without bound and is read back
+ * into memory in full on every reload — a persistent idle memory leak.
+ */
 export function saveChatThread(id: string, items: ThreadItem[]): void {
   const sessions = loadSessions()
-  saveSessions({ ...sessions, threads: { ...sessions.threads, [id]: items } })
+  const capped = items.length > MAX_THREAD_ITEMS ? items.slice(items.length - MAX_THREAD_ITEMS) : items
+  saveSessions({ ...sessions, threads: { ...sessions.threads, [id]: capped } })
 }
 
 /** Drop one chat tab's saved transcript (called when its tab is closed). */

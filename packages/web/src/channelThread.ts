@@ -6,17 +6,29 @@
 
 import type { Message } from './types'
 
+/**
+ * Hard cap on retained messages per open channel. Live messaging plus paged
+ * scrollback would otherwise grow this list forever while the tab is open — an
+ * idle memory leak — so the oldest messages are trimmed past the cap. Scrollback
+ * can always re-fetch older pages over REST.
+ */
+export const MAX_CHANNEL_MESSAGES = 2000
+
 /** The initial (no messages loaded) thread. */
 export function emptyThread(): Message[] {
   return []
 }
 
-/** Merge messages, dedupe by id (last wins), and sort ascending by id. */
+/**
+ * Merge messages, dedupe by id (last wins), sort ascending by id, and trim the
+ * oldest past `MAX_CHANNEL_MESSAGES` so the thread stays bounded.
+ */
 function merge(existing: Message[], incoming: Message[]): Message[] {
   const byId = new Map<number, Message>()
   for (const m of existing) byId.set(m.id, m)
   for (const m of incoming) byId.set(m.id, m)
-  return [...byId.values()].sort((a, b) => a.id - b.id)
+  const sorted = [...byId.values()].sort((a, b) => a.id - b.id)
+  return sorted.length > MAX_CHANNEL_MESSAGES ? sorted.slice(sorted.length - MAX_CHANNEL_MESSAGES) : sorted
 }
 
 /**

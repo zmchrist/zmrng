@@ -8,6 +8,7 @@ import {
   serializeTranscript,
 } from '../src/chatPersistence'
 import type { ThreadItem } from '../src/chatThread'
+import { MAX_THREAD_ITEMS } from '../src/chatThread'
 
 describe('chat tab order persistence', () => {
   beforeEach(() => {
@@ -66,6 +67,18 @@ describe('chat transcript persistence', () => {
     saveChatOrder(['chat-0'], 'chat-0')
     saveChatThread('chat-0', [{ kind: 'user', text: 'hi' }])
     expect(loadChatOrder()).toEqual({ order: ['chat-0'], activeId: 'chat-0' })
+  })
+
+  it('caps the on-disk transcript at MAX_THREAD_ITEMS, keeping the newest', () => {
+    const items: ThreadItem[] = Array.from({ length: MAX_THREAD_ITEMS + 50 }, (_, i) => ({
+      kind: 'user',
+      text: `m${i}`,
+    }))
+    saveChatThread('chat-0', items)
+    const loaded = loadChatThread('chat-0')
+    expect(loaded).toHaveLength(MAX_THREAD_ITEMS)
+    const first = loaded[0]
+    expect(first.kind === 'user' && first.text).toBe('m50')
   })
 })
 
