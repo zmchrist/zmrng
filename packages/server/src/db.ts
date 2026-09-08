@@ -92,6 +92,11 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `
 
 interface TaskRow {
@@ -634,6 +639,40 @@ export class Db {
             .all(channelId, before, limit)
     ) as MessageRow[]
     return rows.reverse().map(rowToMessage)
+  }
+
+  /**
+   * Read one persisted app setting by key, or `undefined` when unset. Used for
+   * durable server-side prefs (e.g. the Team workspace URL + display-name
+   * handle) that must survive a client-side localStorage wipe, an app
+   * close/reopen, a `desktop:build`, and a reboot — the sidecar `zmrng.db` lives
+   * in the persistent per-user data dir.
+   */
+  getSetting(key: string): string | undefined {
+    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
+      | { value: string }
+      | undefined
+    return row?.value
+  }
+
+  /**
+   * Upsert one app setting. A blank (whitespace-only) value deletes the row so
+   * "cleared" and "never set" read back identically as `undefined`. Additive:
+   * the `settings` table is only ever inserted into / updated in place, never
+   * dropped or rewritten wholesale (migration policy above).
+   */
+  setSetting(key: string, value: string, now: string): void {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      this.db.prepare('DELETE FROM settings WHERE key = ?').run(key)
+      return
+    }
+    this.db
+      .prepare(
+        `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      )
+      .run(key, trimmed, now)
   }
 
   /** Hard-delete a task and all its rows (events, comments, chat messages). */
