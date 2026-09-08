@@ -4,7 +4,7 @@
 // deduped-by-id list, mirroring the roster.ts / chatThread.ts style. Kept out of
 // the React component so it is unit-testable without a DOM.
 
-import type { Message } from './types'
+import type { Message, ReactionSummary } from './types'
 
 /**
  * Hard cap on retained messages per open channel. Live messaging plus paged
@@ -48,4 +48,24 @@ export function appendMessage(state: Message[], message: Message): Message[] {
  */
 export function loadScrollback(state: Message[], page: Message[]): Message[] {
   return merge(state, page)
+}
+
+/**
+ * Replace one message's reaction set from a live `reaction` frame. Returns the
+ * same reference untouched if the message is not in the thread (e.g. a reaction
+ * on a message scrolled out past the cap), so an unrelated frame never triggers
+ * a re-render. Order is preserved — only the target message's `reactions` swaps.
+ */
+export function applyReaction(
+  state: Message[],
+  messageId: number,
+  reactions: ReactionSummary[],
+): Message[] {
+  let changed = false
+  const next = state.map((m) => {
+    if (m.id !== messageId) return m
+    changed = true
+    return { ...m, reactions }
+  })
+  return changed ? next : state
 }

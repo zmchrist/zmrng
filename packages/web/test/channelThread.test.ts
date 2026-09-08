@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { MAX_CHANNEL_MESSAGES, emptyThread, appendMessage, loadScrollback } from '../src/channelThread'
+import {
+  MAX_CHANNEL_MESSAGES,
+  emptyThread,
+  appendMessage,
+  loadScrollback,
+  applyReaction,
+} from '../src/channelThread'
 import type { Message } from '../src/types'
 
 const msg = (id: number, body: string, kind: Message['kind'] = 'human'): Message => ({
@@ -64,5 +70,20 @@ describe('channelThread reducer', () => {
     // Oldest 100 trimmed: lowest retained id is 101.
     expect(state[0].id).toBe(101)
     expect(state.at(-1)?.id).toBe(MAX_CHANNEL_MESSAGES + 100)
+  })
+
+  it('applyReaction swaps the target message reactions, leaving others untouched', () => {
+    let state = emptyThread()
+    state = appendMessage(state, msg(1, 'one'))
+    state = appendMessage(state, msg(2, 'two'))
+    const next = applyReaction(state, 2, [{ emoji: '👍', handles: ['Ada'] }])
+    expect(next.find((m) => m.id === 2)?.reactions).toEqual([{ emoji: '👍', handles: ['Ada'] }])
+    expect(next.find((m) => m.id === 1)?.reactions).toBeUndefined()
+  })
+
+  it('applyReaction returns the same reference when the message is absent', () => {
+    const state = appendMessage(emptyThread(), msg(1, 'one'))
+    const next = applyReaction(state, 999, [{ emoji: '👍', handles: ['Ada'] }])
+    expect(next).toBe(state)
   })
 })

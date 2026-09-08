@@ -5,8 +5,14 @@ import {
   WorkspaceManager,
   ChannelManager,
 } from '../src/workspace.js'
-import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from '../src/types.js'
-import type { Channel, Member, Message, WsWorkspaceServerMsg } from '../src/types.js'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from '../src/types.js'
+import type {
+  Channel,
+  Member,
+  Message,
+  ReactionSummary,
+  WsWorkspaceServerMsg,
+} from '../src/types.js'
 
 describe('parseWorkspaceClientMsg', () => {
   it('parses a well-formed hello frame and trims the display name', () => {
@@ -136,6 +142,34 @@ describe('parseWorkspaceClientMsg — channel frames (T2)', () => {
     )
     expect(parsed?.type).toBe('message')
   })
+
+  it('parses a well-formed react frame and trims emoji + handle', () => {
+    expect(
+      parseWorkspaceClientMsg(
+        JSON.stringify({ type: 'react', channelId: 2, messageId: 7, emoji: ' 👍 ', handle: ' Ada ' }),
+      ),
+    ).toEqual({ type: 'react', channelId: 2, messageId: 7, emoji: '👍', handle: 'Ada' })
+  })
+
+  it('rejects react frames with a missing/blank/over-cap field', () => {
+    const bad = [
+      { type: 'react', channelId: 1, messageId: 1, emoji: '👍' }, // no handle
+      { type: 'react', channelId: 1, messageId: 1, handle: 'Ada' }, // no emoji
+      { type: 'react', channelId: 1.5, messageId: 1, emoji: '👍', handle: 'Ada' }, // non-int channel
+      { type: 'react', channelId: 1, messageId: '1', emoji: '👍', handle: 'Ada' }, // non-int message
+      { type: 'react', channelId: 1, messageId: 1, emoji: '   ', handle: 'Ada' }, // blank emoji
+      { type: 'react', channelId: 1, messageId: 1, emoji: '👍', handle: '   ' }, // blank handle
+      { type: 'react', channelId: 1, messageId: 1, emoji: 'x'.repeat(MAX_EMOJI_LEN + 1), handle: 'Ada' },
+      {
+        type: 'react',
+        channelId: 1,
+        messageId: 1,
+        emoji: '👍',
+        handle: 'a'.repeat(MAX_DISPLAY_NAME_LEN + 1),
+      },
+    ]
+    for (const f of bad) expect(parseWorkspaceClientMsg(JSON.stringify(f))).toBeUndefined()
+  })
 })
 
 /** In-memory stand-in for the channel/message surface ChannelManager needs. */
@@ -167,6 +201,28 @@ class FakeChannelDb {
     const all = this.messages.filter((m) => m.channelId === channelId)
     const older = before === null ? all : all.filter((m) => m.id < before)
     return older.slice(-limit)
+  }
+  // ---- reactions ----
+  private reactions: { messageId: number; handle: string; emoji: string }[] = []
+  getMessageChannelId(messageId: number): number | undefined {
+    return this.messages.find((m) => m.id === messageId)?.channelId
+  }
+  private summarize(messageId: number): ReactionSummary[] {
+    const byEmoji = new Map<string, string[]>()
+    for (const r of this.reactions.filter((r) => r.messageId === messageId)) {
+      const list = byEmoji.get(r.emoji) ?? []
+      list.push(r.handle)
+      byEmoji.set(r.emoji, list)
+    }
+    return [...byEmoji.entries()].map(([emoji, handles]) => ({ emoji, handles }))
+  }
+  toggleReaction(messageId: number, handle: string, emoji: string): ReactionSummary[] {
+    const idx = this.reactions.findIndex(
+      (r) => r.messageId === messageId && r.handle === handle && r.emoji === emoji,
+    )
+    if (idx >= 0) this.reactions.splice(idx, 1)
+    else this.reactions.push({ messageId, handle, emoji })
+    return this.summarize(messageId)
   }
 }
 
@@ -253,6 +309,49 @@ describe('ChannelManager fan-out (T2 — acceptance-critical)', () => {
     mgr.subscribe(sockA, 1)
     mgr.post(1, 'Ada', 'once', 'human', 't')
     expect(received).toHaveLength(1)
+  })
+
+  it('react toggles a reaction and fans the updated set out to channel subscribers', () => {
+    const { db, mgr, received } = setup()
+    const msg = db.addMessage(1, 'Ada', 'hi', 'human', 't')
+    const sockA = {}
+    const sockB = {}
+    mgr.subscribe(sockA, 1)
+    mgr.subscribe(sockB, 1)
+    const set = mgr.react(1, msg.id, 'Bo', '👍', 't')
+    expect(set).toEqual([{ emoji: '👍', handles: ['Bo'] }])
+    // Both subscribers get the reaction frame.
+    expect(received).toHaveLength(2)
+    expect(received[0].frame).toEqual({
+      type: 'reaction',
+      channelId: 1,
+      messageId: msg.id,
+      reactions: [{ emoji: '👍', handles: ['Bo'] }],
+    })
+    // Same reactor + emoji again removes it (toggle).
+    const set2 = mgr.react(1, msg.id, 'Bo', '👍', 't')
+    expect(set2).toEqual([])
+  })
+
+  it('react only reaches sockets subscribed to that channel', () => {
+    const { db, mgr, received } = setup()
+    const msg = db.addMessage(1, 'Ada', 'hi', 'human', 't')
+    const onlyB = {}
+    mgr.subscribe(onlyB, 2) // subscribed to a different channel
+    mgr.react(1, msg.id, 'Bo', '👍', 't')
+    expect(received).toHaveLength(0)
+  })
+
+  it('react on a message that does not belong to the channel is a no-op', () => {
+    const { db, mgr, received } = setup()
+    const msg = db.addMessage(1, 'Ada', 'hi', 'human', 't') // in channel 1
+    const sockA = {}
+    mgr.subscribe(sockA, 2)
+    // Claim the message is in channel 2 — mismatch → no persist, no fan-out.
+    expect(mgr.react(2, msg.id, 'Bo', '👍', 't')).toBeUndefined()
+    expect(received).toHaveLength(0)
+    // Unknown message id likewise.
+    expect(mgr.react(1, 99999, 'Bo', '👍', 't')).toBeUndefined()
   })
 })
 

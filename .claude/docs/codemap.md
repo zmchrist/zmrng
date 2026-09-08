@@ -114,6 +114,18 @@ and posted message bodies render `@name` tokens as colored pills. This is visual
 person mentions carry no server behavior, and the actual `@agent` reply trigger (`detectMention`
 in `agentResponder.ts`) is unchanged.
 
+**Emoji reactions on messages**: a `react` client frame (`channelId`/`messageId`/`emoji`/
+`handle`) toggles one reactor's emoji on a message; `ChannelManager.react()` validates the
+message belongs to the channel, persists via the additive `reactions` table
+(`UNIQUE(message_id, handle, emoji)`), and fans the aggregated `{type:'reaction',
+reactions}` frame out to that channel's subscribers. `listMessages` attaches each
+message's aggregated reactions, so scrollback loads with them already applied. Reactor
+identity is the same self-asserted free-text `handle` as message authorship — no
+login/member-id. `TeamView` renders reaction-count pills under each bubble (human and
+agent messages alike): click a pill to toggle your own reaction, click the count for a
+"who reacted" popup, or open a curated emoji-picker grid (`emojiSet.ts`'s
+`REACTION_EMOJI`, a static ~40-emoji set — no picker library, no full-Unicode list).
+
 > **POC exposure precondition (Tailscale is the perimeter):** the VPS
 > workspace port MUST be reachable **only over Tailscale** — firewall it to the
 > tailnet interface, or bind the server to the Tailscale IP. **Never expose it

@@ -16,10 +16,12 @@ import {
   encodeSubscribe,
   encodeUnsubscribe,
   encodeMessage,
+  encodeReact,
   parseWorkspaceServerMsg,
 } from '../workspaceProtocol'
 import { emptyRoster, applyWorkspaceMsg } from '../roster'
-import { emptyThread, appendMessage, loadScrollback } from '../channelThread'
+import { emptyThread, appendMessage, loadScrollback, applyReaction } from '../channelThread'
+import { REACTION_EMOJI } from '../emojiSet'
 import { useAutoScroll } from '../useAutoScroll'
 import { api } from '../api'
 import { buildHandoffPrefill, type HandoffPrefill } from '../teamHandoff'
@@ -98,6 +100,11 @@ export function TeamView({
   const [openId, setOpenId] = useState<number | null>(null)
   const [thread, setThread] = useState<Message[]>(emptyThread)
   const [composer, setComposer] = useState('')
+  // Reaction UI: `pickerFor` is the message id whose emoji picker is open (null =
+  // none); `whoFor` is the message+emoji whose "who reacted" popup is open. Only
+  // one of each is open at a time — opening one closes the other.
+  const [pickerFor, setPickerFor] = useState<number | null>(null)
+  const [whoFor, setWhoFor] = useState<{ messageId: number; emoji: string } | null>(null)
   // True after the operator posts a message that mentions the agent, until the
   // agent's reply message lands — the team `@agent` reply is a whole message
   // (no token streaming), so the dots fill the entire wait. Cleared on channel
@@ -182,6 +189,11 @@ export function TeamView({
             // The agent's reply landed — stop the thinking dots.
             if (msg.message.kind === 'agent') setAwaitingAgent(false)
           }
+        } else if (msg.type === 'reaction') {
+          // A live reaction change for the open channel: swap that message's set.
+          if (msg.channelId === openIdRef.current) {
+            setThread((prev) => applyReaction(prev, msg.messageId, msg.reactions))
+          }
         } else if (msg.type === 'channels') {
           setChannels(msg.channels)
         } else if (msg.type === 'new-version') {
@@ -258,6 +270,8 @@ export function TeamView({
     if (id === openId) return
     scrollToBottom()
     setThread(emptyThread())
+    setPickerFor(null)
+    setWhoFor(null)
     setAwaitingAgent(false)
     setOpenId(id)
   }
@@ -374,6 +388,33 @@ export function TeamView({
     }
     setComposer('')
     closeMention()
+  }
+
+  /**
+   * Toggle my emoji reaction on a message. The updated set returns via the live
+   * `reaction` fan-out (we are subscribed), so there is no optimistic update —
+   * the pill re-renders when the server broadcasts back. Closes the picker.
+   */
+  const toggleReaction = (messageId: number, emoji: string): void => {
+    if (openId === null || !connected) return
+    sendFrame(encodeReact(openId, messageId, handle, emoji))
+    setPickerFor(null)
+  }
+
+  /** Open the emoji picker for one message (closing any who-popup / other picker). */
+  const openPicker = (messageId: number): void => {
+    setWhoFor(null)
+    setPickerFor((cur) => (cur === messageId ? null : messageId))
+  }
+
+  /** Toggle the "who reacted" popup for one message+emoji (closing the picker). */
+  const toggleWho = (messageId: number, emoji: string): void => {
+    setPickerFor(null)
+    setWhoFor((cur) =>
+      cur && cur.messageId === messageId && cur.emoji === emoji
+        ? null
+        : { messageId, emoji },
+    )
   }
 
   // Create a channel over REST (T3). The server broadcasts the refreshed list to
@@ -598,6 +639,81 @@ export function TeamView({
                         ),
                       )}
                     </span>
+                    <div className={styles.reactions}>
+                      {(m.reactions ?? []).map((r) => {
+                        const mine = r.handles.includes(handle)
+                        const whoOpen =
+                          whoFor?.messageId === m.id && whoFor.emoji === r.emoji
+                        return (
+                          <span className={styles.reactionPill} key={r.emoji}>
+                            <button
+                              type="button"
+                              className={`${styles.reactBtn} ${mine ? styles.reactBtnMine : ''}`}
+                              onClick={() => toggleReaction(m.id, r.emoji)}
+                              disabled={!connected}
+                              aria-pressed={mine}
+                              title={mine ? 'Remove your reaction' : `React ${r.emoji}`}
+                            >
+                              <span className={styles.reactEmoji}>{r.emoji}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.reactCount}
+                              onClick={() => toggleWho(m.id, r.emoji)}
+                              title="Who reacted"
+                              aria-label={`${r.handles.length} reacted with ${r.emoji} — show who`}
+                            >
+                              {r.handles.length}
+                            </button>
+                            {whoOpen && (
+                              <div className={styles.whoPopup} role="dialog">
+                                <span className={styles.whoHead}>
+                                  {r.emoji} reacted
+                                </span>
+                                <ul className={styles.whoList}>
+                                  {r.handles.map((h, i) => (
+                                    <li key={`${h}:${i}`} className={styles.whoName}>
+                                      {h}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </span>
+                        )
+                      })}
+                      <span className={styles.reactionPill}>
+                        <button
+                          type="button"
+                          className={styles.addReactBtn}
+                          onClick={() => openPicker(m.id)}
+                          disabled={!connected}
+                          title="Add reaction"
+                          aria-label="Add reaction"
+                        >
+                          ☺
+                        </button>
+                        {pickerFor === m.id && (
+                          <div
+                            className={styles.picker}
+                            role="dialog"
+                            aria-label="Pick an emoji"
+                          >
+                            {REACTION_EMOJI.map((e) => (
+                              <button
+                                type="button"
+                                key={e}
+                                className={styles.pickerEmoji}
+                                onClick={() => toggleReaction(m.id, e)}
+                                title={e}
+                              >
+                                {e}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </span>
+                    </div>
                   </li>
                 ))}
                 {awaitingAgent && (
