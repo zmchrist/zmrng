@@ -577,7 +577,9 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
   if blank or > `MAX_DISPLAY_NAME_LEN`), `ping`, `subscribe`/`unsubscribe` (integer
   `channelId`), and `message` (integer `channelId` + non-blank trimmed `author`/`body` within
   the length caps). **A `message` frame carries no `kind`** — the parser drops any
-  client-supplied `kind`, so a human client can never forge an `agent` message.
+  client-supplied `kind`, so a human client can never forge an `agent` message. Also
+  accepts `react` (integer `channelId`/`messageId` + non-blank trimmed `emoji`/`handle`,
+  emoji capped at `MAX_EMOJI_LEN`).
 - **PresenceTracker<S>** — connection-based presence, generic over the socket type for
   testability. `join(socket, memberId)` / `leave(socket)` / `onlineIds()` /
   `roster(members)`. A member is online while holding ≥1 live socket (multi-tab safe); the
@@ -594,12 +596,35 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
   returns `undefined` if the channel does not exist (nothing persisted); otherwise persists via
   `Db.addMessage` and fans the `{type:'message', message}` frame out ONLY to sockets subscribed
   to that channel. The `/ws/workspace` route always calls `post(..., 'human')` — the `agent`
-  kind is reserved for the future T4 server-side agent path.
+  kind is reserved for the future T4 server-side agent path. `react(channelId, messageId,
+  handle, emoji, now)` validates the message belongs to the channel (via
+  `Db.getMessageChannelId`), toggles the reaction through `Db.toggleReaction`, and fans the
+  resulting `{type:'reaction', channelId, messageId, reactions}` frame out to that channel's
+  subscribers only.
+- **Emoji reactions**: additive `reactions(id, message_id, handle, emoji, created_at,
+  UNIQUE(message_id, handle, emoji))` table + `idx_reactions_message` index (`CREATE TABLE
+  IF NOT EXISTS`, so it never rewrites an existing DB on reopen — same additive-only
+  contract as the rest of the SCHEMA). `Db.toggleReaction(messageId, handle, emoji, now)`
+  adds or removes one handle's reaction and returns the message's updated aggregated
+  `ReactionSummary[]`; `Db.listReactions`/`Db.reactionsForMessages` (batch) back
+  `Db.listMessages`, which now attaches each message's aggregated `reactions` so scrollback
+  loads with them already applied. Reactor identity is the same self-asserted free-text
+  `handle` as message authorship — no login/member-id. Frontend: `workspaceProtocol.ts`
+  gained `encodeReact(...)` and a `reaction` server-frame case in
+  `parseWorkspaceServerMsg`; `channelThread.ts` gained `applyReaction(state, messageId,
+  reactions)` (swaps one message's reaction set, same-reference no-op if the message isn't
+  loaded); `emojiSet.ts` exports `REACTION_EMOJI`, a static ~40-emoji curated set (no picker
+  library, no full-Unicode list — offline-safe by design). `TeamView` renders reaction-count
+  pills under each bubble (human and agent messages alike): click a pill to toggle your own
+  reaction, click the count to open a "who reacted" popup, or open the emoji-picker grid via
+  a `☺` add-button.
 - **DB surface** (`db.ts`): `members(id, display_name, created_at)` + `upsertMember`/
   `listMembers`; `channels(id, name UNIQUE, repo_id nullable, created_at)` +
   `messages(id, channel_id, author, body, kind, created_at)` in the idempotent SCHEMA, with an
   index on `messages(channel_id, id)`; `#general` seeded via `INSERT OR IGNORE`;
-  `listChannels`/`getChannel`/`addMessage`/`listMessages(channelId, before?, limit)`.
+  `listChannels`/`getChannel`/`addMessage`/`listMessages(channelId, before?, limit)` (now
+  reactions-attached), `getMessageChannelId`, `listReactions`, `reactionsForMessages`,
+  `toggleReaction` (see Emoji reactions above).
 - **REST**: `GET /api/channels` (list) · `GET /api/channels/:id/messages?before=&limit=`
   (paginated scrollback, `limit` clamped to `MAX_MESSAGE_PAGE`, always 200 — a bad id yields an
   empty page). `GET /api/config` carries `workspaceUrl` (optional server default for the tab).
@@ -607,12 +632,14 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
   a `Map<string, Set<socket>>`, alongside the flat `/ws` broadcast set. The workspace socket
   joins the `'workspace'` room for roster re-broadcasts.
 - **Frontend pure modules**: `workspaceProtocol.ts` (`encodeHello`/`encodePing`/
-  `encodeSubscribe`/`encodeUnsubscribe`/`encodeMessage` + tolerant `parseWorkspaceServerMsg`
-  for `roster`/`pong`/`message`/`channels`), `roster.ts` (React-free full-snapshot presence
-  reducer), `channelThread.ts` (`emptyThread`/`appendMessage`/`loadScrollback` — dedupes by id
-  so REST scrollback and live frames merge cleanly), `teamConfig.ts` (localStorage handle/URL +
-  socket-URL resolution). `TeamView` component owns the socket (glue, like `Terminal.tsx`);
-  Settings holds the VPS workspace-URL field.
+  `encodeSubscribe`/`encodeUnsubscribe`/`encodeMessage`/`encodeReact` + tolerant
+  `parseWorkspaceServerMsg` for `roster`/`pong`/`message`/`channels`/`reaction`), `roster.ts`
+  (React-free full-snapshot presence reducer), `channelThread.ts` (`emptyThread`/
+  `appendMessage`/`loadScrollback`/`applyReaction` — dedupes by id so REST scrollback and live
+  frames merge cleanly), `teamConfig.ts` (localStorage handle/URL + socket-URL resolution),
+  `emojiSet.ts` (`REACTION_EMOJI` curated static set for the reaction picker). `TeamView`
+  component owns the socket (glue, like `Terminal.tsx`); Settings holds the VPS workspace-URL
+  field.
 - **Repo-scoped channels + handoff (T3)**: `POST /api/channels` creates a channel via
   `Db.createChannel(name, repoId|null, now)` then broadcasts `{type:'channels', channels}` to
   the `workspace` room (blank → 400, duplicate name → existing row, never a 500). A channel's

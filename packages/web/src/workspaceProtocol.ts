@@ -4,8 +4,14 @@
 // `parseWorkspaceClientMsg` accepts; `parseWorkspaceServerMsg` is a tolerant
 // guard over the server -> client frames (mirrors `chatProtocol.ts`).
 
-import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from './types'
-import type { Channel, Message, WorkspaceMember, WsWorkspaceServerMsg } from './types'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from './types'
+import type {
+  Channel,
+  Message,
+  ReactionSummary,
+  WorkspaceMember,
+  WsWorkspaceServerMsg,
+} from './types'
 
 /**
  * Encode a client `hello` frame — self-assert a display name on first connect.
@@ -50,6 +56,27 @@ export function encodeMessage(channelId: number, author: string, body: string): 
   })
 }
 
+/**
+ * Encode a `react` frame — toggle the reactor's emoji on one message. The
+ * `handle` and `emoji` are trimmed and clamped to their caps (the client mirror
+ * of the server's guard). Toggle semantics are server-side: the server adds the
+ * reaction if absent, removes it if the same `(message, handle, emoji)` exists.
+ */
+export function encodeReact(
+  channelId: number,
+  messageId: number,
+  handle: string,
+  emoji: string,
+): string {
+  return JSON.stringify({
+    type: 'react',
+    channelId,
+    messageId,
+    handle: handle.trim().slice(0, MAX_DISPLAY_NAME_LEN),
+    emoji: emoji.trim().slice(0, MAX_EMOJI_LEN),
+  })
+}
+
 function asRecord(v: unknown): Record<string, unknown> | undefined {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
     ? (v as Record<string, unknown>)
@@ -80,26 +107,48 @@ function asChannel(v: unknown): Channel | undefined {
     : undefined
 }
 
+/** Narrow one untyped reaction entry to a `ReactionSummary`, or `undefined`. */
+function asReaction(v: unknown): ReactionSummary | undefined {
+  const obj = asRecord(v)
+  if (!obj) return undefined
+  if (typeof obj.emoji !== 'string' || !Array.isArray(obj.handles)) return undefined
+  const handles = obj.handles.filter((h): h is string => typeof h === 'string')
+  return { emoji: obj.emoji, handles }
+}
+
+/** Narrow an untyped reactions array (ill-typed entries dropped), or `undefined`. */
+function asReactions(v: unknown): ReactionSummary[] | undefined {
+  if (!Array.isArray(v)) return undefined
+  return v.map(asReaction).filter((r): r is ReactionSummary => r !== undefined)
+}
+
 /** Narrow an untyped message object to a `Message`, or `undefined`. */
 function asMessage(v: unknown): Message | undefined {
   const obj = asRecord(v)
   if (!obj) return undefined
   const kind = obj.kind
   if (kind !== 'human' && kind !== 'agent') return undefined
-  return typeof obj.id === 'number' &&
-    typeof obj.channelId === 'number' &&
-    typeof obj.author === 'string' &&
-    typeof obj.body === 'string' &&
-    typeof obj.createdAt === 'string'
-    ? {
-        id: obj.id,
-        channelId: obj.channelId,
-        author: obj.author,
-        body: obj.body,
-        kind,
-        createdAt: obj.createdAt,
-      }
-    : undefined
+  if (
+    typeof obj.id !== 'number' ||
+    typeof obj.channelId !== 'number' ||
+    typeof obj.author !== 'string' ||
+    typeof obj.body !== 'string' ||
+    typeof obj.createdAt !== 'string'
+  ) {
+    return undefined
+  }
+  // `reactions` is optional on the wire — a fresh message omits it. A present
+  // but ill-typed value degrades to an empty set rather than failing the frame.
+  const reactions = obj.reactions === undefined ? undefined : (asReactions(obj.reactions) ?? [])
+  return {
+    id: obj.id,
+    channelId: obj.channelId,
+    author: obj.author,
+    body: obj.body,
+    kind,
+    ...(reactions !== undefined ? { reactions } : {}),
+    createdAt: obj.createdAt,
+  }
 }
 
 /**
@@ -130,6 +179,14 @@ export function parseWorkspaceServerMsg(raw: string): WsWorkspaceServerMsg | und
     case 'message': {
       const message = asMessage(obj.message)
       return message ? { type: 'message', message } : undefined
+    }
+    case 'reaction': {
+      const reactions = asReactions(obj.reactions)
+      return typeof obj.channelId === 'number' &&
+        typeof obj.messageId === 'number' &&
+        reactions !== undefined
+        ? { type: 'reaction', channelId: obj.channelId, messageId: obj.messageId, reactions }
+        : undefined
     }
     case 'channels': {
       if (!Array.isArray(obj.channels)) return undefined

@@ -16,6 +16,7 @@ import type {
   Channel,
   Message,
   MessageKind,
+  ReactionSummary,
 } from './types.js'
 import { GENERAL_CHANNEL_NAME } from './types.js'
 
@@ -92,6 +93,15 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id);
+CREATE TABLE IF NOT EXISTS reactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL,
+  handle TEXT NOT NULL,
+  emoji TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(message_id, handle, emoji)
+);
+CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, id);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
@@ -172,6 +182,12 @@ interface MessageRow {
   body: string
   kind: string
   created_at: string
+}
+
+interface ReactionRow {
+  message_id: number
+  handle: string
+  emoji: string
 }
 
 function rowToTask(r: TaskRow): Task {
@@ -256,15 +272,34 @@ function rowToChannel(r: ChannelRow): Channel {
   }
 }
 
-function rowToMessage(r: MessageRow): Message {
+function rowToMessage(r: MessageRow, reactions: ReactionSummary[] = []): Message {
   return {
     id: r.id,
     channelId: r.channel_id,
     author: r.author,
     body: r.body,
     kind: r.kind as MessageKind,
+    reactions,
     createdAt: r.created_at,
   }
+}
+
+/**
+ * Fold ordered `(emoji, handle)` reaction rows into `ReactionSummary[]`: one
+ * entry per distinct emoji (in first-seen order), each carrying its reactor
+ * handles in insertion order. Shared by the single-message and batch readers.
+ */
+function foldReactions(rows: ReactionRow[]): ReactionSummary[] {
+  const byEmoji = new Map<string, string[]>()
+  for (const r of rows) {
+    let handles = byEmoji.get(r.emoji)
+    if (!handles) {
+      handles = []
+      byEmoji.set(r.emoji, handles)
+    }
+    handles.push(r.handle)
+  }
+  return [...byEmoji.entries()].map(([emoji, handles]) => ({ emoji, handles }))
 }
 
 /** Fields a caller may patch on a task. Usage accumulators are excluded — use `addUsage`. */
@@ -638,7 +673,82 @@ export class Db {
             )
             .all(channelId, before, limit)
     ) as MessageRow[]
-    return rows.reverse().map(rowToMessage)
+    const ordered = rows.reverse()
+    const reactions = this.reactionsForMessages(ordered.map((r) => r.id))
+    return ordered.map((r) => rowToMessage(r, reactions.get(r.id) ?? []))
+  }
+
+  /**
+   * The channel a message belongs to, or `undefined` if the id is unknown.
+   * Used to validate a `react` frame's `messageId` against its claimed
+   * `channelId` before persisting a reaction (never trust the wire).
+   */
+  getMessageChannelId(messageId: number): number | undefined {
+    const row = this.db
+      .prepare('SELECT channel_id FROM messages WHERE id = ?')
+      .get(messageId) as { channel_id: number } | undefined
+    return row?.channel_id
+  }
+
+  /** Aggregated emoji reactions for ONE message, in reactor order. */
+  listReactions(messageId: number): ReactionSummary[] {
+    const rows = this.db
+      .prepare('SELECT message_id, handle, emoji FROM reactions WHERE message_id = ? ORDER BY id ASC')
+      .all(messageId) as ReactionRow[]
+    return foldReactions(rows)
+  }
+
+  /**
+   * Batch-load aggregated reactions for many messages in one query (scrollback
+   * pages), keyed by message id. Messages with no reactions are simply absent
+   * from the map (the caller defaults to `[]`).
+   */
+  reactionsForMessages(messageIds: number[]): Map<number, ReactionSummary[]> {
+    const byMessage = new Map<number, ReactionSummary[]>()
+    if (messageIds.length === 0) return byMessage
+    const placeholders = messageIds.map(() => '?').join(', ')
+    const rows = this.db
+      .prepare(
+        `SELECT message_id, handle, emoji FROM reactions WHERE message_id IN (${placeholders}) ORDER BY id ASC`,
+      )
+      .all(...messageIds) as ReactionRow[]
+    const perMessage = new Map<number, ReactionRow[]>()
+    for (const r of rows) {
+      let list = perMessage.get(r.message_id)
+      if (!list) {
+        list = []
+        perMessage.set(r.message_id, list)
+      }
+      list.push(r)
+    }
+    for (const [id, list] of perMessage) byMessage.set(id, foldReactions(list))
+    return byMessage
+  }
+
+  /**
+   * Toggle one member's emoji reaction on a message: if the exact
+   * `(message_id, handle, emoji)` row exists it is removed, otherwise it is
+   * inserted. Returns the message's full aggregated reaction set AFTER the
+   * change, ready to broadcast. Additive-only: reactions are their own table,
+   * never a rewrite of an existing row.
+   */
+  toggleReaction(
+    messageId: number,
+    handle: string,
+    emoji: string,
+    now: string,
+  ): ReactionSummary[] {
+    const existing = this.db
+      .prepare('SELECT id FROM reactions WHERE message_id = ? AND handle = ? AND emoji = ?')
+      .get(messageId, handle, emoji) as { id: number } | undefined
+    if (existing) {
+      this.db.prepare('DELETE FROM reactions WHERE id = ?').run(existing.id)
+    } else {
+      this.db
+        .prepare('INSERT INTO reactions (message_id, handle, emoji, created_at) VALUES (?, ?, ?, ?)')
+        .run(messageId, handle, emoji, now)
+    }
+    return this.listReactions(messageId)
   }
 
   /**

@@ -494,6 +494,97 @@ describe('channels + messages (team workspace T2)', () => {
   })
 })
 
+describe('reactions (team workspace — emoji reactions)', () => {
+  const seedMessage = (db: Db): { channelId: number; messageId: number } => {
+    const chan = db.listChannels()[0]
+    const m = db.addMessage(chan.id, 'Ada', 'hi', 'human', '2026-08-25T00:00:00.000Z')
+    return { channelId: chan.id, messageId: m.id }
+  }
+
+  it('creates the reactions table', () => {
+    new Db(dbPath)
+    const raw = new Database(dbPath)
+    const row = raw
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='reactions'")
+      .get() as { name: string } | undefined
+    raw.close()
+    expect(row).toBeDefined()
+  })
+
+  it('toggleReaction adds then removes the same (message, handle, emoji)', () => {
+    const db = new Db(dbPath)
+    const { messageId } = seedMessage(db)
+    const after1 = db.toggleReaction(messageId, 'Ada', '👍', '2026-08-25T00:00:01.000Z')
+    expect(after1).toEqual([{ emoji: '👍', handles: ['Ada'] }])
+    const after2 = db.toggleReaction(messageId, 'Ada', '👍', '2026-08-25T00:00:02.000Z')
+    expect(after2).toEqual([])
+    expect(db.listReactions(messageId)).toEqual([])
+  })
+
+  it('aggregates multiple handles per emoji in reaction order', () => {
+    const db = new Db(dbPath)
+    const { messageId } = seedMessage(db)
+    db.toggleReaction(messageId, 'Ada', '👍', '2026-08-25T00:00:01.000Z')
+    db.toggleReaction(messageId, 'Bo', '👍', '2026-08-25T00:00:02.000Z')
+    db.toggleReaction(messageId, 'Cy', '❤️', '2026-08-25T00:00:03.000Z')
+    expect(db.listReactions(messageId)).toEqual([
+      { emoji: '👍', handles: ['Ada', 'Bo'] },
+      { emoji: '❤️', handles: ['Cy'] },
+    ])
+  })
+
+  it('a handle can hold different emoji on the same message simultaneously', () => {
+    const db = new Db(dbPath)
+    const { messageId } = seedMessage(db)
+    db.toggleReaction(messageId, 'Ada', '👍', '2026-08-25T00:00:01.000Z')
+    db.toggleReaction(messageId, 'Ada', '🎉', '2026-08-25T00:00:02.000Z')
+    expect(db.listReactions(messageId)).toEqual([
+      { emoji: '👍', handles: ['Ada'] },
+      { emoji: '🎉', handles: ['Ada'] },
+    ])
+  })
+
+  it('listMessages attaches each message its aggregated reactions', () => {
+    const db = new Db(dbPath)
+    const { channelId, messageId } = seedMessage(db)
+    const second = db.addMessage(channelId, 'Bo', 'yo', 'human', '2026-08-25T00:00:01.000Z')
+    db.toggleReaction(messageId, 'Ada', '👍', '2026-08-25T00:00:02.000Z')
+    db.toggleReaction(messageId, 'Bo', '👍', '2026-08-25T00:00:03.000Z')
+    const page = db.listMessages(channelId, null, 50)
+    const first = page.find((m) => m.id === messageId)
+    const other = page.find((m) => m.id === second.id)
+    expect(first?.reactions).toEqual([{ emoji: '👍', handles: ['Ada', 'Bo'] }])
+    // A message with no reactions gets an empty array, not undefined.
+    expect(other?.reactions).toEqual([])
+  })
+
+  it('getMessageChannelId returns the owning channel or undefined', () => {
+    const db = new Db(dbPath)
+    const { channelId, messageId } = seedMessage(db)
+    expect(db.getMessageChannelId(messageId)).toBe(channelId)
+    expect(db.getMessageChannelId(999999)).toBeUndefined()
+  })
+
+  it('reactionsForMessages batches, and is empty for an empty id list', () => {
+    const db = new Db(dbPath)
+    const { channelId, messageId } = seedMessage(db)
+    const second = db.addMessage(channelId, 'Bo', 'yo', 'human', '2026-08-25T00:00:01.000Z')
+    db.toggleReaction(messageId, 'Ada', '👍', '2026-08-25T00:00:02.000Z')
+    const map = db.reactionsForMessages([messageId, second.id])
+    expect(map.get(messageId)).toEqual([{ emoji: '👍', handles: ['Ada'] }])
+    expect(map.has(second.id)).toBe(false)
+    expect(db.reactionsForMessages([]).size).toBe(0)
+  })
+
+  it('persists reactions across reopen (survives redeploy)', () => {
+    const db1 = new Db(dbPath)
+    const { messageId } = seedMessage(db1)
+    db1.toggleReaction(messageId, 'Ada', '🎉', '2026-08-25T00:00:01.000Z')
+    const db2 = new Db(dbPath)
+    expect(db2.listReactions(messageId)).toEqual([{ emoji: '🎉', handles: ['Ada'] }])
+  })
+})
+
 describe('stale column (agent-task-persistence)', () => {
   it('backfills the stale column on an old-schema table', () => {
     const raw = new Database(dbPath)

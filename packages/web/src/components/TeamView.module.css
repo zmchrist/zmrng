@@ -406,6 +406,182 @@
   word-break: break-word;
 }
 
+/* ---- emoji reactions ---- */
+
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+/* Anchor for a pill's who-popup / the add-button's picker. */
+.reactionPill {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.reactBtn {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+  background: var(--surface-strong);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.reactCount {
+  display: inline-flex;
+  align-items: center;
+  min-width: 16px;
+  justify-content: center;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  background: var(--surface-strong);
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+
+.reactBtn:hover,
+.reactCount:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+/* My own reaction reads as "on". */
+.reactBtnMine,
+.reactBtnMine + .reactCount {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.reactEmoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.addReactBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+
+.addReactBtn:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.reactBtn:disabled,
+.reactCount:disabled,
+.addReactBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* "Who reacted" popup, anchored above its pill. */
+.whoPopup {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 10;
+  min-width: 120px;
+  max-width: 220px;
+  padding: 6px 8px;
+  background: var(--surface-strong);
+  backdrop-filter: blur(var(--blur));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-soft);
+}
+
+.whoHead {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.whoList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.whoName {
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* Curated emoji picker grid, anchored above the add button. */
+.picker {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 10;
+  width: 232px;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  background: var(--surface-strong);
+  backdrop-filter: blur(var(--blur));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-soft);
+}
+
+.pickerEmoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.pickerEmoji:hover {
+  background: var(--accent-soft);
+}
+
 .composer {
   display: flex;
   gap: 8px;
