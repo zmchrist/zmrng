@@ -5,6 +5,7 @@ import {
   emptyThread,
   endTurn,
   finalizeAssistant,
+  isAwaitingReply,
   pushToolNote,
   pushUser,
   resetThread,
@@ -88,6 +89,41 @@ describe('endTurn', () => {
 describe('resetThread', () => {
   it('yields a fresh empty thread', () => {
     expect(resetThread()).toEqual({ items: [], busy: false })
+  })
+})
+
+describe('isAwaitingReply (thinking-dots gate)', () => {
+  it('is false for an empty, idle thread', () => {
+    expect(isAwaitingReply(emptyThread())).toBe(false)
+  })
+
+  it('is true right after the operator sends, before any agent output', () => {
+    const s = pushUser(emptyThread(), 'hello')
+    expect(isAwaitingReply(s)).toBe(true)
+  })
+
+  it('stays true while only tool notes have arrived (no reply text yet)', () => {
+    let s = pushUser(emptyThread(), 'hello')
+    s = pushToolNote(s, { name: 'Read', summary: 'a.ts', actor: 'main' })
+    expect(isAwaitingReply(s)).toBe(true)
+  })
+
+  it('becomes false the moment the first token opens an agent bubble', () => {
+    let s = pushUser(emptyThread(), 'hello')
+    s = appendPartial(s, 'hi')
+    expect(isAwaitingReply(s)).toBe(false)
+  })
+
+  it('is false once the reply is finalized', () => {
+    let s = pushUser(emptyThread(), 'hello')
+    s = finalizeAssistant(s, 'done')
+    expect(isAwaitingReply(s)).toBe(false)
+  })
+
+  it('is false when the turn has ended (not busy)', () => {
+    let s = pushUser(emptyThread(), 'hello')
+    s = endTurn(s)
+    expect(isAwaitingReply(s)).toBe(false)
   })
 })
 
