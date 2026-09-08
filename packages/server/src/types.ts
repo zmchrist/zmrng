@@ -603,6 +603,22 @@ export const MAX_MESSAGE_PAGE = 200
 /** Name of the fixed channel seeded by default in every workspace. */
 export const GENERAL_CHANNEL_NAME = 'general'
 
+/**
+ * Durable, server-side per-user preferences persisted in `zmrng.db` (the
+ * `settings` kv table), read/written over `GET`/`PUT /api/settings`. These were
+ * previously browser `localStorage` only, which proved unreliable across
+ * refresh/app-reopen/rebuild in the desktop shell — the DB lives in the
+ * persistent per-user data dir, so it survives all of those. Empty strings mean
+ * "unset". Mirrored in `packages/web/src/types.ts`.
+ */
+export interface WorkspaceSettings {
+  /** VPS team-workspace server URL for the Team tab. Wins over the
+   *  `ZMRNG_WORKSPACE_URL` env default when non-empty. */
+  workspaceUrl: string
+  /** The teammate's self-asserted display-name handle for the Team roster. */
+  teamHandle: string
+}
+
 // ---- preflight (advisory auth presence probe) ----
 
 /** One advisory presence signal — never a hard gate on Start. */

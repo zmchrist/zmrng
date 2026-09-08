@@ -65,9 +65,16 @@ same server binary, run on a VPS) over ONE multiplexed WebSocket at
 `GET /ws/workspace`. Teammates self-assert a free-text display-name handle (no
 password, no verification — stored as a `members` row) and appear in a live,
 workspace-wide presence roster driven by connection lifecycle plus a periodic
-ping/pong heartbeat. The VPS URL is a per-teammate client setting in Settings
-(localStorage `zmrng-workspace-url`), with an optional server default via
-`ZMRNG_WORKSPACE_URL` surfaced through `GET /api/config` (`workspaceUrl`).
+ping/pong heartbeat. The VPS URL and the teammate's display-name handle are
+per-user settings entered in Settings/the Team join form, persisted **server-side**
+in `zmrng.db` (the `settings` kv table, `WorkspaceSettings` = `{ workspaceUrl,
+teamHandle }`, read/written over `GET`/`PUT /api/settings`). They moved off browser
+`localStorage`, which was unreliable across refresh/app-reopen/rebuild in the
+desktop shell — the sidecar DB lives in the persistent per-user data dir, so the
+values survive all of those. The stored `workspaceUrl` wins over the optional
+`ZMRNG_WORKSPACE_URL` env default surfaced through `GET /api/config` (App merges
+the two; `teamConfig.ts` now holds only the pure `workspaceSocketUrl`/
+`workspaceHttpOrigin` transport coercers).
 
 On top of that shell, **channels + live messaging** (T2): `channels` (a fixed
 `#general` plus optional repo-tied ones) and `messages` (`kind ∈ human|agent`)

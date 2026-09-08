@@ -33,6 +33,7 @@ import type {
   Channel,
   Message,
   UiState,
+  WorkspaceSettings,
   TermServerMsg,
   ChatServerMsg,
   WsWorkspaceServerMsg,
@@ -260,6 +261,44 @@ app.put('/api/ui-state', (req, reply) => {
     return { ok: true }
   } catch (err) {
     app.log.error({ err }, 'failed to write ui state')
+    return reply.code(500).send({ error: errMsg(err) })
+  }
+})
+
+// Durable per-user Team prefs (workspace URL + display-name handle) persisted in
+// zmrng.db. Previously browser localStorage only, which proved unreliable across
+// refresh/app-reopen/rebuild in the desktop shell; the sidecar DB lives in the
+// persistent per-user data dir, so these survive all of those. Keys are the DB's
+// alone — the wire shape is the typed WorkspaceSettings.
+const SETTING_WORKSPACE_URL = 'workspace_url'
+const SETTING_TEAM_HANDLE = 'team_handle'
+
+app.get('/api/settings', (): WorkspaceSettings => ({
+  workspaceUrl: db.getSetting(SETTING_WORKSPACE_URL) ?? '',
+  teamHandle: db.getSetting(SETTING_TEAM_HANDLE) ?? '',
+}))
+
+// PATCH-style: only the keys present in the body are written; a blank value
+// clears that key. Always returns the full, current WorkspaceSettings.
+app.put('/api/settings', (req, reply) => {
+  const body = req.body as Partial<WorkspaceSettings> | undefined
+  if (!body || typeof body !== 'object') {
+    return reply.code(400).send({ error: 'settings document is required' })
+  }
+  try {
+    const now = new Date().toISOString()
+    if (typeof body.workspaceUrl === 'string') {
+      db.setSetting(SETTING_WORKSPACE_URL, body.workspaceUrl, now)
+    }
+    if (typeof body.teamHandle === 'string') {
+      db.setSetting(SETTING_TEAM_HANDLE, body.teamHandle, now)
+    }
+    return {
+      workspaceUrl: db.getSetting(SETTING_WORKSPACE_URL) ?? '',
+      teamHandle: db.getSetting(SETTING_TEAM_HANDLE) ?? '',
+    } satisfies WorkspaceSettings
+  } catch (err) {
+    app.log.error({ err }, 'failed to write settings')
     return reply.code(500).send({ error: errMsg(err) })
   }
 })
