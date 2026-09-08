@@ -11,10 +11,12 @@ import {
   emptyThread,
   endTurn,
   finalizeAssistant,
+  isAwaitingReply,
   pushToolNote,
   pushUser,
   type ThreadState,
 } from '../chatThread'
+import { ThinkingDots } from './ThinkingDots'
 import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget } from '../types'
 
 interface Props {
@@ -267,6 +269,11 @@ export function ChatPane({
               </div>
             )
           })}
+          {isAwaitingReply(thread) && (
+            <div className={`${styles.bubble} ${styles.agent}`}>
+              <ThinkingDots />
+            </div>
+          )}
         </div>
         {hasNew && (
           <button type="button" className={styles.newMsgPill} onClick={scrollToBottom}>
