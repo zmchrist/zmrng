@@ -130,12 +130,39 @@
 }
 
 .select {
-  padding: 6px 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 6px 24px 6px 8px;
   font-size: 12.5px;
+  font-family: inherit;
   color: var(--text);
-  background: var(--well);
+  /* brushed-glass control: translucent smoke surface + backdrop blur, with a
+     custom chevron (stroke mirrors --text-dim; data-URIs can't read CSS vars) */
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23aab0b9' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--hairline-soft);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--transition), box-shadow var(--transition),
+    background-color var(--transition);
+}
+.select:hover {
+  border-color: var(--border-strong);
+  background-color: var(--surface-hover);
+}
+.select:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
+}
+.select option {
+  background: var(--well);
+  color: var(--text);
 }
 
 .launchBtn {
