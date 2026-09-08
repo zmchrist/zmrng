@@ -20,20 +20,44 @@
 }
 
 .select {
+  appearance: none;
+  -webkit-appearance: none;
   font-size: 11px;
+  font-family: inherit;
   color: var(--text-dim);
-  background: var(--surface);
+  /* brushed-glass control: translucent smoke surface + backdrop blur, with a
+     custom chevron (stroke mirrors --text-dim; data-URIs can't read CSS vars) */
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12' fill='none' stroke='%23aab0b9' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--hairline-soft);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 2px 6px;
-  transition: var(--transition);
+  padding: 2px 18px 2px 6px;
+  cursor: pointer;
+  transition: border-color var(--transition), box-shadow var(--transition),
+    background-color var(--transition), color var(--transition);
 }
 .select:hover:not(:disabled) {
   color: var(--text);
   border-color: var(--border-strong);
+  background-color: var(--surface-hover);
+}
+.select:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
 }
 .select:disabled {
   opacity: 0.5;
+  cursor: default;
+}
+.select option {
+  background: var(--well);
+  color: var(--text);
 }
 
 /* ---- scrollable message thread ---------------------------------------- */
