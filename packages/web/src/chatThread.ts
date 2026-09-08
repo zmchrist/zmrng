@@ -97,3 +97,13 @@ export function endTurn(state: ThreadState): ThreadState {
 export function resetThread(): ThreadState {
   return emptyThread()
 }
+
+/**
+ * True when a turn is in flight but the agent has not opened its reply bubble
+ * yet — i.e. the operator has sent and is waiting for the first token. Drives
+ * the "thinking" dots indicator, which vanishes the moment an agent bubble
+ * (streaming or finalized) appears.
+ */
+export function isAwaitingReply(state: ThreadState): boolean {
+  return state.busy && state.items.at(-1)?.kind !== 'agent'
+}
