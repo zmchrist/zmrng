@@ -5,9 +5,10 @@ import {
   encodeSubscribe,
   encodeUnsubscribe,
   encodeMessage,
+  encodeReact,
   parseWorkspaceServerMsg,
 } from '../src/workspaceProtocol'
-import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from '../src/types'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from '../src/types'
 
 describe('client encoders', () => {
   it('encodeHello produces a hello frame carrying the display name', () => {
@@ -51,6 +52,28 @@ describe('client encoders', () => {
     const overCap = 'a'.repeat(MAX_MESSAGE_BODY_LEN + 20)
     const frame = JSON.parse(encodeMessage(1, 'Ada', overCap)) as { body: string }
     expect(frame.body.length).toBe(MAX_MESSAGE_BODY_LEN)
+  })
+
+  it('encodeReact produces a react frame with channel/message/handle/emoji', () => {
+    expect(JSON.parse(encodeReact(2, 7, 'Ada', '👍'))).toEqual({
+      type: 'react',
+      channelId: 2,
+      messageId: 7,
+      handle: 'Ada',
+      emoji: '👍',
+    })
+  })
+
+  it('encodeReact trims handle + emoji and clamps them to their caps', () => {
+    expect(JSON.parse(encodeReact(1, 1, '  Ada  ', '  👍  '))).toMatchObject({
+      handle: 'Ada',
+      emoji: '👍',
+    })
+    const frame = JSON.parse(
+      encodeReact(1, 1, 'a'.repeat(MAX_DISPLAY_NAME_LEN + 5), 'x'.repeat(MAX_EMOJI_LEN + 5)),
+    ) as { handle: string; emoji: string }
+    expect(frame.handle.length).toBe(MAX_DISPLAY_NAME_LEN)
+    expect(frame.emoji.length).toBe(MAX_EMOJI_LEN)
   })
 })
 
@@ -156,6 +179,72 @@ describe('parseWorkspaceServerMsg', () => {
         { id: 1, displayName: 'Ada', online: true },
         { id: 4, displayName: 'Di', online: false },
       ],
+    })
+  })
+
+  it('decodes a message frame carrying reactions', () => {
+    const message = {
+      id: 5,
+      channelId: 1,
+      author: 'Ada',
+      body: 'hi',
+      kind: 'human',
+      reactions: [{ emoji: '👍', handles: ['Bo', 'Cy'] }],
+      createdAt: '2026-08-25T00:00:00.000Z',
+    }
+    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'message', message }))).toEqual({
+      type: 'message',
+      message,
+    })
+  })
+
+  it('degrades an ill-typed reactions field on a message to an empty array', () => {
+    const raw = JSON.stringify({
+      type: 'message',
+      message: {
+        id: 5,
+        channelId: 1,
+        author: 'Ada',
+        body: 'hi',
+        kind: 'human',
+        reactions: 'nope',
+        createdAt: 't',
+      },
+    })
+    const parsed = parseWorkspaceServerMsg(raw)
+    expect(parsed?.type).toBe('message')
+    if (parsed?.type === 'message') expect(parsed.message.reactions).toEqual([])
+  })
+
+  it('decodes a reaction frame', () => {
+    const frame = {
+      type: 'reaction',
+      channelId: 1,
+      messageId: 7,
+      reactions: [{ emoji: '👍', handles: ['Ada'] }],
+    }
+    expect(parseWorkspaceServerMsg(JSON.stringify(frame))).toEqual(frame)
+  })
+
+  it('rejects a reaction frame missing ids or reactions, dropping bad entries', () => {
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'reaction', messageId: 1, reactions: [] })),
+    ).toBeUndefined()
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'reaction', channelId: 1, messageId: 1 })),
+    ).toBeUndefined()
+    // Ill-typed entries inside a valid frame are dropped, not fatal.
+    const raw = JSON.stringify({
+      type: 'reaction',
+      channelId: 1,
+      messageId: 1,
+      reactions: [{ emoji: '👍', handles: ['Ada', 3] }, { emoji: 5, handles: [] }, { nope: true }],
+    })
+    expect(parseWorkspaceServerMsg(raw)).toEqual({
+      type: 'reaction',
+      channelId: 1,
+      messageId: 1,
+      reactions: [{ emoji: '👍', handles: ['Ada'] }],
     })
   })
 
