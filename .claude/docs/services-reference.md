@@ -288,6 +288,13 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `manager.message()`; each route's title/text is now required *or* an attachment is
   present (image/PDF-only turns are valid — `POST /api/tasks` still always requires a
   title, `POST /api/tasks/:id/message` requires text or an attachment).
+  `GET`/`PUT /api/settings` returns/patches the durable per-user `WorkspaceSettings`
+  (`{ workspaceUrl, teamHandle }`) persisted in `zmrng.db` (the `settings` kv table) —
+  the Team workspace URL + display-name handle moved here from browser `localStorage`,
+  which was unreliable across refresh/app-reopen/rebuild in the desktop shell; the
+  sidecar DB lives in the persistent per-user data dir. `PUT` is PATCH-style (only the
+  keys present are written; a blank value clears one) and echoes the full document. The
+  stored `workspaceUrl` wins over the `ZMRNG_WORKSPACE_URL` env default (App merges).
   (This list predates several routes — `/api/agents`, `/api/preflight`, `/api/ui-state`,
   `/api/tasks/:id/{files,file,notes,chat}`, `/api/tasks/:id/archive`, and the
   Projects-dir browsing pair `GET /api/projects/files` (dotfile-skipping, depth-capped
