@@ -25,6 +25,7 @@ import { api } from '../api'
 import { buildHandoffPrefill, type HandoffPrefill } from '../teamHandoff'
 import { workspaceSocketUrl, workspaceHttpOrigin } from '../teamConfig'
 import { ThinkingDots } from './ThinkingDots'
+import { formatMessageTime } from '../teamTime'
 
 interface Props {
   /** The effective VPS team-workspace URL (the persisted per-user
@@ -582,6 +583,9 @@ export function TeamView({
                       >
                         Send to my zmrng
                       </button>
+                      <time className={styles.messageTime} dateTime={m.createdAt}>
+                        {formatMessageTime(m.createdAt)}
+                      </time>
                     </span>
                     <span className={styles.messageBody}>
                       {parseMentions(m.body, mentionNames).map((seg, idx) =>
