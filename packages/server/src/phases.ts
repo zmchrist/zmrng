@@ -314,6 +314,59 @@ export function directKickoff(
   ].join('\n')
 }
 
+/**
+ * The kickoff a FRESH agent receives when the operator manually restarts a task
+ * whose worker session was lost to an app restart (option B — honest dead-state
+ * recovery, NOT `claude --resume`). It composes a RESUME preamble over the
+ * existing, already-pinned per-phase kickoff so the heavy content
+ * (RED→GREEN→REFACTOR, PR body, grill/test-strategy) is reused verbatim rather
+ * than duplicated: the preamble is the only new text. The agent lands in the
+ * SAME worktree and is ordered to inspect the prior work before continuing.
+ *
+ * Exported for prompt-contract tests.
+ */
+export function resumeKickoff(
+  task: Task,
+  branch: string,
+  defaultBranch: string,
+  transcript: string,
+): string {
+  const phaseLabel =
+    task.status === 'clarify'
+      ? 'clarify'
+      : task.status === 'planning'
+        ? 'planning'
+        : task.status === 'executing'
+          ? 'executing'
+          : 'validating'
+  const preamble = [
+    'RESUME — a fresh agent is taking over this task after the app was restarted; the previous worker session was lost. You are NOT starting from scratch.',
+    `You are resuming the ${phaseLabel} phase, on branch \`${branch}\` in the existing worktree (do NOT create or switch branches).`,
+    `Task title: ${task.title}`,
+    `Task details: ${task.body}`,
+    'BEFORE doing anything else, inspect the prior work already in this worktree: read the changed files, run `git log`/`git status`/`git diff`, and read the plan file if one exists. Understand what the previous session already completed, then CONTINUE from where it left off — do NOT redo work that is already done.',
+    '',
+  ].join('\n')
+
+  const transcriptBlock = [
+    'Transcript of the prior session (operator + worker turns):',
+    transcript || '(no transcript captured — work from the task title/details and the worktree state)',
+    '',
+  ].join('\n')
+
+  // Delegate to the existing per-phase kickoff so the harness contract stays
+  // single-sourced. `planKickoff` already embeds the transcript, so it is not
+  // repeated in the preamble for the planning case.
+  if (task.status === 'clarify') {
+    return preamble + transcriptBlock + clarifyKickoff(task)
+  }
+  if (task.status === 'planning') {
+    return preamble + planKickoff(task, transcript)
+  }
+  // executing / validating
+  return preamble + transcriptBlock + executeKickoff(branch, defaultBranch, task.planPath)
+}
+
 export class TaskManager {
   private runners = new Map<string, RunnerLike>()
   /** Tasks holding an autonomous lane (held from planning through to the PR). */
@@ -325,6 +378,13 @@ export class TaskManager {
   private blockedFrom = new Map<string, TaskStatus>()
   /** Tasks whose current turn was hard-interrupted; suppress the result's fail logic. */
   private interrupting = new Set<string>()
+  /**
+   * Lane-holding tasks (planning/executing/validating) whose restart is queued
+   * behind the lane cap. When `freeLane` later promotes them through
+   * `beginPhaseForFlow`, membership here routes them to `beginResume` (a resume
+   * kickoff) instead of a fresh `beginPlan`/`beginDirect`. Transient by design.
+   */
+  private resuming = new Set<string>()
   /**
    * Attachments dropped on the new-task box, held between `createTask` and the
    * first clarify send (no live session exists at create time). Consumed once in
@@ -376,6 +436,7 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
+    this.resuming.delete(taskId)
     this.repoSlugs.delete(taskId)
     this.freeLane(taskId)
     this.transition(taskId, 'failed', note)
@@ -388,8 +449,14 @@ export class TaskManager {
     if (!next) return
     const task = this.db.getTask(next)
     // A queued task is parked in `planning` (plan flow) or `executing` (direct
-    // flow); promote it by starting the fresh child its flow calls for.
-    if (task && (task.status === 'planning' || task.status === 'executing')) {
+    // flow); a queued RESTART may also be parked in `validating`. Promote it by
+    // starting the fresh child its flow/restart calls for.
+    if (
+      task &&
+      (task.status === 'planning' ||
+        task.status === 'executing' ||
+        task.status === 'validating')
+    ) {
       this.executeLanes.add(task.id)
       this.beginPhaseForFlow(task)
     }
@@ -560,9 +627,11 @@ export class TaskManager {
     }
   }
 
-  /** Start the correct fresh session for a task's flow (holds an execute lane). */
+  /** Start the correct fresh session for a task's flow (holds an execute lane).
+   *  A queued RESTART routes to `beginResume` (resume kickoff) instead. */
   private beginPhaseForFlow(task: Task): void {
-    if (task.flow === 'plan') this.beginPlan(task)
+    if (this.resuming.has(task.id)) this.beginResume(task)
+    else if (task.flow === 'plan') this.beginPlan(task)
     else this.beginDirect(task)
   }
 
@@ -602,6 +671,35 @@ export class TaskManager {
       note: 'plan phase — fresh session (opus · high), writing plan',
     })
     this.runners.get(task.id)?.send(planKickoff(task, this.clarifyTranscript(task.id)))
+  }
+
+  /**
+   * Spawn a FRESH agent for a restarted (orphaned) task in the SAME worktree,
+   * seeded with `resumeKickoff`. Planning forces opus/high (mirroring
+   * `beginPlan`); other phases reuse the task's persisted model/effort. Clears
+   * the `resuming`/`queued`/`stale` markers.
+   */
+  private beginResume(task: Task): void {
+    this.resuming.delete(task.id)
+    this.patch(task.id, { queued: false, stale: false })
+    const model = task.status === 'planning' ? 'opus' : (task.model ?? DEFAULT_MODEL)
+    const effort = task.status === 'planning' ? 'high' : (task.effort ?? DEFAULT_EFFORT)
+    if (!this.spawnPhase(task, model, effort)) return
+    this.emitEvent(task.id, 'status', {
+      sub: 'status',
+      note: `resume — fresh ${task.status} session (${model} · ${effort})`,
+    })
+    const defaultBranch = repoById(task.repoId)?.defaultBranch ?? 'main'
+    this.runners
+      .get(task.id)
+      ?.send(
+        resumeKickoff(
+          task,
+          task.branch ?? 'unknown-branch',
+          defaultBranch,
+          this.clarifyTranscript(task.id),
+        ),
+      )
   }
 
   /** Plan written + QA'd; hand off to a fresh execute child on the chosen model/effort. */
@@ -692,6 +790,84 @@ export class TaskManager {
   }
 
   // ---- public actions (REST surface) ----
+
+  /**
+   * Boot-time reconciliation. A fresh `TaskManager` has an empty `runners` map,
+   * but SQLite rows may still show tasks in a live phase (clarify/planning/
+   * executing/validating) — their `claude` children died with the previous
+   * process. Mark each such orphan `stale` and clear `queued`, so the UI can
+   * surface the dead state (and offer Restart) instead of pretending the worker
+   * is alive. Lanes are NOT re-acquired here — a lane is taken only when the
+   * operator actually restarts a lane-holding phase. `blocked` and legacy
+   * `building` are excluded (out of scope). Called once from `index.ts` after
+   * construction, before `app.listen`.
+   */
+  reconcileOrphans(): void {
+    for (const task of this.db.listTasks()) {
+      const live =
+        task.status === 'clarify' ||
+        task.status === 'planning' ||
+        task.status === 'executing' ||
+        task.status === 'validating'
+      if (!live) continue
+      if (this.runners.has(task.id)) continue // defensive — always true at boot
+      this.patch(task.id, { stale: true, queued: false })
+      this.emitEvent(task.id, 'status', {
+        sub: 'status',
+        note: 'worker session ended when the app was restarted — press "Restart agent" to continue',
+      })
+    }
+  }
+
+  /**
+   * Manual restart of an orphaned task: spawn a NEW agent (not `claude --resume`)
+   * in the SAME worktree, seeded with a replayed transcript via `resumeKickoff`.
+   * Rejects if the task is not in a resumable status, already has a live runner,
+   * or has no worktree/branch/repo. `clarify` holds no lane and spawns directly;
+   * the lane-holding phases acquire a lane or queue behind the cap.
+   */
+  async restartAgent(taskId: string): Promise<void> {
+    const task = this.db.getTask(taskId)
+    if (!task) throw new Error('task not found')
+    const resumable =
+      task.status === 'clarify' ||
+      task.status === 'planning' ||
+      task.status === 'executing' ||
+      task.status === 'validating'
+    if (!resumable) {
+      throw new Error(`cannot restart a task in status "${task.status}"`)
+    }
+    if (this.runners.has(taskId)) {
+      throw new Error('this task already has a live worker session — nothing to restart')
+    }
+    const repo = repoById(task.repoId)
+    if (!repo || !task.worktree || !task.branch) {
+      throw new Error('cannot restart: the task has no worktree/branch/repo')
+    }
+    // The repo slug is runtime-only (resolved at start, lost on restart);
+    // re-resolve it so PR detection stays scoped to this task's own repo.
+    this.repoSlugs.set(taskId, await repoSlug(repo.path))
+    this.emitEvent(taskId, 'status', { sub: 'status', note: 'Restart agent — spawning a fresh session' })
+
+    // clarify holds no lane → spawn the fresh session directly.
+    if (task.status === 'clarify') {
+      this.beginResume(task)
+      return
+    }
+    // planning / executing / validating hold an execute lane.
+    if (this.executeLanes.size < config.maxLanes) {
+      this.executeLanes.add(taskId)
+      this.beginResume(task)
+    } else {
+      this.resuming.add(taskId)
+      this.patch(taskId, { queued: true, stale: false })
+      this.executeQueue.push(taskId)
+      this.emitEvent(taskId, 'status', {
+        sub: 'status',
+        note: `queued — ${this.executeLanes.size}/${config.maxLanes} lanes busy`,
+      })
+    }
+  }
 
   createTask(
     title: string,
@@ -809,6 +985,14 @@ export class TaskManager {
       task.status === 'executing' ||
       task.status === 'validating'
     const runner = this.runners.get(taskId)
+    // A live status with no runner means the worker session was lost to an app
+    // restart. Surface an actionable error instead of the generic one so the
+    // operator's message is never silently swallowed.
+    if (live && !runner) {
+      throw new Error(
+        'This task\'s worker session has ended (the app was restarted). Press "Restart agent" to continue talking to it.',
+      )
+    }
     if (!live || !runner) {
       throw new Error('operator messages are only accepted while the worker is live')
     }
@@ -864,8 +1048,10 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
+    this.resuming.delete(taskId)
     this.repoSlugs.delete(taskId)
     this.freeLane(taskId)
+    if (task.stale) this.patch(taskId, { stale: false })
     const repo = repoById(task.repoId)
     const repoPath = repo?.path ?? config.targetRepo
     // Remove the worktree first — it holds the feature branch checked out, which
@@ -899,9 +1085,11 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
+    this.resuming.delete(taskId)
     this.pendingAttachments.delete(taskId)
     this.repoSlugs.delete(taskId)
     this.freeLane(taskId)
+    if (task.stale) this.patch(taskId, { stale: false })
     if (task.worktree) {
       const repoPath = repoById(task.repoId)?.path ?? config.targetRepo
       await removeWorktree(repoPath, task.worktree)
@@ -928,6 +1116,7 @@ export class TaskManager {
     this.runners.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
+    this.resuming.delete(taskId)
     this.pendingAttachments.delete(taskId)
     this.repoSlugs.delete(taskId)
     this.freeLane(taskId)

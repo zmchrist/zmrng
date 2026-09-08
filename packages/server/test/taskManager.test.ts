@@ -293,6 +293,138 @@ describe('TaskManager state machine (fake runner, real temp git repo)', () => {
   })
 })
 
+describe('restart after orphan (agent-task-persistence)', () => {
+  /** A second manager on the SAME db with empty runners — simulates an app restart. */
+  function restartedManager(): { mgr: TaskManager; created: FakeRunner[]; events: WsEvent[] } {
+    const created2: FakeRunner[] = []
+    const events2: WsEvent[] = []
+    const factory2: RunnerFactory = (opts, cb) => {
+      const r = new FakeRunner(opts, cb)
+      created2.push(r)
+      return r
+    }
+    return { mgr: new TaskManager(db, (e) => events2.push(e), factory2), created: created2, events: events2 }
+  }
+
+  /** Drive a fresh task all the way to `executing` on `mgr`. */
+  async function toExecuting(title = 'orphan me'): Promise<string> {
+    const id = await startTask(title)
+    latest().say('ZMRNG_READY')
+    latest().say('ZMRNG_PLAN_READY model=opus effort=high plan=p.md')
+    expect(status(id)).toBe('executing')
+    return id
+  }
+
+  it('reconcileOrphans marks an orphaned live-phase task stale and notes the ended session', async () => {
+    const id = await toExecuting()
+
+    const r = restartedManager()
+    r.mgr.reconcileOrphans()
+
+    expect(db.getTask(id)!.stale).toBe(true)
+    expect(status(id)).toBe('executing') // status preserved, not clobbered
+    expect(db.getTask(id)!.queued).toBe(false)
+    expect(
+      r.events.some(
+        (e) =>
+          e.type === 'event' &&
+          e.event.kind === 'status' &&
+          /session ended|restart/i.test(e.event.payload.note ?? ''),
+      ),
+    ).toBe(true)
+  })
+
+  it('message() on an orphaned task rejects with the restart-agent guidance', async () => {
+    const id = await toExecuting()
+    const r = restartedManager()
+    r.mgr.reconcileOrphans()
+
+    expect(() => r.mgr.message(id, 'you there?')).toThrow(/worker session has ended[\s\S]*Restart agent/)
+  })
+
+  it('restartAgent respawns an executing orphan with a RESUME+EXECUTE kickoff, clears stale, and completes to review', async () => {
+    const id = await toExecuting()
+    const r = restartedManager()
+    r.mgr.reconcileOrphans()
+    expect(db.getTask(id)!.stale).toBe(true)
+
+    await r.mgr.restartAgent(id)
+    expect(db.getTask(id)!.stale).toBe(false)
+    expect(status(id)).toBe('executing')
+
+    const resumed = r.created[r.created.length - 1]
+    expect(resumed.sent.some((m) => /RESUME/.test(m))).toBe(true)
+    expect(resumed.sent.some((m) => /EXECUTE PHASE/.test(m))).toBe(true)
+
+    // The restarted agent drives to a PR — proving it can finish the task.
+    resumed.say('opened https://github.com/anyone/anything/pull/5')
+    expect(status(id)).toBe('review')
+    expect(db.getTask(id)!.prUrl).toBe('https://github.com/anyone/anything/pull/5')
+  })
+
+  it('restartAgent respawns a clarify orphan with a CLARIFY resume', async () => {
+    const id = await startTask() // → clarify
+    expect(status(id)).toBe('clarify')
+
+    const r = restartedManager()
+    r.mgr.reconcileOrphans()
+    expect(db.getTask(id)!.stale).toBe(true)
+
+    await r.mgr.restartAgent(id)
+    expect(db.getTask(id)!.stale).toBe(false)
+    expect(status(id)).toBe('clarify')
+    const resumed = r.created[r.created.length - 1]
+    expect(resumed.sent.some((m) => /RESUME/.test(m))).toBe(true)
+    expect(resumed.sent.some((m) => /CLARIFY PHASE/.test(m))).toBe(true)
+  })
+
+  it('restartAgent rejects when a live runner already exists and when the status is not resumable', async () => {
+    const id = await toExecuting()
+    // `mgr` still holds the live runner → nothing to restart.
+    await expect(mgr.restartAgent(id)).rejects.toThrow(/already|nothing to restart/i)
+
+    // Drive it to review (not a resumable status).
+    latest().say('opened https://github.com/anyone/anything/pull/8')
+    expect(status(id)).toBe('review')
+    await expect(mgr.restartAgent(id)).rejects.toThrow(/cannot restart/i)
+  })
+
+  it('queues a second executing-orphan restart under a 1-lane cap and promotes it via a RESUME kickoff', async () => {
+    // Two tasks both reach `executing` while 2 lanes are available...
+    config.maxLanes = 2
+    const a = await toExecuting('task A')
+    const b = await toExecuting('task B')
+
+    // ...then the app restarts with only ONE lane.
+    config.maxLanes = 1
+    const r = restartedManager()
+    r.mgr.reconcileOrphans()
+    expect(db.getTask(a)!.stale).toBe(true)
+    expect(db.getTask(b)!.stale).toBe(true)
+
+    await r.mgr.restartAgent(a) // takes the only lane
+    await r.mgr.restartAgent(b) // no lane free → queued
+    expect(db.getTask(a)!.queued).toBe(false)
+    expect(db.getTask(b)!.queued).toBe(true)
+    expect(status(b)).toBe('executing')
+
+    const resumedA = r.created[0]
+    expect(resumedA.sent.some((m) => /RESUME/.test(m))).toBe(true)
+
+    // Driving A to a PR frees its lane and promotes B — via a RESUME kickoff,
+    // NOT a fresh PLAN/DIRECT one, so the resumed context is preserved.
+    resumedA.say('opened https://github.com/anyone/anything/pull/1')
+    expect(status(a)).toBe('review')
+    expect(db.getTask(b)!.queued).toBe(false)
+
+    const resumedB = r.created[r.created.length - 1]
+    expect(resumedB).not.toBe(resumedA)
+    expect(resumedB.sent.some((m) => /RESUME/.test(m))).toBe(true)
+    expect(resumedB.sent.some((m) => /EXECUTE PHASE/.test(m))).toBe(true)
+    expect(resumedB.sent.some((m) => /PLAN PHASE/.test(m))).toBe(false)
+  })
+})
+
 describe('deleteTask', () => {
   it('hard-deletes a backlog task (no worktree) and broadcasts task-removed', async () => {
     const task = mgr.createTask('never started', 'do the thing', undefined, undefined, 'normal', 'sandbox', 'direct')

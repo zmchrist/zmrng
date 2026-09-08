@@ -32,4 +32,22 @@ describe('<WorkerLogPanel>', () => {
     renderPanel('executing')
     expect(screen.queryByRole('textbox')).toBeNull()
   })
+
+  it('surfaces the error when a steer message is rejected (no silent drop)', async () => {
+    const onMessage = vi.fn().mockRejectedValue(new Error('worker session has ended'))
+    renderPanel('executing', onMessage)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'you there?' } })
+    fireEvent.click(screen.getByRole('button', { name: /send/i }))
+    await waitFor(() =>
+      expect(screen.getByText(/worker session has ended/i)).toBeInTheDocument(),
+    )
+  })
+
+  it('shows the session-ended notice and disables the composer for a stale task', () => {
+    render(
+      <WorkerLogPanel events={[]} live="" status="executing" onMessage={vi.fn()} stale />,
+    )
+    expect(screen.getByText(/session ended/i)).toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).toBeNull()
+  })
 })
