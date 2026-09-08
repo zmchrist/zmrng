@@ -163,3 +163,17 @@ gained an optional `sessionId` that round-trips through `GlobalUiState.terminalT
 every (re)connect and persists the server-assigned id to `localStorage`
 (`zmrng-term-<tabId>`). A PTY is still reaped on grace-timer expiry or server restart —
 not durable across a restart, just resilient to a lock/blip/reload.
+
+## Team workspace URL + handle — server-side persistence (2026-09-07)
+The Team-tab VPS workspace URL and the self-asserted display-name handle moved off
+browser `localStorage` (unreliable across refresh/app-reopen/rebuild in the desktop
+shell) into durable server-side storage in `zmrng.db`. New additive `settings` kv table
+(`getSetting`/`setSetting` in `db.ts`, blank value clears) + `GET`/`PUT /api/settings`
+returning/patching the typed `WorkspaceSettings` (`{ workspaceUrl, teamHandle }`, mirrored
+server↔web). App fetches settings at boot, merges `workspaceUrl` over the
+`ZMRNG_WORKSPACE_URL` env default, and threads the values + a save callback into
+SettingsModal (controlled URL field) and TeamView (handle now derived from the prop, join/
+leave lift changes up). `teamConfig.ts` shed its localStorage/resolve helpers, keeping only
+the pure `workspaceSocketUrl`/`workspaceHttpOrigin` coercers. The sidecar DB lives in the
+persistent per-user data dir, so the values now survive close/reopen, `desktop:build`, and
+reboot.

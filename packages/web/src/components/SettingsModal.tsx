@@ -11,7 +11,6 @@ import {
   applyTheme,
   type ThemeMode,
 } from '../themes'
-import { loadStoredWorkspaceUrl, saveStoredWorkspaceUrl } from '../teamConfig'
 import { applyOpacity, loadStoredOpacity, saveStoredOpacity } from '../opacity'
 
 interface Props {
@@ -20,6 +19,10 @@ interface Props {
   /** WS connection state — used to detect the down→up transition after a
    *  reboot so the page can be reloaded once the server is actually back. */
   connected: boolean
+  /** The persisted VPS team-workspace URL (server-side WorkspaceSettings). */
+  workspaceUrl: string
+  /** Persist an edit to the workspace URL (server-side, durable). */
+  onWorkspaceUrlChange: (url: string) => void
 }
 
 /**
@@ -32,21 +35,19 @@ interface Props {
  * backdrop click, or Escape. Stays mounted a beat past `open` going false so
  * the closing (minimize) animation can play before it actually unmounts.
  */
-export function SettingsModal({ open, onClose, connected }: Props) {
+export function SettingsModal({
+  open,
+  onClose,
+  connected,
+  workspaceUrl,
+  onWorkspaceUrlChange,
+}: Props) {
   const mounted = usePanelMount(open)
   const [themeId, setThemeId] = useState(() => loadStoredTheme().themeId)
   const [mode, setMode] = useState<ThemeMode>(() => loadStoredTheme().mode)
-  // Per-teammate VPS team-workspace URL (localStorage; wins over the server
-  // default surfaced via ServerConfig.workspaceUrl). Persisted on every edit.
-  const [workspaceUrl, setWorkspaceUrl] = useState(() => loadStoredWorkspaceUrl())
   // Surface (glass panel) opacity, 0–100%. Applied live on drag and persisted to
   // localStorage; affects only the frosted-glass panel backgrounds, not text.
   const [opacity, setOpacity] = useState(() => loadStoredOpacity())
-
-  const onWorkspaceUrlChange = (value: string) => {
-    setWorkspaceUrl(value)
-    saveStoredWorkspaceUrl(value)
-  }
 
   const onOpacityChange = (value: number) => {
     setOpacity(value)

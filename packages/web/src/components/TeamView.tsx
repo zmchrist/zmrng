@@ -23,18 +23,18 @@ import { emptyThread, appendMessage, loadScrollback } from '../channelThread'
 import { useAutoScroll } from '../useAutoScroll'
 import { api } from '../api'
 import { buildHandoffPrefill, type HandoffPrefill } from '../teamHandoff'
-import {
-  loadStoredHandle,
-  saveStoredHandle,
-  resolveWorkspaceUrl,
-  workspaceSocketUrl,
-  workspaceHttpOrigin,
-} from '../teamConfig'
+import { workspaceSocketUrl, workspaceHttpOrigin } from '../teamConfig'
 
 interface Props {
-  /** Optional server-side default VPS URL (ServerConfig.workspaceUrl). The
-   *  per-teammate localStorage value wins over this when set. */
+  /** The effective VPS team-workspace URL (the persisted per-user
+   *  WorkspaceSettings value, already merged over the ServerConfig env default
+   *  by App). Used directly — resolution happens upstream. */
   workspaceUrl: string
+  /** The teammate's persisted display-name handle (server-side
+   *  WorkspaceSettings). Seeds the roster identity; empty ⇒ show the join form. */
+  teamHandle: string
+  /** Persist an edit to the handle (server-side, durable). Called on join/leave. */
+  onHandleChange: (handle: string) => void
   /** The shared team-agent bot handle (default `@agent`), surfaced via
    *  GET /api/config so the `@`-mention autocomplete + highlighter know the
    *  agent's name. Visual only — the server reply trigger is unchanged. */
@@ -70,15 +70,25 @@ function channelLabel(name: string): string {
  * channel-thread reducers, and config resolution it composes are each
  * unit-tested in isolation.
  */
-export function TeamView({ workspaceUrl, botHandle, repos, onSendToZmrng, onNewVersion }: Props) {
-  const resolvedUrl = resolveWorkspaceUrl(workspaceUrl)
-  const socketUrl = workspaceSocketUrl(resolvedUrl)
+export function TeamView({
+  workspaceUrl,
+  teamHandle,
+  onHandleChange,
+  botHandle,
+  repos,
+  onSendToZmrng,
+  onNewVersion,
+}: Props) {
+  const socketUrl = workspaceSocketUrl(workspaceUrl)
   // The VPS http origin for channel REST (list/create/scrollback). Channel data
   // lives on the VPS, not the teammate's local server, so these calls MUST be
   // origin-prefixed — otherwise a channel is created in the local SQLite and no
   // teammate ever sees it.
-  const httpOrigin = workspaceHttpOrigin(resolvedUrl)
-  const [handle, setHandle] = useState<string>(() => loadStoredHandle())
+  const httpOrigin = workspaceHttpOrigin(workspaceUrl)
+  // The roster identity is the persisted handle prop itself — no local copy, so
+  // an async settings load (or a save elsewhere) flows straight through without
+  // a setState-in-effect sync. Join/leave lift the change up via onHandleChange.
+  const handle = teamHandle
   const [draft, setDraft] = useState('')
   const [roster, setRoster] = useState<WorkspaceMember[]>(emptyRoster)
   const [connected, setConnected] = useState(false)
@@ -246,13 +256,11 @@ export function TeamView({ workspaceUrl, botHandle, repos, onSendToZmrng, onNewV
     e.preventDefault()
     const name = draft.trim()
     if (!name) return
-    saveStoredHandle(name)
-    setHandle(name)
+    onHandleChange(name)
   }
 
   const onLeave = () => {
-    saveStoredHandle('')
-    setHandle('')
+    onHandleChange('')
     setDraft('')
     setOpenId(null)
     setThread(emptyThread())

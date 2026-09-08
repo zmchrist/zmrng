@@ -15,6 +15,7 @@ import type {
   Channel,
   Message,
   UiState,
+  WorkspaceSettings,
   Attachment,
 } from './types'
 
@@ -243,5 +244,14 @@ export const api = {
     req<{ ok: true }>('/api/ui-state', {
       method: 'PUT',
       body: JSON.stringify(state),
+    }),
+
+  /** Durable server-side Team prefs (workspace URL + display-name handle). */
+  getSettings: () => req<WorkspaceSettings>('/api/settings'),
+  /** PATCH-style: send only the keys to change; returns the full settings. */
+  putSettings: (patch: Partial<WorkspaceSettings>) =>
+    req<WorkspaceSettings>('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
     }),
 }

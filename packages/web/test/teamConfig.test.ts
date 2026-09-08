@@ -1,56 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import {
-  loadStoredWorkspaceUrl,
-  saveStoredWorkspaceUrl,
-  loadStoredHandle,
-  saveStoredHandle,
-  resolveWorkspaceUrl,
-  workspaceSocketUrl,
-  workspaceHttpOrigin,
-} from '../src/teamConfig'
-
-beforeEach(() => {
-  localStorage.clear()
-})
-
-describe('workspace URL persistence', () => {
-  it('round-trips a stored URL, trimming whitespace', () => {
-    saveStoredWorkspaceUrl('  wss://vps.example  ')
-    expect(loadStoredWorkspaceUrl()).toBe('wss://vps.example')
-  })
-
-  it('an empty/whitespace save clears the stored URL', () => {
-    saveStoredWorkspaceUrl('wss://vps.example')
-    saveStoredWorkspaceUrl('   ')
-    expect(loadStoredWorkspaceUrl()).toBe('')
-  })
-
-  it('defaults to empty when nothing is stored', () => {
-    expect(loadStoredWorkspaceUrl()).toBe('')
-  })
-})
-
-describe('handle persistence', () => {
-  it('round-trips a stored handle, trimming whitespace', () => {
-    saveStoredHandle('  Ada  ')
-    expect(loadStoredHandle()).toBe('Ada')
-  })
-})
-
-describe('resolveWorkspaceUrl', () => {
-  it('prefers the stored localStorage value over the server default', () => {
-    saveStoredWorkspaceUrl('wss://mine.example')
-    expect(resolveWorkspaceUrl('wss://server-default.example')).toBe('wss://mine.example')
-  })
-
-  it('falls back to the server default when nothing is stored', () => {
-    expect(resolveWorkspaceUrl('wss://server-default.example')).toBe('wss://server-default.example')
-  })
-
-  it('returns empty when neither is set', () => {
-    expect(resolveWorkspaceUrl('')).toBe('')
-  })
-})
+import { describe, it, expect } from 'vitest'
+import { workspaceSocketUrl, workspaceHttpOrigin } from '../src/teamConfig'
 
 describe('workspaceSocketUrl', () => {
   it('appends the /ws/workspace path to a bare base', () => {

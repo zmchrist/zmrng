@@ -13,6 +13,7 @@ import type {
   FlowMode,
   RepoTarget,
   WorkspaceMode,
+  WorkspaceSettings,
   Attachment,
 } from './types'
 import { WorkspaceView } from './components/WorkspaceView'
@@ -53,11 +54,24 @@ export default function App() {
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
   const [repos, setRepos] = useState<RepoTarget[]>([])
+  // Durable server-side Team prefs (workspace URL + display-name handle),
+  // persisted in zmrng.db so they survive a refresh/app-reopen/rebuild/reboot —
+  // browser localStorage proved unreliable for these in the desktop shell.
+  const [settings, setSettings] = useState<WorkspaceSettings>({ workspaceUrl: '', teamHandle: '' })
   const ui = useUiState()
   // Workspace is the default home; migrate the retired `'tasks'` mode to it.
   const storedMode = ui.state.global.mode ?? 'workspace'
   const mode: WorkspaceMode = storedMode === 'tasks' ? 'workspace' : storedMode
   const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
+  // Optimistically update settings state, persist to the server, then reconcile
+  // with the server's echoed full document (blank values normalize identically).
+  const saveSettings = useCallback((patch: Partial<WorkspaceSettings>) => {
+    setSettings((prev) => ({ ...prev, ...patch }))
+    api.putSettings(patch).then(setSettings).catch(() => undefined)
+  }, [])
+  // The effective Team workspace URL: the persisted per-user value wins over the
+  // ZMRNG_WORKSPACE_URL env default surfaced via ServerConfig.
+  const effectiveWorkspaceUrl = settings.workspaceUrl || cfg?.workspaceUrl || ''
   // Ephemeral: whether the Workspace Tasks side panel is collapsed. Re-clicking
   // the active Workspace rail button toggles it; leaving Workspace re-expands it.
   const [tasksCollapsed, setTasksCollapsed] = useState(false)
@@ -146,6 +160,7 @@ export default function App() {
 
   useEffect(() => {
     api.getConfig().then(setCfg).catch(() => undefined)
+    api.getSettings().then(setSettings).catch(() => undefined)
     api.listRepos().then(setRepos).catch(() => undefined)
     api
       .listTasks()
@@ -342,7 +357,9 @@ export default function App() {
             style={{ display: mode === 'team' ? 'flex' : 'none' }}
           >
             <TeamView
-              workspaceUrl={cfg?.workspaceUrl ?? ''}
+              workspaceUrl={effectiveWorkspaceUrl}
+              teamHandle={settings.teamHandle}
+              onHandleChange={(h) => saveSettings({ teamHandle: h })}
               botHandle={cfg?.botHandle ?? '@agent'}
               repos={repos}
               onSendToZmrng={onSendToZmrng}
@@ -366,6 +383,8 @@ export default function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         connected={connected}
+        workspaceUrl={settings.workspaceUrl}
+        onWorkspaceUrlChange={(url) => saveSettings({ workspaceUrl: url })}
       />
     </div>
   )
