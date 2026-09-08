@@ -333,6 +333,7 @@ export default function App() {
                 selected ? api.message(selected.id, text, attachments) : Promise.resolve()
               }
               onResume={() => (selected ? api.resume(selected.id) : Promise.resolve())}
+              onRestart={() => (selected ? api.restartAgent(selected.id) : Promise.resolve())}
               onInterrupt={() => (selected ? api.interrupt(selected.id) : Promise.resolve())}
               onDone={() => (selected ? api.done(selected.id) : Promise.resolve())}
               onCancel={() => (selected ? api.cancel(selected.id) : Promise.resolve())}

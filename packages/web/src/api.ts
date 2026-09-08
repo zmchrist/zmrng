@@ -192,6 +192,9 @@ export const api = {
     }),
   resume: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/resume`, { method: 'POST' }),
+  /** Restart an orphaned task's worker: a fresh agent in the same worktree. */
+  restartAgent: (id: string) =>
+    req<{ ok: true }>(`/api/tasks/${id}/restart`, { method: 'POST' }),
   interrupt: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/interrupt`, { method: 'POST' }),
   done: (id: string) =>

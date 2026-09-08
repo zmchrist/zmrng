@@ -112,6 +112,55 @@ describe('<TaskList>', () => {
     await waitFor(() => expect(onStart).toHaveBeenCalled())
   })
 
+  it('renders a Restart agent button + stale notice for a stale live-phase task, hiding autobar and Stop', () => {
+    render(
+      <TaskList
+        tasks={[makeTask({ id: 'a', status: 'executing', stale: true })]}
+        repos={repos}
+        selectedId="a"
+        onSelect={() => {}}
+        onRestart={vi.fn()}
+        onInterrupt={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /restart agent/i })).toBeInTheDocument()
+    expect(screen.getByText(/session ended/i)).toBeInTheDocument()
+    // The misleading "running autonomously" autobar and the Stop button are gated off.
+    expect(screen.queryByText(/running autonomously/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+  })
+
+  it('fires onRestart from the stale row', async () => {
+    const onRestart = vi.fn().mockResolvedValue(undefined)
+    render(
+      <TaskList
+        tasks={[makeTask({ id: 'a', status: 'executing', stale: true })]}
+        repos={repos}
+        selectedId="a"
+        onSelect={() => {}}
+        onRestart={onRestart}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /restart agent/i }))
+    await waitFor(() => expect(onRestart).toHaveBeenCalled())
+  })
+
+  it('a non-stale live task keeps the autobar and Stop and shows no Restart', () => {
+    render(
+      <TaskList
+        tasks={[makeTask({ id: 'a', status: 'executing', stale: false })]}
+        repos={repos}
+        selectedId="a"
+        onSelect={() => {}}
+        onRestart={vi.fn()}
+        onInterrupt={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /restart agent/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/running autonomously/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+  })
+
   it('reveals the metadata dropdown on demand for the selected row', () => {
     render(
       <TaskList

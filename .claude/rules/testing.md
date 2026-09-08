@@ -41,20 +41,30 @@ Run: `npm test` (both), `npm run test:watch` (both), or `-w @zmrng/server` /
   (accepts a valid image/PDF, rejects a bad media type, rejects an oversized decoded
   payload, caps the array at `MAX_ATTACHMENTS`, and tolerates non-array/malformed input).
 - **`db.ts`** — temp-file SQLite; `ensureColumns()` migration + idempotency and
-  atomic `addUsage()` accumulation.
+  atomic `addUsage()` accumulation. Also covers the additive `stale` column: added
+  by `ensureColumns()` on a pre-`stale` schema, idempotent on re-open, and
+  `updateTask({ stale: true })` round-trips through `getTask()`.
 - **`config.ts`** — `resolveRegistry()` precedence (`repos.json` → env → legacy),
   auto-scan, and the empty-registry guard (issue #16).
 - **Worker prompts** (`prompts.test.ts`) — the harness contract. `systemPrompt()`,
   `planKickoff()`, `executeKickoff()`, and `PR_BODY_TEMPLATE` are pinned: the
   branch-only + worktree-hygiene rules, the grill/test-strategy planning steps,
   RED→GREEN→REFACTOR, `--body-file` (never `--fill`), and checklist parity with
-  `.github/PULL_REQUEST_TEMPLATE.md`. Deleting a rule from a prompt fails CI.
+  `.github/PULL_REQUEST_TEMPLATE.md`. Deleting a rule from a prompt fails CI. Also
+  covers `resumeKickoff()` per phase: the RESUME preamble (`RESUME`, `inspect`, `do
+  NOT redo`, title/body carried), the delegated per-phase kickoff present
+  **verbatim** (proving reuse rather than a divergent copy), and — for `planning`
+  — that the transcript appears exactly once (not duplicated by the preamble).
 - **State machine** (`taskManager.test.ts`) — the highest-value artifact. Drives
   the real `TaskManager` over a **real temp git repo** (worktree create/remove run
   for real) with a **fake runner** injected through `TaskManager`'s optional
   `runnerFactory` constructor param. Scripts stream-json lines and asserts every
   status transition that has a control token, plus `blocked`/resume, the lane
-  cap + queue, and `interrupt()` suppressing the failure path.
+  cap + queue, and `interrupt()` suppressing the failure path. Also covers restart
+  after an orphaned session: constructing a second `TaskManager` on the same `db`
+  with an empty `runners` map (simulated app restart), `reconcileOrphans()` marking
+  the live-phase task `stale`, `restartAgent()` spawning a fresh runner in the same
+  worktree, and lane-aware queuing (`resuming` Set) when lanes are full.
 
 ## Hard rules
 - **No test spawns a real `claude` process, calls `gh`, or touches the network.**

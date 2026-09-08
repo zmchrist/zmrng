@@ -71,6 +71,7 @@ interface Props {
   onStart: () => Promise<unknown>
   onMessage: (text: string, attachments?: Attachment[]) => Promise<unknown>
   onResume: () => Promise<unknown>
+  onRestart: () => Promise<unknown>
   onInterrupt: () => Promise<unknown>
   onDone: () => Promise<unknown>
   onCancel: () => Promise<unknown>
@@ -120,6 +121,7 @@ export function WorkspaceView({
   onStart,
   onMessage,
   onResume,
+  onRestart,
   onInterrupt,
   onDone,
   onCancel,
@@ -211,6 +213,7 @@ export function WorkspaceView({
             config={config}
             onStart={onStart}
             onResume={onResume}
+            onRestart={onRestart}
             onInterrupt={onInterrupt}
             onDone={onDone}
             onCancel={onCancel}
@@ -246,6 +249,7 @@ export function WorkspaceView({
               events={events}
               live={live}
               status={status}
+              stale={task?.stale}
               onMessage={task ? onMessage : undefined}
             />
           </div>
