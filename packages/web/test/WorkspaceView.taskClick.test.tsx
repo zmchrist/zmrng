@@ -77,6 +77,7 @@ function Harness() {
       onStart={async () => {}}
       onMessage={async () => {}}
       onResume={async () => {}}
+      onRestart={async () => {}}
       onInterrupt={async () => {}}
       onDone={async () => {}}
       onCancel={async () => {}}

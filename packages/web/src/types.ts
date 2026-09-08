@@ -125,6 +125,13 @@ export interface Task {
   repoId: string
   usage: TaskUsage
   queued: boolean
+  /**
+   * True when the task is in a live phase but its worker session was lost (the
+   * app was restarted). Set only at boot reconciliation and cleared when a fresh
+   * agent is (re)spawned. Optional so older rows/fixtures read `false`. Mirror of
+   * the server's `Task.stale`.
+   */
+  stale?: boolean
   /** Categorises a block (e.g. 'toolchain' | 'auth' | 'subagent') — free string for forward-compat. */
   blockedKind: string | null
   /** Human-readable reason captured when a task enters `blocked`. */

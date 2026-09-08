@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   cost_usd REAL NOT NULL DEFAULT 0,
   turns INTEGER NOT NULL DEFAULT 0,
   queued INTEGER NOT NULL DEFAULT 0,
+  stale INTEGER NOT NULL DEFAULT 0,
   blocked_kind TEXT,
   blocked_reason TEXT,
   created_at TEXT NOT NULL,
@@ -119,6 +120,7 @@ interface TaskRow {
   cost_usd: number
   turns: number
   queued: number
+  stale: number
   blocked_kind: string | null
   blocked_reason: string | null
   created_at: string
@@ -198,6 +200,7 @@ function rowToTask(r: TaskRow): Task {
       turns: r.turns,
     },
     queued: r.queued === 1,
+    stale: r.stale === 1,
     blockedKind: r.blocked_kind,
     blockedReason: r.blocked_reason,
     createdAt: r.created_at,
@@ -278,6 +281,7 @@ export type TaskPatch = Partial<
     | 'effort'
     | 'style'
     | 'queued'
+    | 'stale'
     | 'blockedKind'
     | 'blockedReason'
   >
@@ -294,6 +298,7 @@ const COLUMN_BY_FIELD: Record<keyof TaskPatch, string> = {
   effort: 'effort',
   style: 'style',
   queued: 'queued',
+  stale: 'stale',
   blockedKind: 'blocked_kind',
   blockedReason: 'blocked_reason',
 }
@@ -373,6 +378,7 @@ export class Db {
       ['tokens_cache', 'INTEGER NOT NULL DEFAULT 0'],
       ['cost_usd', 'REAL NOT NULL DEFAULT 0'],
       ['turns', 'INTEGER NOT NULL DEFAULT 0'],
+      ['stale', 'INTEGER NOT NULL DEFAULT 0'],
       ['blocked_kind', 'TEXT'],
       ['blocked_reason', 'TEXT'],
     ]

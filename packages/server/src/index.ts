@@ -93,6 +93,10 @@ process.on('unhandledRejection', (reason) => {
 const db = new Db(config.dbPath)
 const hub = new WsHub()
 const manager = new TaskManager(db, (e: WsEvent) => hub.broadcast(e))
+// Boot reconciliation: mark any task still sitting in a live phase (its worker
+// child died with the previous process) `stale`, so the UI surfaces the dead
+// state and offers Restart instead of pretending the worker is alive.
+manager.reconcileOrphans()
 const terminals = new TerminalManager()
 const chats = new ChatManager()
 // Team-workspace presence: every join/leave re-broadcasts the full roster to the
@@ -572,6 +576,19 @@ app.post('/api/tasks/:id/message', (req, reply) => {
   }
   try {
     manager.message(id, text, attachments.length > 0 ? attachments : undefined)
+    return { ok: true }
+  } catch (err) {
+    return reply.code(400).send({ error: errMsg(err) })
+  }
+})
+
+// Restart an orphaned task's worker (option B — a fresh agent in the same
+// worktree, seeded with a replayed transcript; NOT `claude --resume`).
+// Namespaced under the task, distinct from the self-update POST /api/restart.
+app.post('/api/tasks/:id/restart', async (req, reply) => {
+  const { id } = req.params as { id: string }
+  try {
+    await manager.restartAgent(id)
     return { ok: true }
   } catch (err) {
     return reply.code(400).send({ error: errMsg(err) })
