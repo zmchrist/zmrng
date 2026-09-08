@@ -531,9 +531,24 @@ export interface Channel {
 }
 
 /**
+ * An aggregated emoji reaction on one message: the emoji plus the list of
+ * self-asserted handles that reacted with it, in the order they reacted. The
+ * UI renders `handles.length` as the count pill and lists `handles` in the
+ * "who reacted" popup; a handle is "mine" when it equals my own team handle.
+ * Reactions key on the same free-text handle model as message authorship (no
+ * login/member-id). Mirrored in `packages/web/src/types.ts`.
+ */
+export interface ReactionSummary {
+  emoji: string
+  handles: string[]
+}
+
+/**
  * One persisted channel message. `author` is a self-asserted, free-text member
  * handle (the same identity model as T1 presence — no verification). `kind`
- * distinguishes human vs agent posts.
+ * distinguishes human vs agent posts. `reactions` is the aggregated emoji
+ * reaction set (optional/omitted for a freshly-posted message that has none;
+ * scrollback attaches the persisted set).
  */
 export interface Message {
   id: number
@@ -541,6 +556,7 @@ export interface Message {
   author: string
   body: string
   kind: MessageKind
+  reactions?: ReactionSummary[]
   createdAt: string
 }
 
@@ -563,6 +579,7 @@ export type WsWorkspaceClientMsg =
   | { type: 'subscribe'; channelId: number }
   | { type: 'unsubscribe'; channelId: number }
   | { type: 'message'; channelId: number; author: string; body: string }
+  | { type: 'react'; channelId: number; messageId: number; emoji: string; handle: string }
 
 /**
  * server -> client frames over the workspace socket. `roster` is a full
@@ -581,6 +598,7 @@ export type WsWorkspaceServerMsg =
   | { type: 'pong' }
   | { type: 'message'; message: Message }
   | { type: 'channels'; channels: Channel[] }
+  | { type: 'reaction'; channelId: number; messageId: number; reactions: ReactionSummary[] }
   | { type: 'new-version'; sha: string }
 
 /**
@@ -598,6 +616,15 @@ export const MAX_DISPLAY_NAME_LEN = 64
  * `packages/web/src/types.ts`.
  */
 export const MAX_MESSAGE_BODY_LEN = 4000
+
+/**
+ * Max length of a reaction emoji string, measured in UTF-16 code units. A
+ * `react` frame whose emoji exceeds this is rejected server-side (tolerant parse
+ * → undefined) so a client can never store an unbounded string as an "emoji".
+ * Generous enough for multi-codepoint ZWJ sequences and flags. Mirrored in
+ * `packages/web/src/types.ts`.
+ */
+export const MAX_EMOJI_LEN = 64
 
 /**
  * Default page size for the paginated scrollback route

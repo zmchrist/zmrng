@@ -894,6 +894,12 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
         channels.subscribe(socket, msg.channelId)
       } else if (msg.type === 'unsubscribe') {
         channels.unsubscribe(socket, msg.channelId)
+      } else if (msg.type === 'react') {
+        // Toggle the reactor's emoji on the message and fan the updated set out
+        // live to that channel's subscribers. Best-effort: an unknown/mismatched
+        // message is a no-op inside react(). The reactor handle is self-asserted
+        // (same trust model as a message author).
+        channels.react(msg.channelId, msg.messageId, msg.handle, msg.emoji)
       } else if (msg.type === 'message') {
         // Persist + fan out live to subscribed sockets only (no history replay).
         // A socket post is always `human` — the `agent` kind is server-controlled

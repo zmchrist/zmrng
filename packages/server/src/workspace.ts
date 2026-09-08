@@ -1,9 +1,10 @@
-import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from './types.js'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from './types.js'
 import type { Db } from './db.js'
 import type {
   Member,
   Message,
   MessageKind,
+  ReactionSummary,
   WorkspaceMember,
   WsWorkspaceClientMsg,
   WsWorkspaceServerMsg,
@@ -71,6 +72,17 @@ export function parseWorkspaceClientMsg(raw: string): WsWorkspaceClientMsg | und
       author,
       body,
     }
+  }
+  if (obj.type === 'react') {
+    if (!isChannelId(obj.channelId) || !isChannelId(obj.messageId)) return undefined
+    if (typeof obj.emoji !== 'string' || typeof obj.handle !== 'string') return undefined
+    const emoji = obj.emoji.trim()
+    const handle = obj.handle.trim()
+    if (emoji.length === 0 || emoji.length > MAX_EMOJI_LEN) return undefined
+    if (handle.length === 0 || handle.length > MAX_DISPLAY_NAME_LEN) return undefined
+    // The reactor handle is self-asserted, exactly like a `message` frame's
+    // `author` — the identity model is a free-text handle with no verification.
+    return { type: 'react', channelId: obj.channelId, messageId: obj.messageId, emoji, handle }
   }
   return undefined
 }
@@ -178,7 +190,15 @@ export class WorkspaceManager {
 // ---- channel manager -------------------------------------------------------
 
 /** The channel/message-table surface the manager needs (kept narrow for testability). */
-type ChannelStore = Pick<Db, 'listChannels' | 'getChannel' | 'addMessage' | 'listMessages'>
+type ChannelStore = Pick<
+  Db,
+  | 'listChannels'
+  | 'getChannel'
+  | 'addMessage'
+  | 'listMessages'
+  | 'getMessageChannelId'
+  | 'toggleReaction'
+>
 
 /**
  * Owns channel message posting and live fan-out. Keeps the ticket's named
@@ -245,5 +265,30 @@ export class ChannelManager<S = object> {
       for (const socket of set) this.send(socket, frame)
     }
     return message
+  }
+
+  /**
+   * Toggle a member's emoji reaction on a message and fan the message's updated
+   * reaction set out to every socket subscribed to that channel. The
+   * `messageId` is validated to actually belong to `channelId` first — a
+   * mismatched or unknown message is a no-op (nothing persisted, nothing
+   * delivered), returning `undefined`. Returns the message's reaction set after
+   * the toggle on success.
+   */
+  react(
+    channelId: number,
+    messageId: number,
+    handle: string,
+    emoji: string,
+    now: string = new Date().toISOString(),
+  ): ReactionSummary[] | undefined {
+    if (this.db.getMessageChannelId(messageId) !== channelId) return undefined
+    const reactions = this.db.toggleReaction(messageId, handle, emoji, now)
+    const set = this.subs.get(channelId)
+    if (set) {
+      const frame: WsWorkspaceServerMsg = { type: 'reaction', channelId, messageId, reactions }
+      for (const socket of set) this.send(socket, frame)
+    }
+    return reactions
   }
 }

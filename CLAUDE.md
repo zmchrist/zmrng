@@ -128,8 +128,8 @@ Migrations in `db.ts` (`ensureColumns()`) may **only** `ALTER … ADD COLUMN` /
 existing rows. The VPS team-workspace instance redeploys in place
 (`scripts/autoupdate-workspace.sh` reopens the same populated `zmrng.db` under
 `ZMRNG_DATA_DIR`, untouched by the checkout `reset --hard`), so a destructive or rewriting
-migration is the **one** thing that could lose live channels/messages/members across a
-redeploy. A genuine column drop/rename needs an explicit, reviewed migration path — not the
+migration is the **one** thing that could lose live channels/messages/reactions/members
+across a redeploy. A genuine column drop/rename needs an explicit, reviewed migration path — not the
 best-effort idempotent reopen. (D2a of `.agents/plans/instance-update-distribution-grill.md`.)
 
 ### TypeScript / logging
@@ -216,8 +216,8 @@ zmrng is a **solo** project — there is no two-developer protocol. Conventions:
 ## Team workspace (POC)
 Optional **Team** mode tab talking to a VPS-hosted instance of the same server binary
 over one multiplexed WebSocket (`GET /ws/workspace`): presence roster, channels, live
-messaging, repo-scoped channels with a "Send to my zmrng" handoff, and one shared
-`@agent` that plans but never executes. Architecture detail is in
+messaging, emoji reactions on messages, repo-scoped channels with a "Send to my zmrng"
+handoff, and one shared `@agent` that plans but never executes. Architecture detail is in
 `.claude/docs/codemap.md`; the deploy runbook is `docs/team-workspace-deploy.md`.
 
 > **POC exposure precondition (Tailscale is the perimeter):** the VPS

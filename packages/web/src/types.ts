@@ -507,9 +507,21 @@ export interface Channel {
 }
 
 /**
- * One persisted channel message. `author` is a self-asserted, free-text member
- * handle; `kind` distinguishes human vs agent posts. Mirror of
+ * An aggregated emoji reaction on one message: the emoji plus the reactor
+ * handles (in reaction order). `handles.length` is the count pill; a handle is
+ * "mine" when it equals my own team handle. Mirror of
  * `packages/server/src/types.ts`.
+ */
+export interface ReactionSummary {
+  emoji: string
+  handles: string[]
+}
+
+/**
+ * One persisted channel message. `author` is a self-asserted, free-text member
+ * handle; `kind` distinguishes human vs agent posts. `reactions` is the
+ * aggregated emoji reaction set (omitted for a freshly-posted message with
+ * none). Mirror of `packages/server/src/types.ts`.
  */
 export interface Message {
   id: number
@@ -517,6 +529,7 @@ export interface Message {
   author: string
   body: string
   kind: MessageKind
+  reactions?: ReactionSummary[]
   createdAt: string
 }
 
@@ -537,6 +550,7 @@ export type WsWorkspaceClientMsg =
   | { type: 'subscribe'; channelId: number }
   | { type: 'unsubscribe'; channelId: number }
   | { type: 'message'; channelId: number; author: string; body: string }
+  | { type: 'react'; channelId: number; messageId: number; emoji: string; handle: string }
 
 /**
  * server -> client frames over the workspace socket. `roster` is a full
@@ -552,6 +566,7 @@ export type WsWorkspaceServerMsg =
   | { type: 'pong' }
   | { type: 'message'; message: Message }
   | { type: 'channels'; channels: Channel[] }
+  | { type: 'reaction'; channelId: number; messageId: number; reactions: ReactionSummary[] }
   | { type: 'new-version'; sha: string }
 
 /**
@@ -567,6 +582,13 @@ export const MAX_DISPLAY_NAME_LEN = 64
  * `packages/server/src/types.ts`.
  */
 export const MAX_MESSAGE_BODY_LEN = 4000
+
+/**
+ * Max length of a reaction emoji string (UTF-16 code units). The client clamps
+ * before sending `react`; the server rejects any over-cap frame. Mirror of
+ * `packages/server/src/types.ts`.
+ */
+export const MAX_EMOJI_LEN = 64
 
 /**
  * Default page size for the paginated scrollback route and its hard upper bound.
