@@ -494,6 +494,46 @@ describe('channels + messages (team workspace T2)', () => {
   })
 })
 
+describe('settings (durable per-user prefs)', () => {
+  it('returns undefined for an unset key', () => {
+    const db = new Db(dbPath)
+    expect(db.getSetting('workspace_url')).toBeUndefined()
+    db.close()
+  })
+
+  it('round-trips a value, trimming whitespace', () => {
+    const db = new Db(dbPath)
+    db.setSetting('workspace_url', '  wss://vps.example  ', '2026-09-07T00:00:00.000Z')
+    expect(db.getSetting('workspace_url')).toBe('wss://vps.example')
+    db.close()
+  })
+
+  it('upserts (last write wins) rather than duplicating the key', () => {
+    const db = new Db(dbPath)
+    db.setSetting('team_handle', 'Ada', '2026-09-07T00:00:00.000Z')
+    db.setSetting('team_handle', 'Grace', '2026-09-07T00:00:01.000Z')
+    expect(db.getSetting('team_handle')).toBe('Grace')
+    db.close()
+  })
+
+  it('a blank/whitespace value clears the key (reads back as undefined)', () => {
+    const db = new Db(dbPath)
+    db.setSetting('workspace_url', 'wss://vps.example', '2026-09-07T00:00:00.000Z')
+    db.setSetting('workspace_url', '   ', '2026-09-07T00:00:01.000Z')
+    expect(db.getSetting('workspace_url')).toBeUndefined()
+    db.close()
+  })
+
+  it('survives a reopen of the same DB file (persistent, like the sidecar data dir)', () => {
+    const db = new Db(dbPath)
+    db.setSetting('workspace_url', 'wss://vps.example', '2026-09-07T00:00:00.000Z')
+    db.close()
+    const reopened = new Db(dbPath)
+    expect(reopened.getSetting('workspace_url')).toBe('wss://vps.example')
+    reopened.close()
+  })
+})
+
 describe('addUsage', () => {
   const mk = (): Db => {
     const db = new Db(dbPath)
