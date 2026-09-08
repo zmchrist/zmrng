@@ -164,6 +164,28 @@ every (re)connect and persists the server-assigned id to `localStorage`
 (`zmrng-term-<tabId>`). A PTY is still reaped on grace-timer expiry or server restart —
 not durable across a restart, just resilient to a lock/blip/reload.
 
+## Agent task persistence — restart frozen task workers after a clean quit (2026-09-07)
+A clean app quit kills the server and every task's live `claude` child; on reopen a fresh
+`TaskManager` has an empty `runners` map while SQLite rows still show tasks in a live phase
+(`clarify`/`planning`/`executing`/`validating`), leaving them "frozen" (a steer message
+returned a swallowed 400). Option **B** — honest dead-state recovery, no `claude --resume`:
+a new additive `Task.stale` boolean (server `types.ts` + web mirror; SQLite `stale INTEGER
+NOT NULL DEFAULT 0` via `ensureColumns()`) marks orphaned tasks. `TaskManager` gained
+`reconcileOrphans()` (boot-time, called from `index.ts` before `listen` — marks live-phase
+tasks with no runner `stale` + clears `queued`), `restartAgent(taskId)` behind `POST
+/api/tasks/:id/restart` (spawns a fresh agent in the SAME worktree, re-resolves the repo
+slug, lane-aware via a new `resuming` Set that routes queued promotions through
+`beginResume` rather than a fresh plan/direct kickoff), `beginResume()`, and an exported
+`resumeKickoff(task, branch, defaultBranch, transcript)` prompt builder that composes a
+RESUME preamble (inspect prior work, continue not redo) over the existing per-phase
+kickoffs verbatim. `message()` now throws a specific actionable error ("worker session has
+ended … Restart agent") instead of silently dropping an operator turn on a live-but-
+runnerless task. Web: `api.restartAgent(id)`; `TaskList` shows a "Restart agent" button +
+stale notice and gates the autobar/Stop on `!stale`; `WorkerLogPanel` surfaces send errors
+and shows a session-ended notice with a disabled composer for a stale task. `stale` is set
+only at reconcile and cleared on respawn/cancel/done, so it can never be wrongly true for a
+running task.
+
 ## Team workspace URL + handle — server-side persistence (2026-09-07)
 The Team-tab VPS workspace URL and the self-asserted display-name handle moved off
 browser `localStorage` (unreliable across refresh/app-reopen/rebuild in the desktop

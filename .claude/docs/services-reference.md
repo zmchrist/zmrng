@@ -94,12 +94,67 @@ The phase state machine and orchestration.
   an execute child on the plan's chosen model/effort, which runs through validate → PR.
 - **Execute lanes:** cap = `config.maxLanes` (`ZMRNG_MAX_LANES`, default 2). A task takes
   a lane at `ZMRNG_READY`; extra READY tasks park in `planning` with `queued=true` in
-  `executeQueue`; `freeLane` (on PR/done/cancel/fail) promotes the next via `beginPlan`.
+  `executeQueue`; `freeLane` (on PR/done/cancel/fail) promotes the next via
+  `beginPhaseForFlow` — normally `beginPlan`/`beginDirect`, but a queued **restart**
+  (see below) can also park in `validating`, and `beginPhaseForFlow` checks the private
+  `resuming` Set first, routing those to `beginResume` instead.
 - **`message(taskId, text, attachments?: Attachment[])`** — accepted while `status ∈
   {clarify, planning, executing, validating}` and a runner exists (gate lifted from
-  clarify-only); throws otherwise. Emits an `operator` event (its logged text gains a
-  trailing `[n attachment(s)]` suffix when `attachments` is non-empty) and calls
+  clarify-only); throws otherwise. A live status with **no** runner (the worker session
+  was lost to an app restart) throws a specific, actionable error — `This task's worker
+  session has ended (the app was restarted). Press "Restart agent" to continue talking
+  to it.` — instead of the generic "operator messages are only accepted while the
+  worker is live". Emits an `operator` event (its logged text gains a trailing `[n
+  attachment(s)]` suffix when `attachments` is non-empty) and calls
   `runner.send(text, attachments)`.
+- **Stale-task recovery (option B — a fresh agent, never `claude --resume`):** a task's
+  `claude` child dies with the server process (e.g. a clean app quit); a freshly
+  constructed `TaskManager` has an empty `runners` map even though SQLite may still show
+  a task in a live phase. Persisted `Task.stale: boolean` (SQLite `stale INTEGER NOT
+  NULL DEFAULT 0`, additive migration) lets the UI tell an orphaned task apart from a
+  genuinely-live one, since `status` alone is identical in both cases. `stale` is set
+  only by `reconcileOrphans()` and cleared only when a fresh agent is (re)spawned (plus
+  defensively in `cancel`/`done`).
+  - **`reconcileOrphans(): void`** — called once from `index.ts` right after
+    construction, before `app.listen`. For every task whose status is `clarify`,
+    `planning`, `executing`, or `validating` with no live runner (always true at boot):
+    marks it `stale: true`, clears `queued`, and emits a persisted `status` event noting
+    the session ended and Restart is available. Does **not** re-acquire a lane —
+    a lane is only taken when the operator actually restarts a lane-holding phase.
+    `blocked` and legacy `building` are excluded (out of scope; `blocked` has its own
+    resume path).
+  - **`async restartAgent(taskId: string): Promise<void>`** — the manual "Restart
+    agent" action, behind `POST /api/tasks/:id/restart`. Rejects (throws) if the task
+    is not in a resumable status (the same four live phases), already has a live
+    runner ("already live — nothing to restart"), or has no worktree/branch/repo.
+    Re-resolves `repoSlug(repo.path)` into `repoSlugs` (lost on restart) so PR
+    detection stays repo-scoped. Clears `stale`; emits a "Restart agent" status note.
+    `clarify` holds no lane → spawns the fresh session directly via `beginResume`.
+    `planning`/`executing`/`validating` hold an execute lane → acquires a lane
+    (respecting `config.maxLanes`) and calls `beginResume`, or — if lanes are full —
+    adds the task to the private `resuming: Set<string>`, sets `queued: true`, and
+    pushes it onto `executeQueue`; when `freeLane()` later promotes it, `resuming`
+    membership routes it to `beginResume` instead of a fresh `beginPlan`/`beginDirect`.
+  - **`beginResume(task)`** (private) — spawns via the existing `spawnPhase` seam
+    (planning forces `opus`/`high`, mirroring `beginPlan`; other phases reuse the
+    task's persisted `model`/`effort`), clears `resuming`/`queued`/`stale`, emits a
+    status note, and sends `resumeKickoff(task, branch, defaultBranch, transcript)`
+    seeded with `clarifyTranscript(taskId)` (already condenses every operator +
+    assistant turn across all phases, not just clarify).
+  - **`resumeKickoff(task, branch, defaultBranch, transcript): string`** (exported, for
+    prompt-contract tests) — composes a RESUME preamble (normal English: a fresh agent
+    is taking over after an app restart, names the phase, carries title/body, orders
+    the agent to inspect the worktree — files, `git log`/`status`/`diff`, the plan file
+    — **before** acting and to continue rather than redo prior work) over the
+    **existing, already-pinned per-phase kickoff**, so the heavy content (RED→GREEN→
+    REFACTOR, PR body, grill/test-strategy) is reused verbatim rather than duplicated:
+    `clarify` → preamble + transcript block + `clarifyKickoff(task)`; `planning` →
+    preamble + `planKickoff(task, transcript)` (transcript already lives inside
+    `planKickoff`, so it is not repeated); `executing`/`validating` → preamble +
+    transcript block + `executeKickoff(branch, defaultBranch, task.planPath)`.
+  - Transient-set hygiene: `resuming` is deleted alongside `interrupting`/
+    `blockedFrom` in `fail`/`cancel`/`done`/`deleteTask`; `cancel`/`done` also clear
+    `stale` defensively.
 - **`interrupt(taskId)`** (new) — looks up the runner (throws if none); adds the task to
   the private `interrupting` Set; calls `runner.interrupt()`; emits a `status` note. Does
   **not** change the task's status (worker idles awaiting the next `message()`).
@@ -206,8 +261,11 @@ distinct from the existing per-task `/api/tasks/:id/chat` REST chat (`chat.ts`,
 SQLite (better-sqlite3, WAL).
 
 - **Tables:** `tasks` (id, title, body, status, session_id, branch, worktree, pr_url,
-  model, effort, style, **repo_id**, usage counters, queued, timestamps) and `events`
-  (autoincrement id, task_id, ts, kind, payload JSON) + `idx_events_task`.
+  model, effort, style, **repo_id**, usage counters, queued, **stale**, timestamps) and
+  `events` (autoincrement id, task_id, ts, kind, payload JSON) + `idx_events_task`.
+  `stale INTEGER NOT NULL DEFAULT 0` (additive, `ensureColumns()`) marks a task whose
+  worker session was lost to an app restart — see `reconcileOrphans()`/`restartAgent()`
+  in the TaskManager section above.
 - **Migrations:** `ensureColumns()` reads `PRAGMA table_info(tasks)` and `ALTER`s any
   missing column (idempotent); columns also live in `SCHEMA` for fresh DBs.
 - **Durability:** constructor sets `wal_autocheckpoint = 1000` to bound in-run WAL
@@ -274,8 +332,11 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `workspaceUrl` and `botHandle` for the Team tab — see Team workspace below),
   `GET /api/repos` (the registry), `GET /api/tasks`, `POST /api/tasks`
   (title/body/model/effort/style/repoId/flow/**attachments**), `GET /api/tasks/:id/events`,
-  `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel}`.
+  `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel,restart}`.
   `interrupt` is bodyless; mirrors the `resume` route's try/catch + 400 on error shape.
+  `POST /api/tasks/:id/restart` (bodyless) calls `manager.restartAgent(id)` — namespaced
+  under the task, distinct from the self-update `POST /api/restart` (git-pull + rebuild
+  zmrng's own repo, see the Web `components/` bullets below).
   `POST /api/tasks` and `POST /api/tasks/:id/message` both run `body.attachments` through
   `sanitizeAttachments()` (from `runner.ts`) before handing it to `manager.createTask()` /
   `manager.message()`; each route's title/text is now required *or* an attachment is
@@ -355,10 +416,13 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `FST_ERR_CTP_EMPTY_JSON_BODY` on bodyless POSTs). Includes `interrupt(id)` (bodyless POST).
   `createTask(...)` and `message(id, text, attachments?)` both take an optional trailing
   `attachments?: Attachment[]`, sent as-is in the JSON body for the server's
-  `sanitizeAttachments()` to re-validate.
+  `sanitizeAttachments()` to re-validate. `restartAgent(id)` → bodyless
+  `POST /api/tasks/:id/restart`, distinct from the self-update `POST /api/restart`.
 - **types.ts** — MANUAL mirror of `packages/server/src/types.ts`. `EventSub` includes
   `'tool' | 'subagent' | 'subagent_result'`; `EventPayload` includes `tool?`, `actor?`,
-  `subagentType?`, `summary?`.
+  `subagentType?`, `summary?`. `Task.stale?: boolean` — true when the task is in a live
+  phase but its worker session was lost (the app was restarted); set only at boot
+  reconciliation, cleared when a fresh agent is (re)spawned.
 - **status.ts** — `statusColor(status)` backed by `--status-*` tokens; `actorColor(actor)`
   backed by `--actor-*` tokens (`main`, `frontend-specialist`, `backend-specialist`, `qa`,
   `code-reviewer`, `doc-updater`, `general-purpose`, with `--actor-default` fallback).

@@ -21,6 +21,14 @@ const AUTONOMOUS: ReadonlySet<string> = new Set([
 /** Autonomous live phases where a hard Stop (interrupt) is offered. */
 const STOPPABLE: ReadonlySet<string> = new Set(['planning', 'executing', 'validating'])
 
+/** Live phases from which an orphaned (stale) task can be restarted. */
+const RESTARTABLE: ReadonlySet<string> = new Set([
+  'clarify',
+  'planning',
+  'executing',
+  'validating',
+])
+
 /** Terminal statuses (no live runner attached) where a hard delete is safe. */
 const DELETABLE: ReadonlySet<string> = new Set(['backlog', 'done', 'failed'])
 
@@ -32,6 +40,7 @@ interface Props {
   config?: ServerConfig | null
   onStart?: () => Promise<unknown>
   onResume?: () => Promise<unknown>
+  onRestart?: () => Promise<unknown>
   onInterrupt?: () => Promise<unknown>
   onDone?: () => Promise<unknown>
   onCancel?: () => Promise<unknown>
@@ -52,6 +61,7 @@ export function TaskList({
   config = null,
   onStart,
   onResume,
+  onRestart,
   onInterrupt,
   onDone,
   onCancel,
@@ -111,6 +121,16 @@ export function TaskList({
                         {t.status === 'failed' ? 'Restart' : 'Start'}
                       </button>
                     )}
+                    {t.stale && RESTARTABLE.has(t.status) && (
+                      <button
+                        type="button"
+                        className={ctrl.primary}
+                        disabled={busy}
+                        onClick={() => run(onRestart)}
+                      >
+                        Restart agent
+                      </button>
+                    )}
                     {t.status === 'blocked' && (
                       <button
                         type="button"
@@ -140,7 +160,7 @@ export function TaskList({
                         Mark done
                       </button>
                     )}
-                    {STOPPABLE.has(t.status) && (
+                    {STOPPABLE.has(t.status) && !t.stale && (
                       <button
                         type="button"
                         className={ctrl.danger}
@@ -174,7 +194,13 @@ export function TaskList({
 
                   {err && <div className={ctrl.error}>{err}</div>}
 
-                  {AUTONOMOUS.has(t.status) && (
+                  {t.stale && RESTARTABLE.has(t.status) && (
+                    <div className={ctrl.error}>
+                      Worker session ended after an app restart. Press “Restart agent” to
+                      spawn a fresh worker in the same worktree and continue.
+                    </div>
+                  )}
+                  {AUTONOMOUS.has(t.status) && !t.stale && (
                     <div className={ctrl.autobar}>
                       {t.queued
                         ? 'Queued — waiting for a free lane…'

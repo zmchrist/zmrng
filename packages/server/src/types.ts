@@ -143,6 +143,13 @@ export interface Task {
   usage: TaskUsage
   /** Set while a task that reached READY is waiting for a free build lane. */
   queued: boolean
+  /**
+   * True when the task is in a live phase but its worker session was lost (the
+   * app was restarted). Set only at boot reconciliation and cleared when a fresh
+   * agent is (re)spawned; normal live operation never sets it. Optional so older
+   * DB rows and test fixtures read `false`. Mirrored in web/src/types.ts.
+   */
+  stale?: boolean
   /** Categorises a block (e.g. 'toolchain' | 'auth' | 'subagent') — free string for forward-compat. */
   blockedKind: string | null
   /** Human-readable reason captured when a task enters `blocked`. */

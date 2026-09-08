@@ -494,6 +494,65 @@ describe('channels + messages (team workspace T2)', () => {
   })
 })
 
+describe('stale column (agent-task-persistence)', () => {
+  it('backfills the stale column on an old-schema table', () => {
+    const raw = new Database(dbPath)
+    raw.exec(`CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL,
+      session_id TEXT, branch TEXT, worktree TEXT, pr_url TEXT, model TEXT,
+      queued INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );`)
+    raw.close()
+    expect(columns(dbPath).has('stale')).toBe(false)
+
+    new Db(dbPath) // constructor runs ensureColumns()
+    expect(columns(dbPath).has('stale')).toBe(true)
+  })
+
+  it('defaults stale to false and round-trips updateTask({ stale: true })', () => {
+    const db = new Db(dbPath)
+    db.createTask({
+      id: 't1',
+      title: 'x',
+      body: 'y',
+      model: 'opus',
+      effort: 'high',
+      style: 'normal',
+      flow: 'plan',
+      repoId: 'zmrng',
+      now: '2026-09-07T00:00:00.000Z',
+    })
+    expect(db.getTask('t1')?.stale).toBe(false)
+
+    db.updateTask('t1', { stale: true }, '2026-09-07T00:00:01.000Z')
+    expect(db.getTask('t1')?.stale).toBe(true)
+
+    // ...and can be cleared back to false.
+    db.updateTask('t1', { stale: false }, '2026-09-07T00:00:02.000Z')
+    expect(db.getTask('t1')?.stale).toBe(false)
+  })
+
+  it('is preserved as false across a reopen for a legacy (pre-stale) row', () => {
+    // Old-schema table with a row, then reopen through Db (adds stale DEFAULT 0).
+    const raw = new Database(dbPath)
+    raw.exec(`CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL,
+      session_id TEXT, branch TEXT, worktree TEXT, pr_url TEXT, model TEXT,
+      queued INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );`)
+    raw
+      .prepare(
+        `INSERT INTO tasks (id, title, body, status, queued, created_at, updated_at)
+         VALUES ('legacy', 't', 'b', 'executing', 0, '2026-01-01', '2026-01-01')`,
+      )
+      .run()
+    raw.close()
+
+    const db = new Db(dbPath)
+    expect(db.getTask('legacy')?.stale).toBe(false)
+  })
+})
+
 describe('settings (durable per-user prefs)', () => {
   it('returns undefined for an unset key', () => {
     const db = new Db(dbPath)

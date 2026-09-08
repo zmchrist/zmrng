@@ -9,9 +9,10 @@ import {
   directKickoff,
   executeKickoff,
   planKickoff,
+  resumeKickoff,
   systemPrompt,
 } from '../src/phases.js'
-import type { Task } from '../src/types.js'
+import type { Task, TaskStatus } from '../src/types.js'
 
 // The kickoff/system prompts ARE the harness: the lifecycle (Plan → TDD →
 // Review → Validate → Sync Docs), branch-only enforcement, and the guaranteed
@@ -232,6 +233,57 @@ describe('directKickoff', () => {
 
   it('does not write or reference a plan file', () => {
     expect(prompt).not.toMatch(/\.agents\/plans\//)
+  })
+})
+
+describe('resumeKickoff', () => {
+  const branch = 'feat/zmrng/x-1'
+  const transcript = 'OPERATOR: do the thing\n\nWORKER: on it'
+  const withStatus = (status: TaskStatus): Task => ({ ...task, status })
+
+  it('all phases: carry the RESUME preamble ordering inspect-before-continue + title/body', () => {
+    for (const status of ['clarify', 'planning', 'executing', 'validating'] as TaskStatus[]) {
+      const prompt = resumeKickoff(withStatus(status), branch, 'main', transcript)
+      expect(prompt).toMatch(/RESUME/)
+      expect(prompt).toMatch(/inspect/i)
+      expect(prompt).toMatch(/do NOT redo/)
+      expect(prompt).toContain(task.title)
+      expect(prompt).toContain(task.body)
+    }
+  })
+
+  it('clarify: delegates verbatim to clarifyKickoff (CLARIFY PHASE)', () => {
+    const t = withStatus('clarify')
+    const prompt = resumeKickoff(t, branch, 'main', transcript)
+    expect(prompt).toMatch(/CLARIFY PHASE/)
+    expect(prompt).toContain(clarifyKickoff(t))
+  })
+
+  it('planning: delegates verbatim to planKickoff, with the transcript exactly once', () => {
+    const t = withStatus('planning')
+    const prompt = resumeKickoff(t, branch, 'main', transcript)
+    expect(prompt).toMatch(/PLAN PHASE/)
+    expect(prompt).toMatch(/GRILL THE APPROACH FIRST/)
+    expect(prompt).toContain(planKickoff(t, transcript))
+    // The preamble must NOT double-inject what planKickoff already carries.
+    const occurrences = prompt.split('OPERATOR: do the thing').length - 1
+    expect(occurrences).toBe(1)
+  })
+
+  it('executing: delegates verbatim to executeKickoff (EXECUTE PHASE + RED) with the transcript', () => {
+    const t = withStatus('executing')
+    const prompt = resumeKickoff(t, branch, 'main', transcript)
+    expect(prompt).toMatch(/EXECUTE PHASE/)
+    expect(prompt).toMatch(/RED —/)
+    expect(prompt).toContain('OPERATOR: do the thing')
+    expect(prompt).toContain(executeKickoff(branch, 'main', t.planPath))
+  })
+
+  it('validating: reuses the same execute resume body', () => {
+    const t = withStatus('validating')
+    const prompt = resumeKickoff(t, branch, 'main', transcript)
+    expect(prompt).toMatch(/EXECUTE PHASE/)
+    expect(prompt).toContain(executeKickoff(branch, 'main', t.planPath))
   })
 })
 

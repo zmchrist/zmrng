@@ -102,6 +102,14 @@ Each task records `model` (opus/sonnet), `effort` (low/medium/high/xhigh/max),
 the mapped intensity), and `repoId` (which target repo it drives). Token/cost usage
 accumulates across stream-json `result` events and shows once the task hits review/done.
 
+### Stale task recovery (Restart agent)
+A task's `claude` worker dies with the server process (e.g. a clean app quit); on
+reboot `reconcileOrphans()` marks any task still sitting in a live phase `stale`
+rather than pretending it's alive. The operator's only recovery is the manual
+**Restart agent** action (`POST /api/tasks/:id/restart`), which spawns a **fresh**
+agent in the same worktree (never `claude --resume`). Details:
+`.claude/docs/services-reference.md`.
+
 ### Done = local sync after the GitHub merge (never auto-push to main)
 The worker still finishes autonomous work by pushing its branch and opening a **PR** —
 zmrng never merges or pushes to `origin/main` itself. The operator reviews and merges the
