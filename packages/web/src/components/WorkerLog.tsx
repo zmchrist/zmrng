@@ -3,10 +3,14 @@ import styles from './WorkerLog.module.css'
 import type { TaskEvent } from '../types'
 import { actorColor } from '../status'
 import { useAutoScroll } from '../useAutoScroll'
+import { ThinkingDots } from './ThinkingDots'
 
 interface Props {
   events: TaskEvent[]
   live: string
+  /** Show the "agent is thinking" dots after an operator turn, before the
+   *  worker's first token lands. Suppressed automatically while `live` streams. */
+  thinking?: boolean
 }
 
 function renderEvent(ev: TaskEvent) {
@@ -97,13 +101,15 @@ function renderEvent(ev: TaskEvent) {
   )
 }
 
-export function WorkerLog({ events, live }: Props) {
+export function WorkerLog({ events, live, thinking }: Props) {
   const { ref, onScroll, scrollToBottom, notifyContentChanged, hasNew } =
     useAutoScroll<HTMLDivElement>()
 
+  const showThinking = !!thinking && !live
+
   useEffect(() => {
     notifyContentChanged()
-  }, [events, live, notifyContentChanged])
+  }, [events, live, showThinking, notifyContentChanged])
 
   return (
     <div className={styles.logWrap}>
@@ -117,6 +123,13 @@ export function WorkerLog({ events, live }: Props) {
             <div className={`${styles.bubble} ${styles.assistant} ${styles.streaming}`}>
               {live}
               <span className={styles.caret} />
+            </div>
+          </div>
+        )}
+        {showThinking && (
+          <div className={styles.row}>
+            <div className={`${styles.bubble} ${styles.assistant}`}>
+              <ThinkingDots />
             </div>
           </div>
         )}

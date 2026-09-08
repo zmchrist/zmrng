@@ -24,6 +24,7 @@ import { useAutoScroll } from '../useAutoScroll'
 import { api } from '../api'
 import { buildHandoffPrefill, type HandoffPrefill } from '../teamHandoff'
 import { workspaceSocketUrl, workspaceHttpOrigin } from '../teamConfig'
+import { ThinkingDots } from './ThinkingDots'
 import { formatMessageTime } from '../teamTime'
 
 interface Props {
@@ -97,6 +98,11 @@ export function TeamView({
   const [openId, setOpenId] = useState<number | null>(null)
   const [thread, setThread] = useState<Message[]>(emptyThread)
   const [composer, setComposer] = useState('')
+  // True after the operator posts a message that mentions the agent, until the
+  // agent's reply message lands — the team `@agent` reply is a whole message
+  // (no token streaming), so the dots fill the entire wait. Cleared on channel
+  // switch/leave so a stale wait never bleeds into another channel.
+  const [awaitingAgent, setAwaitingAgent] = useState(false)
   // `@`-mention autocomplete state for the channel composer. `mentionStart` is
   // the index of the active `@`; `mentionMatches` is the live-filtered candidate
   // list (empty ⇒ dropdown closed); `mentionIndex` is the highlighted row.
@@ -173,6 +179,8 @@ export function TeamView({
           // Only the currently-open channel's live messages hit the thread.
           if (msg.message.channelId === openIdRef.current) {
             setThread((prev) => appendMessage(prev, msg.message))
+            // The agent's reply landed — stop the thinking dots.
+            if (msg.message.kind === 'agent') setAwaitingAgent(false)
           }
         } else if (msg.type === 'channels') {
           setChannels(msg.channels)
@@ -250,6 +258,7 @@ export function TeamView({
     if (id === openId) return
     scrollToBottom()
     setThread(emptyThread())
+    setAwaitingAgent(false)
     setOpenId(id)
   }
 
@@ -265,6 +274,7 @@ export function TeamView({
     setDraft('')
     setOpenId(null)
     setThread(emptyThread())
+    setAwaitingAgent(false)
   }
 
   // ---- `@`-mention autocomplete (visual only; the agent trigger is server-side) ----
@@ -272,6 +282,9 @@ export function TeamView({
   // `mentionNames` drives the in-thread pill highlighter.
   const candidates = useMemo(() => mentionCandidates(roster, botHandle), [roster, botHandle])
   const mentionNames = useMemo(() => candidates.map((c) => c.name), [candidates])
+  // The agent's mention name (bot handle minus a leading `@`), used to tell
+  // whether an outgoing message will trigger an `@agent` reply worth waiting on.
+  const agentName = useMemo(() => botHandle.replace(/^@/, ''), [botHandle])
 
   /** Recompute the dropdown from the composer's current value + caret. */
   const refreshMention = (value: string, caret: number): void => {
@@ -351,6 +364,14 @@ export function TeamView({
     // so it appears in the thread through the live socket — no optimistic append.
     scrollToBottom()
     sendFrame(encodeMessage(openId, handle, body))
+    // If the message mentions the agent, expect a reply — show the dots until it
+    // lands. Word-boundary match mirrors the server's @agent reply trigger.
+    if (
+      agentName &&
+      parseMentions(body, [agentName]).some((seg) => seg.type === 'mention')
+    ) {
+      setAwaitingAgent(true)
+    }
     setComposer('')
     closeMention()
   }
@@ -579,6 +600,17 @@ export function TeamView({
                     </span>
                   </li>
                 ))}
+                {awaitingAgent && (
+                  <li className={`${styles.message} ${styles.messageAgent}`}>
+                    <span className={styles.messageAuthor}>
+                      {agentName || 'agent'}
+                      <span className={styles.agentTag}>agent</span>
+                    </span>
+                    <span className={styles.messageBody}>
+                      <ThinkingDots />
+                    </span>
+                  </li>
+                )}
               </ul>
               <form className={styles.composer} onSubmit={onSend}>
                 <div className={styles.composerWrap}>

@@ -42,9 +42,15 @@ export function WorkerLogPanel({ events, live, status, onMessage, stale }: Props
   const inLivePhase = status != null && LIVE_STATUSES.has(status)
   const canSteer = !!onMessage && inLivePhase && !stale
 
+  // Show the thinking dots in the gap after an operator turn (the steer/answer
+  // POST is in flight, or the operator message is the newest event) until the
+  // worker's first token lands. `WorkerLog` suppresses it while `live` streams.
+  const thinking =
+    inLivePhase && !stale && (busy || events.at(-1)?.kind === 'operator')
+
   return (
     <div className={styles.panel}>
-      <WorkerLog events={events} live={live} />
+      <WorkerLog events={events} live={live} thinking={thinking} />
       {stale && inLivePhase && (
         <div className={styles.staleNotice}>
           Worker session ended after an app restart — press “Restart agent” in the task
