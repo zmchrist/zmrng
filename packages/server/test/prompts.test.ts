@@ -192,39 +192,13 @@ describe('executeKickoff', () => {
     expect(prompt).toMatch(/guaranteed present/i)
   })
 
-  it('instructs a final-state screenshot when the change touches UI', () => {
-    expect(prompt).toMatch(/screenshot/i)
-    // The condition must key off the worker's own diff of user-facing UI, not a
-    // hardcoded frontend path.
-    expect(prompt).toMatch(/user-facing UI/i)
-  })
-
-  it('uses the Playwright MCP browser tools and gates the step on UI changes', () => {
-    expect(prompt).toMatch(/Playwright/)
-    // Gated, not unconditional: backend-only changes skip the whole step.
-    expect(prompt).toMatch(/[Bb]ackend-only/)
-  })
-
-  it('commits the screenshot under the .github/pr-screenshots folder', () => {
-    expect(prompt).toContain('.github/pr-screenshots/')
-  })
-
-  it('delivers the screenshot as a separate PR comment', () => {
-    expect(prompt).toMatch(/gh pr comment/)
-  })
-
-  it('degrades gracefully — skips, never blocks, when the browser tools are absent', () => {
-    // Skip when Playwright MCP is unavailable...
-    expect(prompt).toMatch(/not.*available/i)
-    // ...and explicitly does NOT turn a missing screenshot tool into a block.
-    expect(prompt).toMatch(/do NOT emit ZMRNG_BLOCKED/i)
-  })
-
-  it('posts the PR comment before the final PR-URL line, so the runner stays live', () => {
-    // detect() kills the child once the worker writes the PR URL in prose, so the
-    // comment must be posted before that final instruction.
-    expect(prompt.indexOf('gh pr comment')).toBeGreaterThan(-1)
-    expect(prompt.indexOf('gh pr comment')).toBeLessThan(prompt.indexOf('output the PR URL'))
+  it('does not instruct any end-of-workflow screenshot capture or upload', () => {
+    // The screenshot step was removed entirely — never re-add it silently.
+    expect(prompt).not.toMatch(/screenshot/i)
+    expect(prompt).not.toContain('.github/pr-screenshots/')
+    expect(prompt).not.toMatch(/gh pr comment/)
+    expect(prompt).not.toMatch(/gh release/)
+    expect(prompt).not.toMatch(/Playwright/)
   })
 })
 
