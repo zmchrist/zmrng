@@ -147,17 +147,32 @@ describe('condenseTranscript (D1 byte cap)', () => {
     expect(out).toContain('c'.repeat(90))
   })
 
-  it('NEVER drops the scope summary; the whole (over-budget) turn history falls away first', () => {
-    // Each turn far exceeds the budget, so none survive the tail-truncation;
-    // the scope summary is exempt and retained verbatim even though it too is
-    // larger than the budget.
+  it('NEVER drops the scope summary; older over-budget turns fall away, newest survives truncated', () => {
+    // Every turn far exceeds the budget. Older turns are dropped entirely; the
+    // NEWEST turn is byte-truncated to fit (never dropped wholesale); the scope
+    // summary is exempt and retained verbatim even though it too is over budget.
     const turns = [`OPERATOR: ${'x'.repeat(300)}`, `WORKER: ${'y'.repeat(300)}`]
     const bigSummary = 'SCOPE: ' + 'z'.repeat(500)
     const out = condenseTranscript(turns, bigSummary, 100)
+    // Summary always present and verbatim.
     expect(out).toContain(bigSummary)
-    // Only the (budget-exempt) summary remains — the over-budget turns are gone.
-    expect(out).toBe(bigSummary)
+    // Oldest turn gone entirely.
     expect(out).not.toContain('x'.repeat(300))
+    // Newest turn survives, truncated with a marker (not dropped, not full).
+    expect(out).toContain('WORKER: ')
+    expect(out).toContain('…[truncated]')
+    expect(out).not.toContain('y'.repeat(300))
+  })
+
+  it('when a single turn busts the budget and there is NO summary, keeps that turn truncated (never empty)', () => {
+    const turns = [`WORKER: ${'q'.repeat(500)}`]
+    const out = condenseTranscript(turns, null, 100)
+    // The turn survives truncated — not an empty string.
+    expect(out.length).toBeGreaterThan(0)
+    expect(out).toContain('WORKER: ')
+    expect(out).toContain('…[truncated]')
+    expect(Buffer.byteLength(out, 'utf8')).toBeLessThanOrEqual(100)
+    expect(out).not.toContain('q'.repeat(500))
   })
 
   it('exposes a sane default budget (~8 KB) so normal transcripts are unbounded in practice', () => {

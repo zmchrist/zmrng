@@ -97,12 +97,31 @@ export function splitScopeSummary(
   }
 }
 
+/** Marker appended when a single turn is byte-truncated to fit the budget. */
+const TRUNCATION_MARKER = '…[truncated]'
+
+/**
+ * Head-truncate `s` to at most `maxBytes` UTF-8 bytes (marker included),
+ * backing off to a valid UTF-8 boundary so a multibyte char is never split.
+ */
+function truncateToBytes(s: string, maxBytes: number): string {
+  if (Buffer.byteLength(s, 'utf8') <= maxBytes) return s
+  const budget = Math.max(0, maxBytes - Buffer.byteLength(TRUNCATION_MARKER, 'utf8'))
+  // `toString('utf8')` on a buffer cut mid-codepoint yields a trailing U+FFFD;
+  // strip it so we end on a clean boundary rather than a replacement char.
+  const head = Buffer.from(s, 'utf8').subarray(0, budget).toString('utf8').replace(/�$/, '')
+  return head + TRUNCATION_MARKER
+}
+
 /**
  * Condense a clarify transcript to `maxBytes` for kickoff injection.
  * - The confirmed-scope `summary` (emitted after ZMRNG_READY) is ALWAYS retained
  *   verbatim and is EXEMPT from the budget — it must never be dropped.
  * - The remaining `turns` are tail-truncated to `maxBytes`, keeping the
  *   MOST-RECENT turns (oldest drop first).
+ * - If even the SINGLE most-recent turn exceeds `maxBytes`, it is byte-truncated
+ *   to fit rather than dropped wholesale — the newest (most relevant) context is
+ *   never lost entirely.
  * - Under budget, all turns pass through unchanged.
  * Exported as a pure function so D1's byte-cap behavior is unit-testable without
  * a live TaskManager. `clarifyTranscript` is a thin wrapper over it.
@@ -123,6 +142,11 @@ export function condenseTranscript(
     if (used + cost > maxBytes) break
     used += cost
     kept.unshift(turn)
+  }
+  // Nothing fit because the newest turn alone busts the budget: keep it,
+  // truncated, so the most-recent turn survives instead of vanishing.
+  if (kept.length === 0 && turns.length > 0) {
+    kept.push(truncateToBytes(turns[turns.length - 1], maxBytes))
   }
   const summary = scopeSummary?.trim()
   const parts = summary ? [...kept, summary] : kept
