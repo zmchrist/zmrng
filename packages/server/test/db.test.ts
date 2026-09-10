@@ -130,6 +130,140 @@ describe('ensureColumns migration', () => {
     raw.close()
     expect(tables.has('task_comments')).toBe(true)
   })
+
+  it('backfills the security_status column on an old-schema table', () => {
+    const raw = new Database(dbPath)
+    raw.exec(`CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL,
+      session_id TEXT, branch TEXT, worktree TEXT, pr_url TEXT, model TEXT,
+      queued INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );`)
+    raw.close()
+    expect(columns(dbPath).has('security_status')).toBe(false)
+
+    new Db(dbPath)
+    expect(columns(dbPath).has('security_status')).toBe(true)
+  })
+
+  it('creates the security_scans table', () => {
+    new Db(dbPath)
+    const raw = new Database(dbPath)
+    const tables = new Set(
+      (
+        raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+          name: string
+        }[]
+      ).map((t) => t.name),
+    )
+    raw.close()
+    expect(tables.has('security_scans')).toBe(true)
+  })
+})
+
+describe('security_scans', () => {
+  const mk = (): Db => {
+    const db = new Db(dbPath)
+    db.createTask({
+      id: 't1',
+      title: 'x',
+      body: 'y',
+      model: 'opus',
+      effort: 'high',
+      style: 'normal',
+      flow: 'plan',
+      repoId: 'zmrng',
+      now: '2026-09-10T00:00:00.000Z',
+    })
+    return db
+  }
+
+  it('insertSecurityScan + listSecurityScansForTask round-trip (findings + tool versions)', () => {
+    const db = mk()
+    const findings = [
+      {
+        tool: 'semgrep' as const,
+        ruleId: 'r1',
+        severity: 'ERROR' as const,
+        title: 'shell injection',
+        path: 'src/app.py',
+        line: 42,
+        confidence: 'HIGH' as const,
+      },
+    ]
+    const s1 = db.insertSecurityScan({
+      taskId: 't1',
+      round: 1,
+      verdict: 'fail',
+      findings,
+      toolVersions: { semgrep: '1.80.0', 'osv-scanner': '1.9.0' },
+      now: '2026-09-10T00:00:01.000Z',
+    })
+    const s2 = db.insertSecurityScan({
+      taskId: 't1',
+      round: 2,
+      verdict: 'pass',
+      findings: [],
+      toolVersions: { semgrep: '1.80.0', 'osv-scanner': '1.9.0' },
+      now: '2026-09-10T00:00:02.000Z',
+    })
+    expect(s1.id).not.toBe(s2.id)
+
+    const listed = db.listSecurityScansForTask('t1')
+    expect(listed).toHaveLength(2)
+    expect(listed[0]).toEqual(s1)
+    expect(listed[1]).toEqual(s2)
+    expect(listed[0].verdict).toBe('fail')
+    expect(listed[0].findings).toEqual(findings)
+    expect(listed[0].toolVersions).toEqual({ semgrep: '1.80.0', 'osv-scanner': '1.9.0' })
+    expect(listed[1].findings).toEqual([])
+  })
+
+  it('persists across reopen (survives reload)', () => {
+    const db1 = mk()
+    db1.insertSecurityScan({
+      taskId: 't1',
+      round: 1,
+      verdict: 'pass',
+      findings: [],
+      toolVersions: { semgrep: '1.80.0' },
+      now: '2026-09-10T00:00:01.000Z',
+    })
+    const db2 = new Db(dbPath)
+    const listed = db2.listSecurityScansForTask('t1')
+    expect(listed).toHaveLength(1)
+    expect(listed[0].verdict).toBe('pass')
+  })
+
+  it('returns an empty list for an unknown task', () => {
+    const db = new Db(dbPath)
+    expect(db.listSecurityScansForTask('nope')).toEqual([])
+  })
+})
+
+describe('securityStatus column', () => {
+  it('updateTask can set and read back securityStatus through rowToTask', () => {
+    const db = new Db(dbPath)
+    db.createTask({
+      id: 't1',
+      title: 'x',
+      body: 'y',
+      model: 'opus',
+      effort: 'high',
+      style: 'normal',
+      flow: 'plan',
+      repoId: 'zmrng',
+      now: '2026-09-10T00:00:00.000Z',
+    })
+    // A freshly-created task has no security verdict yet.
+    expect(db.getTask('t1')?.securityStatus).toBeUndefined()
+
+    const updated = db.updateTask('t1', { securityStatus: 'pass' }, '2026-09-10T00:00:01.000Z')
+    expect(updated?.securityStatus).toBe('pass')
+    expect(db.getTask('t1')?.securityStatus).toBe('pass')
+
+    db.updateTask('t1', { securityStatus: 'fail' }, '2026-09-10T00:00:02.000Z')
+    expect(db.getTask('t1')?.securityStatus).toBe('fail')
+  })
 })
 
 describe('task_comments', () => {
