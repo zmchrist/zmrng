@@ -2,7 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import type { AgentTarget, RepoTarget } from './types.js'
+import type { AgentTarget, RepoTarget, SecurityPolicy, SecuritySeverity } from './types.js'
 
 /** Expand a leading ~ to the user's home directory. */
 function expandHome(p: string): string {
@@ -109,6 +109,11 @@ export interface Config {
    * workers against the metered API instead.
    */
   authMode: AuthMode
+  /**
+   * Global-default security-gate policy (env-tunable via `resolveSecurityPolicy`).
+   * A per-repo `RepoTarget.security` override is merged over this per task.
+   */
+  security: SecurityPolicy
   /** Root dir for the workspace terminal's PTY (== PROJECTS_DIR). */
   projectsDir: string
   /** Login shell for the workspace terminal (SHELL env, else a sane default). */
@@ -176,6 +181,88 @@ export type AuthMode = 'oauth' | 'apikey'
  */
 export function resolveAuthMode(env: { ZMRNG_AUTH_MODE?: string }): AuthMode {
   return env.ZMRNG_AUTH_MODE?.trim().toLowerCase() === 'apikey' ? 'apikey' : 'oauth'
+}
+
+/**
+ * The locked default Semgrep `--config` for the security gate (D1/D4): a
+ * vendored high-signal rules directory plus the secrets pack. Deliberately does
+ * NOT include `p/owasp-top-ten` (dropped as false-positive-heavy per D1). The
+ * actual vendored directory is provisioned in Slice 2; this is the default
+ * string the policy carries.
+ */
+const DEFAULT_SEMGREP_CONFIG = 'security/semgrep-rules,p/secrets'
+
+/** Env inputs for the security policy, isolated so `resolveSecurityPolicy` is testable. */
+export interface SecurityEnv {
+  ZMRNG_SECURITY_ENABLED?: string
+  ZMRNG_SECURITY_MAX_ROUNDS?: string
+  ZMRNG_SECURITY_SEMGREP_CONFIG?: string
+  ZMRNG_SECURITY_MIN_SEVERITY?: string
+}
+
+/** Coerce a severity string onto the SecuritySeverity scale, or `undefined` if unknown. */
+function parseSeverity(v: string | undefined): SecuritySeverity | undefined {
+  switch (v?.trim().toUpperCase()) {
+    case 'ERROR':
+      return 'ERROR'
+    case 'WARNING':
+      return 'WARNING'
+    case 'INFO':
+      return 'INFO'
+    default:
+      return undefined
+  }
+}
+
+/**
+ * Resolve the global-default `SecurityPolicy` from env — pure and unit-testable,
+ * mirroring `resolveAuthMode`. Locked defaults (D1/D7): enabled=true, maxRounds=2,
+ * minSeverity=ERROR, semgrepConfig=DEFAULT_SEMGREP_CONFIG (no owasp-top-ten).
+ * The gate is disabled ONLY on an explicit falsey `ZMRNG_SECURITY_ENABLED`
+ * (`false`/`0`/`no`, case-insensitive); any other value (incl. unset) keeps it on.
+ */
+export function resolveSecurityPolicy(env: SecurityEnv): SecurityPolicy {
+  const enabledRaw = env.ZMRNG_SECURITY_ENABLED?.trim().toLowerCase()
+  const enabled = !(enabledRaw === 'false' || enabledRaw === '0' || enabledRaw === 'no')
+  const rounds = Number(env.ZMRNG_SECURITY_MAX_ROUNDS)
+  const maxRounds = Number.isInteger(rounds) && rounds > 0 ? rounds : 2
+  const semgrepConfig = env.ZMRNG_SECURITY_SEMGREP_CONFIG?.trim() || DEFAULT_SEMGREP_CONFIG
+  const minSeverity = parseSeverity(env.ZMRNG_SECURITY_MIN_SEVERITY) ?? 'ERROR'
+  return { enabled, maxRounds, semgrepConfig, minSeverity }
+}
+
+/**
+ * Merge an optional per-repo `security` partial OVER a global-default policy,
+ * field-by-field (a repo that omits a field inherits the default). Pure — the
+ * orchestrator (Slice 2) calls this to resolve the effective policy per task.
+ */
+export function mergeSecurityPolicy(
+  global: SecurityPolicy,
+  override: Partial<SecurityPolicy> | undefined,
+): SecurityPolicy {
+  return { ...global, ...(override ?? {}) }
+}
+
+/**
+ * Validate a raw per-repo `security` value into a `Partial<SecurityPolicy>`,
+ * or `undefined` when absent/ill-typed. Only plain objects are accepted; each
+ * known field is copied only when its type matches, so one bad key never sinks
+ * the whole override (mirrors `normalizeAgent`'s defensive field handling).
+ */
+function normalizeSecurity(raw: unknown): Partial<SecurityPolicy> | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
+  const r = raw as Record<string, unknown>
+  const out: Partial<SecurityPolicy> = {}
+  if (typeof r.enabled === 'boolean') out.enabled = r.enabled
+  if (typeof r.maxRounds === 'number' && Number.isInteger(r.maxRounds) && r.maxRounds > 0) {
+    out.maxRounds = r.maxRounds
+  }
+  if (typeof r.semgrepConfig === 'string' && r.semgrepConfig.trim()) {
+    out.semgrepConfig = r.semgrepConfig.trim()
+  }
+  const sev = parseSeverity(typeof r.minSeverity === 'string' ? r.minSeverity : undefined)
+  if (sev) out.minSeverity = sev
+  return Object.keys(out).length ? out : undefined
 }
 
 /**
@@ -293,12 +380,15 @@ function normalizeEntry(e: Partial<RepoTarget>): RepoTarget | undefined {
   const id = e.id?.trim()
   const rawPath = e.path?.trim()
   if (!id || !rawPath) return undefined
-  return {
+  const entry: RepoTarget = {
     id,
     label: e.label?.trim() || id,
     path: path.resolve(expandHome(rawPath)),
     defaultBranch: e.defaultBranch?.trim() || 'main',
   }
+  const security = normalizeSecurity(e.security)
+  if (security) entry.security = security
+  return entry
 }
 
 /**
@@ -580,6 +670,7 @@ function buildConfig(): Config {
     dbPath: path.join(DATA_DIR, 'zmrng.db'),
     webDist: process.env.ZMRNG_WEB_DIST ?? path.join(REPO_ROOT, 'packages', 'web', 'dist'),
     authMode: resolveAuthMode(process.env),
+    security: resolveSecurityPolicy(process.env),
     projectsDir: PROJECTS_DIR,
     shell: process.env.SHELL?.trim() || '/bin/sh',
     terminalGraceMs: Number(process.env.ZMRNG_TERMINAL_GRACE_MS ?? 600000),

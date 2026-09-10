@@ -17,6 +17,10 @@ import type {
   Message,
   MessageKind,
   ReactionSummary,
+  SecurityScan,
+  SecurityFinding,
+  SecurityStatus,
+  SecurityVerdict,
 } from './types.js'
 import { GENERAL_CHANNEL_NAME } from './types.js'
 
@@ -107,6 +111,16 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS security_scans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,
+  round INTEGER NOT NULL,
+  verdict TEXT NOT NULL,
+  findings_json TEXT NOT NULL,
+  tool_versions_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_security_scans_task ON security_scans(task_id, id);
 `
 
 interface TaskRow {
@@ -131,10 +145,21 @@ interface TaskRow {
   turns: number
   queued: number
   stale: number
+  security_status: string | null
   blocked_kind: string | null
   blocked_reason: string | null
   created_at: string
   updated_at: string
+}
+
+interface SecurityScanRow {
+  id: number
+  task_id: string
+  round: number
+  verdict: string
+  findings_json: string
+  tool_versions_json: string
+  created_at: string
 }
 
 interface EventRow {
@@ -217,10 +242,24 @@ function rowToTask(r: TaskRow): Task {
     },
     queued: r.queued === 1,
     stale: r.stale === 1,
+    // Optional so legacy rows (pre-column) read `undefined`, mirroring `stale`.
+    securityStatus: (r.security_status as SecurityStatus | null) ?? undefined,
     blockedKind: r.blocked_kind,
     blockedReason: r.blocked_reason,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+  }
+}
+
+function rowToSecurityScan(r: SecurityScanRow): SecurityScan {
+  return {
+    id: r.id,
+    taskId: r.task_id,
+    round: r.round,
+    verdict: r.verdict as SecurityVerdict,
+    findings: JSON.parse(r.findings_json) as SecurityFinding[],
+    toolVersions: JSON.parse(r.tool_versions_json) as Record<string, string>,
+    createdAt: r.created_at,
   }
 }
 
@@ -317,6 +356,7 @@ export type TaskPatch = Partial<
     | 'style'
     | 'queued'
     | 'stale'
+    | 'securityStatus'
     | 'blockedKind'
     | 'blockedReason'
   >
@@ -334,6 +374,7 @@ const COLUMN_BY_FIELD: Record<keyof TaskPatch, string> = {
   style: 'style',
   queued: 'queued',
   stale: 'stale',
+  securityStatus: 'security_status',
   blockedKind: 'blocked_kind',
   blockedReason: 'blocked_reason',
 }
@@ -414,6 +455,7 @@ export class Db {
       ['cost_usd', 'REAL NOT NULL DEFAULT 0'],
       ['turns', 'INTEGER NOT NULL DEFAULT 0'],
       ['stale', 'INTEGER NOT NULL DEFAULT 0'],
+      ['security_status', 'TEXT'],
       ['blocked_kind', 'TEXT'],
       ['blocked_reason', 'TEXT'],
     ]
@@ -535,6 +577,46 @@ export class Db {
       .prepare('SELECT * FROM task_comments WHERE task_id = ? ORDER BY id ASC')
       .all(taskId) as TaskCommentRow[]
     return rows.map(rowToComment)
+  }
+
+  /**
+   * Persist one security-scan round for a task. `findings` and `toolVersions`
+   * are JSON-serialized into TEXT columns (mirrors the `task_comments` insert
+   * pattern). Additive — never rewrites a prior round.
+   */
+  insertSecurityScan(input: {
+    taskId: string
+    round: number
+    verdict: SecurityVerdict
+    findings: SecurityFinding[]
+    toolVersions: Record<string, string>
+    now: string
+  }): SecurityScan {
+    const findingsJson = JSON.stringify(input.findings)
+    const toolVersionsJson = JSON.stringify(input.toolVersions)
+    const info = this.db
+      .prepare(
+        `INSERT INTO security_scans (task_id, round, verdict, findings_json, tool_versions_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(input.taskId, input.round, input.verdict, findingsJson, toolVersionsJson, input.now)
+    return {
+      id: Number(info.lastInsertRowid),
+      taskId: input.taskId,
+      round: input.round,
+      verdict: input.verdict,
+      findings: input.findings,
+      toolVersions: input.toolVersions,
+      createdAt: input.now,
+    }
+  }
+
+  /** Every persisted security-scan round for a task, oldest-first (round order). */
+  listSecurityScansForTask(taskId: string): SecurityScan[] {
+    const rows = this.db
+      .prepare('SELECT * FROM security_scans WHERE task_id = ? ORDER BY id ASC')
+      .all(taskId) as SecurityScanRow[]
+    return rows.map(rowToSecurityScan)
   }
 
   addChatMessage(
