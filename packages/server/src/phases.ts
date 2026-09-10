@@ -13,7 +13,6 @@ import { pruneTask as pruneUiStateTask } from './uiState.js'
 import {
   DEFAULT_EFFORT,
   DEFAULT_FLOW,
-  DEFAULT_MODEL,
   DEFAULT_STYLE,
   type Task,
   type TaskStatus,
@@ -70,6 +69,66 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
+// ---- clarify transcript condensing ----
+
+/**
+ * Byte budget for the clarify transcript injected into the plan, execute, and
+ * resume kickoffs. ~8 KB ≈ 2k tokens — enough to carry the agreed scope without
+ * paying to re-inject an unbounded Q&A every time a clarify chat runs long. The
+ * confirmed-scope summary is exempt and always retained in full.
+ */
+export const CLARIFY_TRANSCRIPT_MAX_BYTES = 8 * 1024
+
+/**
+ * Split a worker assistant turn on its `ZMRNG_READY` line (own line, per
+ * READY_RE). Returns the text before the token as `preamble` and the
+ * one-paragraph scope summary after it as `summary`, or `undefined` when the
+ * turn carries no READY token. Both parts are trimmed.
+ */
+export function splitScopeSummary(
+  text: string,
+): { preamble: string; summary: string } | undefined {
+  const lines = text.split('\n')
+  const idx = lines.findIndex((l) => /^\s*ZMRNG_READY\s*$/.test(l))
+  if (idx === -1) return undefined
+  return {
+    preamble: lines.slice(0, idx).join('\n').trim(),
+    summary: lines.slice(idx + 1).join('\n').trim(),
+  }
+}
+
+/**
+ * Condense a clarify transcript to `maxBytes` for kickoff injection.
+ * - The confirmed-scope `summary` (emitted after ZMRNG_READY) is ALWAYS retained
+ *   verbatim and is EXEMPT from the budget — it must never be dropped.
+ * - The remaining `turns` are tail-truncated to `maxBytes`, keeping the
+ *   MOST-RECENT turns (oldest drop first).
+ * - Under budget, all turns pass through unchanged.
+ * Exported as a pure function so D1's byte-cap behavior is unit-testable without
+ * a live TaskManager. `clarifyTranscript` is a thin wrapper over it.
+ */
+export function condenseTranscript(
+  turns: string[],
+  scopeSummary: string | null,
+  maxBytes: number = CLARIFY_TRANSCRIPT_MAX_BYTES,
+): string {
+  const sep = '\n\n'
+  const size = (s: string): number => Buffer.byteLength(s, 'utf8')
+  // Walk newest → oldest, keeping turns while they fit; oldest fall off first.
+  const kept: string[] = []
+  let used = 0
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i]
+    const cost = size(turn) + (kept.length > 0 ? sep.length : 0)
+    if (used + cost > maxBytes) break
+    used += cost
+    kept.unshift(turn)
+  }
+  const summary = scopeSummary?.trim()
+  const parts = summary ? [...kept, summary] : kept
+  return parts.join(sep)
+}
+
 // ---- phase prompts ----
 
 /** Map a CaveStyle to the `caveman` skill's intensity argument (`/caveman <arg>`). */
@@ -80,7 +139,7 @@ const CAVEMAN_SKILL_ARG: Record<Exclude<CaveStyle, 'normal'>, string> = {
   'wenyan-full': 'wenyan-full',
 }
 
-/** Per-level caveman register rules — used as a fallback if the skill is unavailable. */
+/** Per-level caveman register rules, inlined directly into the system prompt. */
 const CAVEMAN_RULES: Record<Exclude<CaveStyle, 'normal'>, string> = {
   'caveman-lite':
     'Drop filler and hedging. Keep articles and full sentences. Tight and professional.',
@@ -94,20 +153,17 @@ const CAVEMAN_RULES: Record<Exclude<CaveStyle, 'normal'>, string> = {
 
 /**
  * Communication-style block appended to the system prompt for non-`normal` styles.
- * Directs the worker to actually invoke the `caveman` skill (equivalent to the
- * operator running `/caveman <level>`); the register rules remain only as a
- * fallback for environments where that skill is not installed.
+ * The mapped `CAVEMAN_RULES` register is inlined DIRECTLY into the prompt so the
+ * worker adopts it with ZERO tool round-trips — no per-session `caveman` skill
+ * invoke (which cost a tool call on every worker before it could say a word).
  */
 export function styleDirective(style: CaveStyle): string {
   if (style === 'normal') return ''
-  const arg = CAVEMAN_SKILL_ARG[style]
   return [
     '',
     'COMMUNICATION STYLE:',
-    `Your VERY FIRST action this session — before clarifying questions or any other output — MUST be to invoke the \`caveman\` skill at "${arg}" intensity (the Skill tool with skill "caveman" and args "${arg}", equivalent to the operator running \`/caveman ${arg}\`).`,
-    'Apply that caveman register to ALL narration, status updates, clarify questions, and streamed log for the rest of the session.',
+    `Apply this register to ALL narration, status updates, clarify questions, and streamed log for the rest of the session: ${CAVEMAN_RULES[style]}`,
     'EXCEPTION: write code, commit messages, PR titles/bodies, and plan files in normal, clear, professional English (never caveman).',
-    `Fallback if the caveman skill is unavailable: ${CAVEMAN_RULES[style]}`,
   ].join('\n')
 }
 
@@ -634,14 +690,16 @@ export class TaskManager {
   }
 
   /**
-   * Start a fresh execute child for the `direct` flow — no plan phase. Uses the
-   * task's own model/effort (defaults sonnet/medium for menial work) and seeds
-   * the lean `directKickoff` with the clarify transcript as the brief.
+   * Start a fresh execute child for the `direct` flow — no plan phase. Resolves
+   * the task's explicit model/effort when the operator picked one, otherwise
+   * defaults to the cheap sonnet/medium tier for this menial-work flow (the
+   * persisted values are NULL unless the operator explicitly chose). Seeds the
+   * lean `directKickoff` with the clarify transcript as the brief.
    */
   private beginDirect(task: Task): void {
     this.patch(task.id, { queued: false })
-    const model = task.model ?? DEFAULT_MODEL
-    const effort = task.effort ?? DEFAULT_EFFORT
+    const model = task.model ?? 'sonnet'
+    const effort = task.effort ?? 'medium'
     if (!this.spawnPhase(task, model, effort)) return
     this.emitEvent(task.id, 'status', {
       sub: 'status',
@@ -680,8 +738,8 @@ export class TaskManager {
   private beginResume(task: Task): void {
     this.resuming.delete(task.id)
     this.patch(task.id, { queued: false, stale: false })
-    const model = task.status === 'planning' ? 'opus' : (task.model ?? DEFAULT_MODEL)
-    const effort = task.status === 'planning' ? 'high' : (task.effort ?? DEFAULT_EFFORT)
+    const model = task.status === 'planning' ? 'opus' : (task.model ?? 'sonnet')
+    const effort = task.status === 'planning' ? 'high' : (task.effort ?? 'medium')
     if (!this.spawnPhase(task, model, effort)) return
     this.emitEvent(task.id, 'status', {
       sub: 'status',
@@ -774,17 +832,35 @@ export class TaskManager {
     }
   }
 
-  /** Condense the clarify conversation (operator + worker turns) for the plan child. */
+  /**
+   * Condense the clarify conversation (operator + worker turns) for the plan/
+   * execute/resume child. Thin wrapper over the pure `condenseTranscript`: it
+   * pulls the confirmed-scope summary out of the worker's ZMRNG_READY turn (so
+   * it is retained verbatim, exempt from the byte budget) and tail-truncates the
+   * remaining turn history to `CLARIFY_TRANSCRIPT_MAX_BYTES`, oldest first.
+   */
   private clarifyTranscript(taskId: string): string {
-    const lines: string[] = []
+    const turns: string[] = []
+    let scopeSummary: string | null = null
     for (const ev of this.db.getEvents(taskId)) {
       const { kind, payload } = ev
       const text = payload.text?.trim()
       if (!text) continue
-      if (kind === 'operator') lines.push(`OPERATOR: ${text}`)
-      else if (kind === 'claude' && payload.sub === 'assistant') lines.push(`WORKER: ${text}`)
+      if (kind === 'operator') {
+        turns.push(`OPERATOR: ${text}`)
+      } else if (kind === 'claude' && payload.sub === 'assistant') {
+        const split = splitScopeSummary(text)
+        if (split) {
+          // Retain the post-ZMRNG_READY scope summary verbatim (budget-exempt);
+          // any preamble before the token stays as a normal, truncatable turn.
+          if (split.summary) scopeSummary = split.summary
+          if (split.preamble) turns.push(`WORKER: ${split.preamble}`)
+        } else {
+          turns.push(`WORKER: ${text}`)
+        }
+      }
     }
-    return lines.join('\n\n')
+    return condenseTranscript(turns, scopeSummary)
   }
 
   // ---- public actions (REST surface) ----
@@ -883,8 +959,12 @@ export class TaskManager {
       id,
       title,
       body,
-      model: model ?? DEFAULT_MODEL,
-      effort: effort ?? DEFAULT_EFFORT,
+      // Persist NULL when the operator did NOT explicitly pick a model/effort, so
+      // each flow resolves its own cheap default at spawn time (direct → sonnet/
+      // medium; clarify → sonnet; plan → opus/high). An explicit pick is stored
+      // verbatim and wins everywhere. Columns are nullable (see db.ts).
+      model: model ?? null,
+      effort: effort ?? null,
       style: style ?? DEFAULT_STYLE,
       flow: flow ?? DEFAULT_FLOW,
       repoId: resolvedRepoId,
@@ -949,7 +1029,10 @@ export class TaskManager {
       prUrl: null,
     })
     this.transition(taskId, 'clarify')
-    const model = updated?.model ?? config.defaultModel
+    // Clarify is a cheap Q&A phase: force sonnet regardless of the task's
+    // persisted model (plan still earns opus; execute takes the agent's pick).
+    // settingsNote below logs this ACTUAL model, so the operator log is truthful.
+    const model = 'sonnet'
     const effort = updated?.effort ?? DEFAULT_EFFORT
     const style = updated?.style ?? DEFAULT_STYLE
     this.spawn(
