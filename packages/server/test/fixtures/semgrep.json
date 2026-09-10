@@ -1,0 +1,40 @@
+{
+  "version": "1.80.0",
+  "results": [
+    {
+      "check_id": "python.lang.security.audit.subprocess-shell-true",
+      "path": "src/app.py",
+      "start": { "line": 42, "col": 1 },
+      "end": { "line": 42, "col": 40 },
+      "extra": {
+        "severity": "ERROR",
+        "message": "Detected subprocess call with shell=True (command injection risk)",
+        "metadata": { "confidence": "HIGH", "category": "security" }
+      }
+    },
+    {
+      "check_id": "generic.secrets.security.detected-generic-api-key",
+      "path": "config/settings.py",
+      "start": { "line": 7, "col": 5 },
+      "end": { "line": 7, "col": 60 },
+      "extra": {
+        "severity": "ERROR",
+        "message": "Hardcoded generic API key detected",
+        "metadata": { "confidence": "LOW", "category": "security" }
+      }
+    },
+    {
+      "check_id": "javascript.lang.best-practice.eqeqeq-eq",
+      "path": "web/index.js",
+      "start": { "line": 100, "col": 3 },
+      "end": { "line": 100, "col": 20 },
+      "extra": {
+        "severity": "WARNING",
+        "message": "Use === instead of ==",
+        "metadata": { "confidence": "HIGH", "category": "best-practice" }
+      }
+    }
+  ],
+  "errors": [],
+  "paths": { "scanned": ["src/app.py", "config/settings.py", "web/index.js"] }
+}

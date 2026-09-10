@@ -3,6 +3,12 @@
     "id": "example-app",
     "label": "Example App",
     "path": "~/Projects/example-app",
-    "defaultBranch": "main"
+    "defaultBranch": "main",
+    "security": {
+      "enabled": true,
+      "maxRounds": 2,
+      "semgrepConfig": "security/semgrep-rules,p/secrets",
+      "minSeverity": "ERROR"
+    }
   }
 ]

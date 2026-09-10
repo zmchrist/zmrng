@@ -1,0 +1,67 @@
+{
+  "results": [
+    {
+      "source": { "path": "package-lock.json", "type": "lockfile" },
+      "packages": [
+        {
+          "package": { "name": "lodash", "version": "4.17.4", "ecosystem": "npm" },
+          "vulnerabilities": [
+            {
+              "id": "GHSA-jf85-cpcp-j695",
+              "summary": "Prototype Pollution in lodash",
+              "aliases": ["CVE-2019-10744"],
+              "affected": [
+                {
+                  "package": { "name": "lodash", "ecosystem": "npm" },
+                  "ranges": [
+                    {
+                      "type": "SEMVER",
+                      "events": [{ "introduced": "0" }, { "fixed": "4.17.12" }]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "package": { "name": "minimist", "version": "0.0.8", "ecosystem": "npm" },
+          "vulnerabilities": [
+            {
+              "id": "GHSA-vh95-rmgr-6w4m",
+              "summary": "Prototype Pollution in minimist (transitive dependency)",
+              "aliases": ["CVE-2020-7598"],
+              "affected": [
+                {
+                  "ranges": [
+                    {
+                      "type": "SEMVER",
+                      "events": [{ "introduced": "0" }, { "fixed": "0.2.1" }]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "package": { "name": "abandoned-lib", "version": "1.0.0", "ecosystem": "npm" },
+          "vulnerabilities": [
+            {
+              "id": "GHSA-0000-nofix-0000",
+              "summary": "Vulnerability with no fixed version available",
+              "aliases": [],
+              "affected": [
+                {
+                  "ranges": [
+                    { "type": "SEMVER", "events": [{ "introduced": "0" }] }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

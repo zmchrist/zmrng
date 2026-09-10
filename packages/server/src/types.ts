@@ -93,6 +93,83 @@ export interface RepoTarget {
   label: string
   path: string
   defaultBranch: string
+  /**
+   * Optional per-repo security-gate override, merged OVER the env-tunable global
+   * default (field-by-field). A repo that omits this inherits the global policy;
+   * `security.enabled === false` is the honest opt-out. Mirrored in web/src/types.ts.
+   */
+  security?: Partial<SecurityPolicy>
+}
+
+// ---- security-scan gate (deterministic SAST + SCA) -------------------------
+
+/**
+ * Semgrep severities. osv (SCA) findings are normalized onto this same scale
+ * (a known vuln maps to `ERROR`); the block rule for osv is fix-availability,
+ * not this severity (see `evaluateThreshold`).
+ */
+export type SecuritySeverity = 'ERROR' | 'WARNING' | 'INFO'
+
+/** Semgrep confidence bucket (from `extra.metadata.confidence`). */
+export type SecurityConfidence = 'HIGH' | 'MEDIUM' | 'LOW'
+
+/** Which scanner produced a finding. */
+export type SecurityTool = 'semgrep' | 'osv'
+
+/** The deterministic gate's pass/fail verdict for one scan round. */
+export type SecurityVerdict = 'pass' | 'fail'
+
+/**
+ * A task's security-gate state, persisted on the `securityStatus` column.
+ * `pending` = not yet scanned; `pass`/`fail` = the last verdict; `skipped` =
+ * the repo opted out (`security.enabled === false`).
+ */
+export type SecurityStatus = 'pending' | 'pass' | 'fail' | 'skipped'
+
+/**
+ * One normalized finding from either scanner. `tool` discriminates the source:
+ * `path`/`line`/`confidence` are set for SAST (semgrep) hits, `package`/`cve`/
+ * `fixAvailable` for SCA (osv) hits. `confidence` is part of the D1 block rule
+ * for semgrep and is undefined for osv.
+ */
+export interface SecurityFinding {
+  tool: SecurityTool
+  ruleId: string
+  severity: SecuritySeverity
+  title: string
+  path?: string
+  line?: number
+  package?: string
+  cve?: string
+  fixAvailable?: boolean
+  confidence?: SecurityConfidence
+}
+
+/**
+ * The per-repo (or global-default) policy that parametrizes the gate. The
+ * global default is env-tunable via `resolveSecurityPolicy`; a per-repo
+ * `RepoTarget.security` override is merged over it field-by-field.
+ */
+export interface SecurityPolicy {
+  /** Master switch; `false` is the honest opt-out (verdict recorded as `skipped`). */
+  enabled: boolean
+  /** Bounded fix-round budget before parking `blocked` (D7 default 2). */
+  maxRounds: number
+  /** Semgrep `--config` value: a vendored high-signal dir + `p/secrets` (D1/D4). */
+  semgrepConfig: string
+  /** Semgrep severity floor at/above which a high-confidence hit blocks (D1, default `ERROR`). */
+  minSeverity: SecuritySeverity
+}
+
+/** One persisted security-scan round for a task (the `security_scans` table). */
+export interface SecurityScan {
+  id: number
+  taskId: string
+  round: number
+  verdict: SecurityVerdict
+  findings: SecurityFinding[]
+  toolVersions: Record<string, string>
+  createdAt: string
 }
 
 // ---- optional agent-chat adapter (U4) ----
@@ -150,6 +227,12 @@ export interface Task {
    * DB rows and test fixtures read `false`. Mirrored in web/src/types.ts.
    */
   stale?: boolean
+  /**
+   * The task's security-gate state (last verdict / opt-out). Optional so older
+   * DB rows and test fixtures read `undefined`, mirroring the `stale?` precedent.
+   * Mirrored in web/src/types.ts.
+   */
+  securityStatus?: SecurityStatus
   /** Categorises a block (e.g. 'toolchain' | 'auth' | 'subagent') — free string for forward-compat. */
   blockedKind: string | null
   /** Human-readable reason captured when a task enters `blocked`. */
