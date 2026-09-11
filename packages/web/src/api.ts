@@ -18,6 +18,14 @@ import type {
   WorkspaceSettings,
   Attachment,
   SecurityScan,
+  Space,
+  KbTreeNode,
+  KbPageDetail,
+  KbFolder,
+  KbPage,
+  KbBlock,
+  KbBlockKind,
+  KbRevision,
 } from './types'
 
 /** Pull a text delta out of one parsed SSE `data:` payload (OpenAI-compatible + plain shapes). */
@@ -74,6 +82,21 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(detail)
   }
   return (await res.json()) as T
+}
+
+/** Like `req` but for endpoints that answer 204 No Content (e.g. KB deletes). */
+async function reqNoContent(path: string, init?: RequestInit): Promise<void> {
+  const res = await fetch(path, init)
+  if (!res.ok) {
+    let detail = res.statusText
+    try {
+      const body = (await res.json()) as { error?: string }
+      if (body.error) detail = body.error
+    } catch {
+      // non-JSON / empty error body
+    }
+    throw new Error(detail)
+  }
 }
 
 export const api = {
@@ -259,5 +282,79 @@ export const api = {
     req<WorkspaceSettings>('/api/settings', {
       method: 'PUT',
       body: JSON.stringify(patch),
+    }),
+
+  // ---- Knowledge Base (KB) — spaces / folders / pages / blocks (T3) ----
+  // KB data is server-local (NOT task-scoped and NOT VPS-scoped), so these
+  // routes take no origin prefix, unlike the Team channel calls above.
+
+  /** Every KB space (the seeded general/zmrng/pheme + any created later). */
+  getSpaces: () => req<Space[]>('/api/spaces'),
+  /** A space's folder/page tree, already FileTree-shaped server-side. */
+  getSpaceTree: (spaceId: number) => req<KbTreeNode[]>(`/api/spaces/${spaceId}/tree`),
+  /** One page plus its ordered blocks. */
+  getPage: (pageId: number) => req<KbPageDetail>(`/api/pages/${pageId}`),
+
+  /** Create a folder in a space (null parentId = space root). */
+  createFolder: (spaceId: number, name: string, parentId: number | null = null) =>
+    req<KbFolder>(`/api/spaces/${spaceId}/folders`, {
+      method: 'POST',
+      body: JSON.stringify({ name, parentId }),
+    }),
+  /** Rename and/or move a folder. */
+  updateFolder: (id: number, patch: { name?: string; parentId?: number | null }) =>
+    req<KbFolder>(`/api/folders/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  /** Delete a folder (and its subtree, server-side). */
+  deleteFolder: (id: number) =>
+    reqNoContent(`/api/folders/${id}`, { method: 'DELETE' }),
+
+  /** Create a page in a space (null folderId = space root). */
+  createPage: (spaceId: number, title: string, author: string, folderId: number | null = null) =>
+    req<KbPage>(`/api/spaces/${spaceId}/pages`, {
+      method: 'POST',
+      body: JSON.stringify({ title, author, folderId }),
+    }),
+  /** Rename and/or move a page. */
+  updatePage: (id: number, patch: { title?: string; folderId?: number | null }) =>
+    req<KbPage>(`/api/pages/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  /** Delete a page (and its blocks + revisions, server-side). */
+  deletePage: (id: number) =>
+    reqNoContent(`/api/pages/${id}`, { method: 'DELETE' }),
+
+  /** Append a block to a page. */
+  createBlock: (
+    pageId: number,
+    block: { kind: KbBlockKind; body: string; meta?: string | null; updatedBy: string },
+  ) =>
+    req<KbBlock>(`/api/pages/${pageId}/blocks`, {
+      method: 'POST',
+      body: JSON.stringify({ meta: null, ...block }),
+    }),
+  /** Update a block (server snapshots the prior state into a revision first). */
+  updateBlock: (
+    id: number,
+    patch: { kind?: KbBlockKind; body?: string; meta?: string | null; updatedBy: string },
+  ) =>
+    req<KbBlock>(`/api/blocks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  /** Delete a block (and its revisions, server-side). */
+  deleteBlock: (id: number) =>
+    reqNoContent(`/api/blocks/${id}`, { method: 'DELETE' }),
+
+  /** Every revision of a block, oldest first — backs the restore-from-revision UX. */
+  getRevisions: (blockId: number) => req<KbRevision[]>(`/api/blocks/${blockId}/revisions`),
+  /** Restore a revision back onto its block (itself recording a revision). */
+  restoreRevision: (revisionId: number, author: string) =>
+    req<KbBlock>(`/api/revisions/${revisionId}/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ author }),
     }),
 }

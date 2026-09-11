@@ -21,6 +21,7 @@ import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
 import { Board } from './components/Board'
 import { TeamView } from './components/TeamView'
+import { KbView } from './components/KbView'
 import { UpdateBanner } from './components/UpdateBanner'
 import { SettingsModal } from './components/SettingsModal'
 import { updateAvailable } from './updateGate'
@@ -36,6 +37,7 @@ const RAIL: ReadonlyArray<{ id: WorkspaceMode; glyph: string; label: string }> =
   { id: 'workspace', glyph: '≣', label: 'Workspace' },
   { id: 'board', glyph: '⑃', label: 'Board' },
   { id: 'team', glyph: '▤', label: 'Team' },
+  { id: 'kb', glyph: '❏', label: 'KB' },
 ]
 
 // Read once — the runtime never changes mid-session.
@@ -261,7 +263,9 @@ export default function App() {
       ? (selected?.title ?? 'No task selected')
       : mode === 'board'
         ? 'Board'
-        : 'Team'
+        : mode === 'kb'
+          ? 'KB'
+          : 'Team'
   const lanes = cfg?.maxLanes ?? 0
   const running = sorted.filter((t) => t.status === 'executing').length
   const queued = sorted.filter((t) => t.queued).length
@@ -378,6 +382,13 @@ export default function App() {
               onSendToZmrng={onSendToZmrng}
               onNewVersion={onNewVersion}
             />
+          </div>
+
+          <div
+            className={styles.modeContent}
+            style={{ display: mode === 'kb' ? 'flex' : 'none' }}
+          >
+            <KbView teamHandle={settings.teamHandle} />
           </div>
         </div>
 
