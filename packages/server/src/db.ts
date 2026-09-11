@@ -1114,8 +1114,33 @@ export class Db {
     return this.getFolder(id)
   }
 
-  /** Move a folder under a new parent (null = space root). */
+  /**
+   * Move a folder under a new parent (null = space root). Rejects a move that
+   * would create a cycle — a folder cannot become its own parent, nor a
+   * descendant of itself. A cycle would detach the whole sub-loop from every
+   * root in `spaceTree` (iterative assembly never re-attaches it), silently
+   * vanishing those folders/pages from the tree, so guard it at the seam.
+   * Returns the folder unchanged when the move is rejected (no-op).
+   */
   moveFolder(id: number, parentId: number | null): KbFolder | undefined {
+    const folder = this.getFolder(id)
+    if (!folder) return undefined
+    if (parentId !== null) {
+      if (parentId === id) return folder
+      // Walk up from the proposed parent; if we reach `id`, the move is a cycle.
+      let cursor: number | null = parentId
+      const seen = new Set<number>()
+      while (cursor !== null) {
+        if (cursor === id) return folder
+        if (seen.has(cursor)) break // pre-existing loop upstream — don't spin
+        seen.add(cursor)
+        const row = this.db
+          .prepare('SELECT parent_id FROM folders WHERE id = ?')
+          .get(cursor) as { parent_id: number | null } | undefined
+        if (!row) break
+        cursor = row.parent_id
+      }
+    }
     this.db.prepare('UPDATE folders SET parent_id = ? WHERE id = ?').run(parentId, id)
     return this.getFolder(id)
   }

@@ -133,6 +133,23 @@ describe('KB folders + pages (nesting / placement)', () => {
     db.close()
   })
 
+  it('moveFolder rejects a cycle (self-parent or moving under a descendant) as a no-op', () => {
+    const db = new Db(dbPath)
+    const space = db.listSpaces()[0]
+    const root = db.createFolder(space.id, null, 'Root', NOW)
+    const child = db.createFolder(space.id, root.id, 'Child', NOW)
+    const grandchild = db.createFolder(space.id, child.id, 'Grandchild', NOW)
+    // self-parent rejected
+    expect(db.moveFolder(root.id, root.id)?.parentId).toBeNull()
+    // moving an ancestor under its own descendant is rejected (would vanish in spaceTree)
+    expect(db.moveFolder(root.id, grandchild.id)?.parentId).toBeNull()
+    expect(db.getFolder(root.id)?.parentId).toBeNull()
+    // a legitimate move still works
+    const other = db.createFolder(space.id, null, 'Other', NOW)
+    expect(db.moveFolder(other.id, child.id)?.parentId).toBe(child.id)
+    db.close()
+  })
+
   it('places pages at the space root (folder_id null) or inside a folder', () => {
     const db = new Db(dbPath)
     const space = db.listSpaces()[0]
