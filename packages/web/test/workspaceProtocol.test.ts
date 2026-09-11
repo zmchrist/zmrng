@@ -374,4 +374,25 @@ describe('parseWorkspaceServerMsg — KB page frames (T2, #144)', () => {
       parseWorkspaceServerMsg(JSON.stringify({ type: 'page.presence', pageId: '3', viewers: [] })),
     ).toBeUndefined()
   })
+
+  it('decodes a page.delete tombstone carrying numeric pageId + blockId (#151)', () => {
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', pageId: 3, blockId: 7 })),
+    ).toEqual({ type: 'page.delete', pageId: 3, blockId: 7 })
+  })
+
+  it('rejects a page.delete with a missing/ill-typed pageId or blockId (#151)', () => {
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', pageId: 3 })),
+    ).toBeUndefined()
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', blockId: 7 })),
+    ).toBeUndefined()
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', pageId: '3', blockId: 7 })),
+    ).toBeUndefined()
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', pageId: 3, blockId: 'x' })),
+    ).toBeUndefined()
+  })
 })

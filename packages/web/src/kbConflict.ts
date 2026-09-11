@@ -39,3 +39,14 @@ export function mergeBlock(blocks: KbBlock[], incoming: KbBlock): KbBlock[] {
   }
   return [...blocks, incoming].sort((a, b) => (a.ord !== b.ord ? a.ord - b.ord : a.id - b.id))
 }
+
+/**
+ * Remove the block with `blockId` from a page's block list, converging on a
+ * live `page.delete` tombstone. Returns a new array with the block filtered out,
+ * or the SAME array reference when the id is absent (a no-op — nothing to
+ * remove). Never mutates the input.
+ */
+export function removeBlock(blocks: KbBlock[], blockId: number): KbBlock[] {
+  if (!blocks.some((b) => b.id === blockId)) return blocks
+  return blocks.filter((b) => b.id !== blockId)
+}
