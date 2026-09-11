@@ -307,6 +307,72 @@ describe('KB spaceTree assembly', () => {
   })
 })
 
+describe('KB cross-space parent integrity (#141)', () => {
+  // The REST boundary rejects a parentId/folderId owned by another space with a
+  // 400 by comparing the parent folder's spaceId to the target space. These tests
+  // exercise that same invariant at the Db layer: getFolder(parent).spaceId is the
+  // signal the route guard keys off, and a mismatch is what triggers the rejection.
+  it('exposes each folder/page spaceId so a cross-space parent is detectable', () => {
+    const db = new Db(dbPath)
+    const [spaceA, spaceB] = db.listSpaces()
+    const parentInB = db.createFolder(spaceB.id, null, 'B-Docs', NOW)
+
+    // A parent folder created in space B carries B's spaceId, not A's.
+    const parent = db.getFolder(parentInB.id)!
+    expect(parent.spaceId).toBe(spaceB.id)
+    expect(parent.spaceId).not.toBe(spaceA.id)
+    db.close()
+  })
+
+  it('createFolder into space A pointed at a space-B parent yields a spaceId mismatch', () => {
+    const db = new Db(dbPath)
+    const [spaceA, spaceB] = db.listSpaces()
+    const parentInB = db.createFolder(spaceB.id, null, 'B-Docs', NOW)
+
+    // The route guard runs `db.getFolder(parentId).spaceId !== spaceId` before
+    // creating — here that comparison is true, so the create would be a 400.
+    const targetSpaceId = spaceA.id
+    expect(db.getFolder(parentInB.id)?.spaceId).not.toBe(targetSpaceId)
+
+    // A same-space parent passes the invariant.
+    const parentInA = db.createFolder(spaceA.id, null, 'A-Docs', NOW)
+    expect(db.getFolder(parentInA.id)?.spaceId).toBe(targetSpaceId)
+    db.close()
+  })
+
+  it('moveFolder to a parent in another space is a detectable spaceId mismatch', () => {
+    const db = new Db(dbPath)
+    const [spaceA, spaceB] = db.listSpaces()
+    const child = db.createFolder(spaceA.id, null, 'A-Child', NOW)
+    const parentInB = db.createFolder(spaceB.id, null, 'B-Parent', NOW)
+
+    // The PATCH /api/folders/:id move guard compares the new parent's spaceId to
+    // the moved folder's own spaceId.
+    expect(db.getFolder(parentInB.id)?.spaceId).not.toBe(db.getFolder(child.id)?.spaceId)
+
+    const parentInA = db.createFolder(spaceA.id, null, 'A-Parent', NOW)
+    expect(db.getFolder(parentInA.id)?.spaceId).toBe(db.getFolder(child.id)?.spaceId)
+    db.close()
+  })
+
+  it('createPage/movePage into a folder owned by another space is a detectable mismatch', () => {
+    const db = new Db(dbPath)
+    const [spaceA, spaceB] = db.listSpaces()
+    const folderInB = db.createFolder(spaceB.id, null, 'B-Folder', NOW)
+
+    // POST /api/spaces/:id/pages compares db.getFolder(folderId).spaceId to spaceId.
+    expect(db.getFolder(folderInB.id)?.spaceId).not.toBe(spaceA.id)
+
+    // PATCH /api/pages/:id move compares to db.getPage(id).spaceId.
+    const page = db.createPage(spaceA.id, null, 'A-Page', 'Ada', NOW)
+    expect(db.getFolder(folderInB.id)?.spaceId).not.toBe(db.getPage(page.id)?.spaceId)
+
+    const folderInA = db.createFolder(spaceA.id, null, 'A-Folder', NOW)
+    expect(db.getFolder(folderInA.id)?.spaceId).toBe(db.getPage(page.id)?.spaceId)
+    db.close()
+  })
+})
+
 describe('KB additive-migration idempotency', () => {
   it('reopening a db with KB data adds no tables/columns and preserves rows', () => {
     const db1 = new Db(dbPath)

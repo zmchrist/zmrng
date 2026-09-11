@@ -534,6 +534,10 @@ app.post('/api/spaces/:id/folders', (req, reply): KbFolder | undefined => {
     reply.code(404).send({ error: 'parent folder not found' })
     return undefined
   }
+  if (parentId !== null && db.getFolder(parentId)?.spaceId !== spaceId) {
+    reply.code(400).send({ error: 'parent folder belongs to a different space' })
+    return undefined
+  }
   const folder = db.createFolder(spaceId, parentId, name, new Date().toISOString())
   app.log.info({ folderId: folder.id, spaceId }, 'kb folder created')
   return folder
@@ -564,6 +568,10 @@ app.patch('/api/folders/:id', (req, reply): KbFolder | undefined => {
     }
     if (parentId !== null && !db.getFolder(parentId)) {
       reply.code(404).send({ error: 'parent folder not found' })
+      return undefined
+    }
+    if (parentId !== null && db.getFolder(parentId)?.spaceId !== db.getFolder(id)?.spaceId) {
+      reply.code(400).send({ error: 'parent folder belongs to a different space' })
       return undefined
     }
     result = db.moveFolder(id, parentId)
@@ -606,6 +614,10 @@ app.post('/api/spaces/:id/pages', (req, reply): KbPage | undefined => {
     reply.code(404).send({ error: 'folder not found' })
     return undefined
   }
+  if (folderId !== null && db.getFolder(folderId)?.spaceId !== spaceId) {
+    reply.code(400).send({ error: 'folder belongs to a different space' })
+    return undefined
+  }
   const page = db.createPage(spaceId, folderId, title, author, new Date().toISOString())
   app.log.info({ pageId: page.id, spaceId }, 'kb page created')
   return page
@@ -637,6 +649,10 @@ app.patch('/api/pages/:id', (req, reply): KbPage | undefined => {
     }
     if (folderId !== null && !db.getFolder(folderId)) {
       reply.code(404).send({ error: 'folder not found' })
+      return undefined
+    }
+    if (folderId !== null && db.getFolder(folderId)?.spaceId !== db.getPage(id)?.spaceId) {
+      reply.code(400).send({ error: 'folder belongs to a different space' })
       return undefined
     }
     result = db.movePage(id, folderId, now)
