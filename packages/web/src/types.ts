@@ -641,6 +641,18 @@ export type WsWorkspaceClientMsg =
   | { type: 'unsubscribe'; channelId: number }
   | { type: 'message'; channelId: number; author: string; body: string }
   | { type: 'react'; channelId: number; messageId: number; emoji: string; handle: string }
+  // ---- KB real-time sync (T2, #144) — mirror of server types ----
+  | { type: 'page.subscribe'; pageId: number }
+  | { type: 'page.unsubscribe'; pageId: number }
+  | {
+      type: 'page.edit'
+      pageId: number
+      blockId: number | null
+      kind: KbBlockKind
+      body: string
+      meta: string | null
+      author: string
+    }
 
 /**
  * server -> client frames over the workspace socket. `roster` is a full
@@ -658,6 +670,9 @@ export type WsWorkspaceServerMsg =
   | { type: 'channels'; channels: Channel[] }
   | { type: 'reaction'; channelId: number; messageId: number; reactions: ReactionSummary[] }
   | { type: 'new-version'; sha: string }
+  // ---- KB real-time sync (T2, #144) — mirror of server types ----
+  | { type: 'page.update'; pageId: number; block: KbBlock }
+  | { type: 'page.presence'; pageId: number; viewers: WorkspaceMember[] }
 
 /**
  * Max length of a self-asserted display-name handle, measured after trimming.
@@ -774,6 +789,12 @@ export const KB_BLOCK_KINDS: readonly KbBlockKind[] = [
   'checklist',
   'list',
 ]
+
+/**
+ * Max length of a block's `meta` JSON string on a `page.edit` frame (T2). A
+ * block `body` reuses `MAX_MESSAGE_BODY_LEN`. Mirror of server types.
+ */
+export const MAX_BLOCK_META_LEN = 2000
 
 /**
  * One block of a page's body. `body` is markdown; `meta` is a nullable JSON

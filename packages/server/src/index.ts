@@ -12,7 +12,7 @@ import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { TerminalManager, parseClientMsg } from './terminal.js'
 import { ChatManager, parseChatClientMsg } from './chatAgent.js'
-import { WorkspaceManager, ChannelManager, parseWorkspaceClientMsg } from './workspace.js'
+import { WorkspaceManager, ChannelManager, PageManager, parseWorkspaceClientMsg } from './workspace.js'
 import { AgentResponder, resolveBotAgent } from './agentResponder.js'
 import { defaultRunnerFactory, sanitizeAttachments } from './runner.js'
 import { defaultScanRunnerFactory } from './scanRunner.js'
@@ -38,6 +38,7 @@ import type {
   TermServerMsg,
   ChatServerMsg,
   WsWorkspaceServerMsg,
+  WorkspaceMember,
   Space,
   KbTreeNode,
   KbPageDetail,
@@ -118,6 +119,18 @@ const workspace = new WorkspaceManager(db, (frame: WsWorkspaceServerMsg) =>
 // channel. The per-socket send sink writes directly to the target ws socket (no
 // history replay — scrollback is the REST route below).
 const channels = new ChannelManager<WebSocket>(db, (socket, frame) => {
+  try {
+    socket.send(JSON.stringify(frame))
+  } catch {
+    // socket closed mid-send; its close handler drops the subscription
+  }
+})
+// KB real-time sync (T2, #144): a dedicated Map<page_id, Set<socket>> subscription
+// registry fans a saved block delta (page.update) out ONLY to the sockets
+// subscribed to that page, and drives lightweight per-page viewer presence
+// (page.presence) off the subscribe set. Same per-socket send injection as
+// ChannelManager — no history replay (page scrollback is the REST route).
+const pages = new PageManager<WebSocket>(db, (socket, frame) => {
   try {
     socket.send(JSON.stringify(frame))
   } catch {
@@ -1197,6 +1210,10 @@ let latestKnownVersionSha = ''
 app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
   hub.join('workspace', socket)
   let joined = false
+  // The socket's roster identity, established by its `hello`. Page presence
+  // (T2) attaches this member to each page.subscribe so the per-page viewer set
+  // carries display names; page frames before `hello` are ignored (no identity).
+  let member: WorkspaceMember | undefined
 
   const send = (msg: WsWorkspaceServerMsg): void => {
     try {
@@ -1229,9 +1246,14 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
     clearInterval(heartbeat)
     hub.leaveAll(socket)
     channels.unsubscribeAll(socket)
+    // Drop this socket from every page's fan-out and re-broadcast presence to the
+    // pages it was viewing (T2). No new heartbeat — this close/error path IS the
+    // eviction trigger for page presence.
+    pages.unsubscribeAll(socket)
     if (joined) {
       workspace.leave(socket)
       joined = false
+      member = undefined
     }
   }
 
@@ -1240,8 +1262,11 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
       const msg = parseWorkspaceClientMsg(String(raw))
       if (!msg) return
       if (msg.type === 'hello') {
-        workspace.join(socket, msg.displayName)
+        const joinedMember = workspace.join(socket, msg.displayName)
         joined = true
+        // Capture the roster identity for page presence (viewers are live sockets,
+        // so `online` is always true).
+        member = { id: joinedMember.id, displayName: joinedMember.displayName, online: true }
       } else if (msg.type === 'ping') {
         send({ type: 'pong' })
       } else if (msg.type === 'subscribe') {
@@ -1274,6 +1299,31 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
             app.log.error({ err, channelId: msg.channelId }, 'team-agent handleMention crashed')
           })
         }
+      } else if (msg.type === 'page.subscribe') {
+        // Register interest in a page's live block fan-out + viewer presence.
+        // Requires an established roster identity (from `hello`); a page frame
+        // before `hello` is ignored (no member to attribute presence to).
+        if (member) pages.subscribe(socket, msg.pageId, member)
+      } else if (msg.type === 'page.unsubscribe') {
+        pages.unsubscribe(socket, msg.pageId)
+      } else if (msg.type === 'page.edit') {
+        // Persist a block delta (create when blockId is null, else update) and
+        // fan a `page.update` out live to that page's subscribers. A socket
+        // `page.edit` is ALWAYS a human author — the parser already carries the
+        // self-asserted author; the agent block path is out of T2 scope. A bad
+        // page / mismatched block is a no-op inside saveBlock().
+        const stored = pages.saveBlock(
+          msg.pageId,
+          msg.blockId,
+          msg.kind,
+          msg.body,
+          msg.meta,
+          msg.author,
+        )
+        app.log.info(
+          { pageId: msg.pageId, blockId: stored?.id ?? msg.blockId, saved: stored !== undefined },
+          'kb page.edit',
+        )
       }
     } catch (err) {
       app.log.error({ err }, 'workspace message handler failed')

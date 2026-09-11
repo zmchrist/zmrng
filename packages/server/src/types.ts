@@ -670,6 +670,26 @@ export type WsWorkspaceClientMsg =
   | { type: 'unsubscribe'; channelId: number }
   | { type: 'message'; channelId: number; author: string; body: string }
   | { type: 'react'; channelId: number; messageId: number; emoji: string; handle: string }
+  // ---- KB real-time sync (T2, #144) ----
+  // `page.subscribe`/`page.unsubscribe` register interest in a page's live block
+  // fan-out (and drive its lightweight viewer presence), mirroring the channel
+  // subscribe frames. `page.edit` is a BLOCK DELTA on save: `blockId: null`
+  // creates a new block (server appends — see PageManager.saveBlock), a non-null
+  // `blockId` updates that existing block (→ Db.updateBlock, which snapshots the
+  // prior state into `revisions`). A socket `page.edit` is ALWAYS a human author
+  // (mirrors the channel `message` "always human" posture — the agent block path
+  // is out of T2 scope).
+  | { type: 'page.subscribe'; pageId: number }
+  | { type: 'page.unsubscribe'; pageId: number }
+  | {
+      type: 'page.edit'
+      pageId: number
+      blockId: number | null
+      kind: KbBlockKind
+      body: string
+      meta: string | null
+      author: string
+    }
 
 /**
  * server -> client frames over the workspace socket. `roster` is a full
@@ -690,6 +710,15 @@ export type WsWorkspaceServerMsg =
   | { type: 'channels'; channels: Channel[] }
   | { type: 'reaction'; channelId: number; messageId: number; reactions: ReactionSummary[] }
   | { type: 'new-version'; sha: string }
+  // ---- KB real-time sync (T2, #144) ----
+  // `page.update` fans ONE created/updated block (the delta) out to every socket
+  // subscribed to that page — mirrors the channel `message` frame. `page.presence`
+  // is the lightweight per-page viewer set driven by the subscribe set (who is
+  // currently viewing the page), re-broadcast on every subscribe/unsubscribe. It
+  // reuses `WorkspaceMember` (viewers are live sockets, so `online` is always
+  // true) rather than introducing a slim viewer shape — no extra mirror surface.
+  | { type: 'page.update'; pageId: number; block: KbBlock }
+  | { type: 'page.presence'; pageId: number; viewers: WorkspaceMember[] }
 
 /**
  * Max length of a self-asserted display-name handle, measured after trimming.
@@ -785,6 +814,14 @@ export const KB_BLOCK_KINDS: readonly KbBlockKind[] = [
   'checklist',
   'list',
 ]
+
+/**
+ * Max length of a block's `meta` JSON string on a `page.edit` frame (T2). `meta`
+ * carries small kind-specific extras (`{"level":1}`, `{"checked":true}`), so a
+ * generous-but-bounded cap keeps a client from persisting an unbounded string.
+ * A block `body` reuses `MAX_MESSAGE_BODY_LEN`. Mirrored in web types.
+ */
+export const MAX_BLOCK_META_LEN = 2000
 
 /**
  * One block of a page's body. `body` is markdown; `meta` is a nullable JSON
