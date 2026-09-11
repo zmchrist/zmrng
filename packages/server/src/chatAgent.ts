@@ -8,7 +8,63 @@ import {
   type RunnerLike,
   type SpawnOptions,
 } from './runner.js'
-import type { CaveStyle, ChatClientMsg, EffortLevel } from './types.js'
+import type { CaveStyle, ChatClientMsg, EffortLevel, WorkflowPreset } from './types.js'
+
+// ---- workflow presets ------------------------------------------------------
+
+/**
+ * The directive body for each named workflow preset, keyed by `WorkflowPreset`.
+ * zmrng OWNS these committed copies (ADR-0002 D3): they are authored for zmrng
+ * users and are NEVER read from or symlinked to the operator's `~/.hermes`
+ * skills at runtime, so a fresh clone works with no external setup. They are
+ * allowed to drift from the operator's evolving personal skills of the same
+ * name — different audiences. Only single-session-viable presets ship here
+ * (ADR-0002 D4): `grill` and `teach-me`. `code-review` lands in #159; `none`
+ * appends nothing. Each is inlined into the chat system prompt with zero tool
+ * round-trips, exactly like `styleDirective`.
+ */
+const WORKFLOW_BODIES: Record<Exclude<WorkflowPreset, 'none' | 'code-review'>, string> = {
+  grill: [
+    'Operate in GRILL mode: interrogate the idea before building anything.',
+    '- Do NOT write code, edit files, or take irreversible action until the operator',
+    '  and you share an explicit understanding of the goal and approach.',
+    '- Ask questions to close the gaps, but be economical: batch INDEPENDENT questions',
+    '  into one message; only serialize a question when its answer genuinely depends on',
+    '  the answer to a previous one.',
+    '- For EVERY question, recommend your own best answer (a default the operator can',
+    '  simply confirm) — never ask an open question you could answer yourself.',
+    '- Look facts up; do not ask the operator for anything you can determine by reading',
+    '  the code, files, or configuration yourself. Reserve questions for genuine',
+    '  judgment calls and missing intent.',
+    '- Surface tradeoffs, risks, and rejected alternatives; push back on weak premises',
+    '  rather than agreeing by default.',
+    '- Only once the shared understanding is explicit should you propose enacting it.',
+  ].join('\n'),
+  'teach-me': [
+    'Operate in TEACH-ME mode: explain as you go so the operator learns, not just gets an answer.',
+    '- Lead with the concept and the "why" before the "how"; build from what the operator',
+    '  already knows toward the new idea.',
+    '- Prefer clear, concrete explanations and small worked examples over terse assertions.',
+    '- Define jargon the first time you use it; call out common misconceptions and pitfalls.',
+    '- When you show code or a command, explain what each meaningful part does and why.',
+    '- Check understanding: offer a brief recap of the key takeaways, and invite follow-up',
+    '  questions rather than assuming the explanation landed.',
+    '- Favor teaching the transferable principle over solving only the immediate instance.',
+  ].join('\n'),
+}
+
+/**
+ * Working-mode block appended to the chat system prompt for a selected workflow
+ * preset — structurally identical to `styleDirective` (an inlined instruction
+ * block, zero tool round-trips) and COMPOSING with it (ADR-0002 D5): style is
+ * narration register, workflow is session behavior; both append. `'none'` (the
+ * default) and `'code-review'` (reserved for #159) return `''`, so the prompt is
+ * byte-identical to the pre-workflow one when no shipped preset is selected.
+ */
+export function workflowDirective(workflow: WorkflowPreset): string {
+  if (workflow === 'none' || workflow === 'code-review') return ''
+  return ['', 'WORKING MODE:', WORKFLOW_BODIES[workflow]].join('\n')
+}
 
 // ---- conversational system prompt ------------------------------------------
 
@@ -19,18 +75,32 @@ import type { CaveStyle, ChatClientMsg, EffortLevel } from './types.js'
  * assistant embedded in the zmrng chat panel with read/explore filesystem
  * access to the configured Projects directory, asks it to keep tool use
  * purposeful, and appends the shared caveman `styleDirective` for non-`normal`
- * styles (identical wording to the worker, so the caveman contract stays DRY).
+ * styles (identical wording to the worker, so the caveman contract stays DRY),
+ * then the `workflowDirective` for the selected preset. The two directives are
+ * orthogonal and both append (ADR-0002 D5): `style = 'normal'` and
+ * `workflow = 'none'` (the defaults) each add nothing, so the prompt is
+ * byte-identical to the pre-workflow one.
  */
-export function chatSystemPrompt(style: CaveStyle, projectsDir: string): string {
-  return [
-    'You are a helpful assistant embedded in the zmrng chat panel — a live,',
-    'conversational side channel, not an autonomous task worker.',
-    `You have read and explore filesystem access to the operator's projects at \`${projectsDir}\`.`,
-    'This is a free-form conversation with no lifecycle, no phases, and no',
-    'special output protocol — just answer, explore, and help directly.',
-    'Keep tool use purposeful: surface meaningful actions, not every internal step.',
-    styleDirective(style),
-  ].join('\n')
+export function chatSystemPrompt(
+  style: CaveStyle,
+  projectsDir: string,
+  workflow: WorkflowPreset = 'none',
+): string {
+  // `styleDirective` stays the final array element (preserving the exact
+  // pre-workflow output); `workflowDirective` is concatenated as a suffix so a
+  // `'none'` workflow (→ `''`) leaves the prompt byte-identical to before, while
+  // a selected preset appends its block after the style block (ADR-0002 D5).
+  return (
+    [
+      'You are a helpful assistant embedded in the zmrng chat panel — a live,',
+      'conversational side channel, not an autonomous task worker.',
+      `You have read and explore filesystem access to the operator's projects at \`${projectsDir}\`.`,
+      'This is a free-form conversation with no lifecycle, no phases, and no',
+      'special output protocol — just answer, explore, and help directly.',
+      'Keep tool use purposeful: surface meaningful actions, not every internal step.',
+      styleDirective(style),
+    ].join('\n') + workflowDirective(workflow)
+  )
 }
 
 /**
@@ -106,6 +176,12 @@ export function parseChatClientMsg(raw: string): ChatClientMsg | undefined {
         effort: obj.effort as EffortLevel,
         style: obj.style as CaveStyle,
         ...(typeof obj.repoId === 'string' ? { repoId: obj.repoId } : {}),
+        // Tolerant like the other optional fields: a missing/ill-typed workflow
+        // is simply dropped, defaulting to `'none'` downstream. `'none'` is
+        // omitted so a default frame stays byte-identical to the pre-workflow one.
+        ...(typeof obj.workflow === 'string' && obj.workflow !== 'none'
+          ? { workflow: obj.workflow as WorkflowPreset }
+          : {}),
         ...(obj.voice === true ? { voice: true } : {}),
       }
     }
@@ -136,6 +212,10 @@ export interface ChatConfig {
   /** Picks which registered repo the session's cwd is rooted at. A missing or
    *  unresolvable id falls back to `config.projectsDir` ("Projects root"). */
   repoId?: string
+  /** Optional named working mode; its `workflowDirective` block is appended to
+   *  the chat system prompt, composing with `style`. Defaults to `'none'`
+   *  (appends nothing). Ignored on the voice branch, like `style`. */
+  workflow?: WorkflowPreset
   /** When true, spawn with `voiceSystemPrompt` (spoken register) instead of
    *  `chatSystemPrompt`; `style` is then ignored. Set by the Voice surface. */
   voice?: boolean
@@ -163,7 +243,9 @@ export class ChatManager {
       cwd: root,
       model: cfg.model,
       effort: cfg.effort,
-      systemPrompt: cfg.voice ? voiceSystemPrompt(root) : chatSystemPrompt(cfg.style, root),
+      systemPrompt: cfg.voice
+        ? voiceSystemPrompt(root)
+        : chatSystemPrompt(cfg.style, root, cfg.workflow ?? 'none'),
     }
     const session = this.factory(opts, {
       ...cb,

@@ -13,7 +13,7 @@ import {
   type TabsState,
 } from '../windowTabs'
 import { removeChatThread } from '../chatPersistence'
-import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget } from '../types'
+import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget, WorkflowPreset } from '../types'
 
 interface Props {
   tabs: TabsState<ChatTabState>
@@ -31,6 +31,7 @@ const STYLE_OPTIONS: readonly CaveStyle[] = [
   'caveman-ultra',
   'wenyan-full',
 ]
+const WORKFLOW_OPTIONS: readonly WorkflowPreset[] = ['none', 'grill', 'teach-me', 'code-review']
 
 /** New-tab default config — independent of the task-level DEFAULT_* controls. */
 const NEW_TAB_DEFAULTS = {
@@ -39,6 +40,8 @@ const NEW_TAB_DEFAULTS = {
   style: 'caveman-full' as CaveStyle,
   /** `''` = "Projects root" (`config.projectsDir`), the default. */
   repoId: '',
+  /** Named working mode; `'none'` appends no directive (the default). */
+  workflow: 'none' as WorkflowPreset,
 }
 
 /**
@@ -71,7 +74,7 @@ export function ChatCard({ tabs, onTabsChange, repos }: Props) {
   const activate = useCallback((id: string) => onTabsChange(setActiveTab(tabs, id)), [tabs, onTabsChange])
   const launch = useCallback((id: string) => onTabsChange(launchChatTab(tabs, id)), [tabs, onTabsChange])
   const setConfig = useCallback(
-    (id: string, patch: Partial<Pick<ChatTabState, 'model' | 'effort' | 'style' | 'repoId'>>) =>
+    (id: string, patch: Partial<Pick<ChatTabState, 'model' | 'effort' | 'style' | 'repoId' | 'workflow'>>) =>
       onTabsChange(setChatTabConfig(tabs, id, patch)),
     [tabs, onTabsChange],
   )
@@ -97,6 +100,7 @@ export function ChatCard({ tabs, onTabsChange, repos }: Props) {
                 initialEffort={t.effort}
                 initialStyle={t.style}
                 initialRepoId={t.repoId}
+                initialWorkflow={t.workflow ?? 'none'}
                 repos={repos}
               />
             ) : (
@@ -136,6 +140,18 @@ export function ChatCard({ tabs, onTabsChange, repos }: Props) {
                     {STYLE_OPTIONS.map((st) => (
                       <option key={st} value={st}>
                         {st}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className={styles.select}
+                    aria-label="Workflow"
+                    value={t.workflow ?? 'none'}
+                    onChange={(e) => setConfig(t.id, { workflow: e.target.value as WorkflowPreset })}
+                  >
+                    {WORKFLOW_OPTIONS.map((wf) => (
+                      <option key={wf} value={wf}>
+                        {wf}
                       </option>
                     ))}
                   </select>
