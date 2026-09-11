@@ -40,6 +40,16 @@ interface Props {
    * FRESH object per promotion so the seed fires once each time.
    */
   openTarget?: { spaceId: number; pageId: number } | null
+  /**
+   * Whether the KB tab is the ACTIVE mode. The view is always mounted (App
+   * keeps it in the DOM via `display:none`), so the workspace socket is gated
+   * on this flag: an idle client on another mode opens ZERO sockets, entering
+   * the KB tab opens exactly one, and leaving tears it down (the socket
+   * effect's cleanup closes the ws + clears timers). Prevents the always-
+   * mounted view from holding a permanent /ws/workspace socket + duplicate
+   * page-presence membership (#149).
+   */
+  active: boolean
 }
 
 const PING_MS = 25000
@@ -70,7 +80,7 @@ function initials(name: string): string {
  * multiplexed workspace socket (GET /ws/workspace, same-origin) for page
  * subscribe/edit/presence — REST covers spaces/tree/page + structural CRUD.
  */
-export function KbView({ teamHandle, openTarget = null }: Props) {
+export function KbView({ teamHandle, openTarget = null, active }: Props) {
   const handle = teamHandle.trim() || 'anon'
 
   const [spaces, setSpaces] = useState<Space[]>([])
@@ -142,7 +152,12 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
   }
 
   // ---- socket lifecycle (page presence + live block deltas) ----
+  // Gated on `active` (#149): only the active KB mode holds a workspace socket.
+  // When `active` flips false the effect cleanup below runs (closes the ws,
+  // clears timers, nulls wsRef, setConnected(false)) — so leaving the tab tears
+  // the socket down; returning re-runs the effect and connects fresh.
   useEffect(() => {
+    if (!active) return
     const socketUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/workspace`
     let closed = false
     let ws: WebSocket | null = null
@@ -215,7 +230,7 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
       wsRef.current = null
       setConnected(false)
     }
-  }, [handle])
+  }, [handle, active])
 
   // ---- load spaces once; default to the first space ----
   useEffect(() => {

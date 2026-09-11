@@ -395,6 +395,7 @@ export default function App() {
               onSendToZmrng={onSendToZmrng}
               onOpenKbPage={onOpenKbPage}
               onNewVersion={onNewVersion}
+              active={mode === 'team'}
             />
           </div>
 
@@ -402,7 +403,7 @@ export default function App() {
             className={styles.modeContent}
             style={{ display: mode === 'kb' ? 'flex' : 'none' }}
           >
-            <KbView teamHandle={settings.teamHandle} openTarget={kbTarget} />
+            <KbView teamHandle={settings.teamHandle} openTarget={kbTarget} active={mode === 'kb'} />
           </div>
         </div>
 
