@@ -719,6 +719,114 @@ export interface ServerConfig {
   dev: boolean
 }
 
+// ---- Knowledge Base (KB) — spaces / folders / pages / blocks / revisions ----
+//
+// MANUAL MIRROR of `packages/server/src/types.ts` (the KB data foundation, T1
+// #140). Server is the source of truth; every type change touches BOTH files —
+// `npm run typecheck` over both workspaces catches mirror drift.
+
+/**
+ * One KB space: the top-level container that groups a knowledge tree. `repoUrl`
+ * optionally ties a space to a GitHub repo (null for the general space).
+ */
+export interface Space {
+  id: number
+  name: string
+  repoUrl: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * One folder in a space's tree. `parentId` self-references `folders` for
+ * nesting; null means the folder sits at the space root.
+ */
+export interface KbFolder {
+  id: number
+  spaceId: number
+  parentId: number | null
+  name: string
+  createdAt: string
+}
+
+/**
+ * One KB page. `folderId` places the page inside a folder; null means the page
+ * sits at the space root. A page owns an ordered list of blocks.
+ */
+export interface KbPage {
+  id: number
+  spaceId: number
+  folderId: number | null
+  title: string
+  author: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** The block kinds a page body is composed of. */
+export type KbBlockKind = 'text' | 'heading' | 'code' | 'checklist' | 'list'
+
+/** Every valid `KbBlockKind`, for wire validation. Mirror of server types. */
+export const KB_BLOCK_KINDS: readonly KbBlockKind[] = [
+  'text',
+  'heading',
+  'code',
+  'checklist',
+  'list',
+]
+
+/**
+ * One block of a page's body. `body` is markdown; `meta` is a nullable JSON
+ * string carrying kind-specific extras — `{"level":1}` for a heading level,
+ * `{"checked":true}` for a checklist item. Each update snapshots the PRIOR
+ * state into a revision.
+ */
+export interface KbBlock {
+  id: number
+  pageId: number
+  ord: number
+  kind: KbBlockKind
+  body: string
+  meta: string | null
+  updatedAt: string
+  updatedBy: string
+}
+
+/**
+ * A prior-state snapshot of a block, captured on each block update (and on each
+ * restore). Backs the locked-toast + restore-from-revision conflict UX (T2).
+ */
+export interface KbRevision {
+  id: number
+  blockId: number
+  body: string
+  kind: KbBlockKind
+  meta: string | null
+  author: string
+  createdAt: string
+}
+
+/**
+ * One node in a space's KB tree (assembled server-side). Structurally
+ * assignable to `WorktreeFileNode` so the existing `FileTree` consumes it with
+ * ZERO changes (`type: 'dir'` = folder, `'file'` = page), plus KB-native `id` +
+ * `kind`. `path` encodes the id as `folder/<id>` or `page/<id>`.
+ */
+export interface KbTreeNode {
+  id: number
+  name: string
+  path: string
+  type: WorktreeNodeType
+  kind: 'folder' | 'page'
+  children?: KbTreeNode[]
+}
+
+/** `GET /api/pages/:id` response — a page plus its ordered blocks. */
+export interface KbPageDetail {
+  page: KbPage
+  blocks: KbBlock[]
+}
+
 /**
  * Durable, server-side per-user preferences persisted in `zmrng.db` (the
  * `settings` kv table), read/written over `GET`/`PUT /api/settings`. These were
