@@ -849,6 +849,22 @@ export interface KbPageDetail {
 }
 
 /**
+ * `POST /api/spaces/:id/pages/from-message` request body (KB "Send to KB", T4
+ * #154): promote a team-channel message into a durable KB page in space `:id`.
+ * `messageId` is the source message the server looks up (its body + channel are
+ * read canonically — provenance is built server-side, never trusted from here).
+ * `folderId` optionally places the page in a folder (null/omitted = space root).
+ * `title` is an optional editable label; when blank the server derives it from
+ * the message body. The response is a normal `KbPage`. MANUAL MIRROR of the
+ * server's `packages/server/src/types.ts`.
+ */
+export interface KbPageFromMessageInput {
+  messageId: number
+  folderId?: number | null
+  title?: string
+}
+
+/**
  * Durable, server-side per-user preferences persisted in `zmrng.db` (the
  * `settings` kv table), read/written over `GET`/`PUT /api/settings`. These were
  * previously browser `localStorage` only, which proved unreliable across

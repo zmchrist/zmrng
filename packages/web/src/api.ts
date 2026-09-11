@@ -23,6 +23,7 @@ import type {
   KbPageDetail,
   KbFolder,
   KbPage,
+  KbPageFromMessageInput,
   KbBlock,
   KbBlockKind,
   KbRevision,
@@ -316,6 +317,21 @@ export const api = {
     req<KbPage>(`/api/spaces/${spaceId}/pages`, {
       method: 'POST',
       body: JSON.stringify({ title, author, folderId }),
+    }),
+  /**
+   * Promote a team-channel message into a durable KB page (T4, #154). The server
+   * looks the message up by id, builds the page body + provenance canonically
+   * server-side, and returns the created page. Optional `folderId` places it in
+   * a folder; optional `title` overrides the server-derived label. KB data is
+   * server-local, so this route takes no origin prefix (like the other KB calls).
+   */
+  createPageFromMessage: (
+    spaceId: number,
+    input: KbPageFromMessageInput,
+  ) =>
+    req<KbPage>(`/api/spaces/${spaceId}/pages/from-message`, {
+      method: 'POST',
+      body: JSON.stringify(input),
     }),
   /** Rename and/or move a page. */
   updatePage: (id: number, patch: { title?: string; folderId?: number | null }) =>
