@@ -232,7 +232,7 @@ export interface TaskComment {
 }
 
 /** Top-level workspace shell mode (UI-only; mirrored for type-parity). */
-export type WorkspaceMode = 'tasks' | 'board' | 'workspace' | 'team'
+export type WorkspaceMode = 'tasks' | 'board' | 'workspace' | 'team' | 'kb'
 
 // ---- workspace dashboard grid (customizable card grid) ---------------------
 
