@@ -16,6 +16,22 @@ backlog ─Start─▶ clarify ─READY─▶ planning ─PLAN_READY─▶ execu
 ```
 A worker that needs a missing subagent emits `ZMRNG_BLOCKED: <reason>` and parks in `blocked` until the operator resumes it. `building` is a legacy single-phase status, retained only for old DB rows/events.
 
+**Security-scan gate (a `validating` sub-step, NOT a new phase).** Between `validating`
+and the PR there is a deterministic security scan. The worker no longer pushes/opens the
+PR from its execute tail — it commits on the branch and emits `ZMRNG_SCAN_READY`, then
+waits. The orchestrator runs a fixed scanner (semgrep SAST + osv-scanner SCA), machine-
+asserts the verdict, and only then drives the outcome: **green** → sends the extracted
+`openPrKickoff` into the same live session (→ PR url → `review`, unchanged); **red** →
+sends `securityFixKickoff` and the worker iterates (bounded by `maxRounds`), re-emitting
+`ZMRNG_SCAN_READY` each round; **rounds exhausted** → `blocked`; **any scanner error /
+unparseable output** → fail-closed (treated as red, never a pass). The task **stays in
+`validating`** the whole time — there is deliberately no `scanning` status/pill (D6). The
+execute lane is freed *before* the scan runs so the deterministic machine work doesn't
+idle a lane (D3). Per-repo policy via the optional `security` block in the repo registry;
+scans persist to the additive `security_scans` table and surface read-only in the web
+Security panel. Full contract + decisions: `.claude/docs/services-reference.md` and
+`docs/adr/0001-deterministic-security-scan-gate.md`.
+
 ## ⚠️ App-only focus (operator directive)
 **All work in this directory targets the desktop APP (`packages/desktop` Tauri shell),
 not the browser "website".** There is one codebase — `packages/web` is the app's
