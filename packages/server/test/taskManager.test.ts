@@ -518,3 +518,58 @@ describe('deleteTask', () => {
     ).toBe(true)
   })
 })
+
+// D2/D4 — the cheap-default pipeline. createTask persists NULL when the operator
+// picked nothing, so each phase resolves its own cheap default at spawn time:
+// clarify → sonnet (D4), direct execute → sonnet/medium (D2). An explicit
+// operator pick is stored verbatim and wins everywhere.
+describe('default model/effort resolution (D2/D4)', () => {
+  it('createTask persists NULL model/effort when the operator supplied none', () => {
+    const t = mgr.createTask('menial', 'do it', undefined, undefined, 'normal', 'sandbox', 'direct')
+    const row = db.getTask(t.id)!
+    expect(row.model).toBeNull()
+    expect(row.effort).toBeNull()
+  })
+
+  it('createTask persists the operator’s explicit pick verbatim', () => {
+    const t = mgr.createTask('picky', 'do it', 'opus', 'max', 'normal', 'sandbox', 'direct')
+    const row = db.getTask(t.id)!
+    expect(row.model).toBe('opus')
+    expect(row.effort).toBe('max')
+  })
+
+  it('clarify phase spawns on sonnet regardless of the task’s persisted model (D4)', async () => {
+    // Explicit opus pick — clarify must STILL run sonnet (cheap Q&A phase).
+    const t = mgr.createTask('big task', 'do it', 'opus', 'high', 'normal', 'sandbox', 'plan')
+    await mgr.start(t.id)
+    expect(status(t.id)).toBe('clarify')
+    expect(latest().opts.model).toBe('sonnet')
+    // The operator log is truthful — it reports the ACTUAL model used (sonnet).
+    expect(
+      events.some(
+        (e) =>
+          e.type === 'event' && /settings — model=sonnet/.test(e.event.payload.note ?? ''),
+      ),
+    ).toBe(true)
+  })
+
+  it('direct execute resolves sonnet/medium when the operator picked nothing (D2)', async () => {
+    const id = await startTask('menial direct', 'direct') // no model/effort supplied → NULL
+    const clarify = latest()
+    clarify.say('scope clear\nZMRNG_READY\ndo the menial thing')
+    expect(status(id)).toBe('executing')
+    const exec = latest()
+    expect(exec).not.toBe(clarify)
+    expect(exec.opts.model).toBe('sonnet')
+    expect(exec.opts.effort).toBe('medium')
+  })
+
+  it('direct execute honors an explicit opus/high pick (operator wins)', async () => {
+    const t = mgr.createTask('heavy direct', 'do it', 'opus', 'high', 'normal', 'sandbox', 'direct')
+    await mgr.start(t.id)
+    latest().say('scope clear\nZMRNG_READY\ndo the heavy thing')
+    expect(status(t.id)).toBe('executing')
+    expect(latest().opts.model).toBe('opus')
+    expect(latest().opts.effort).toBe('high')
+  })
+})
