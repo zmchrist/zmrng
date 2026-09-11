@@ -14,7 +14,7 @@ import { FileTree } from './FileTree'
 import { api } from '../api'
 import { renderMarkdown } from '../kbMarkdown'
 import { filterKbTree, collectFolders, pageBreadcrumb, parseKbNodePath } from '../kbTree'
-import { isBlockConflict, mergeBlock } from '../kbConflict'
+import { isBlockConflict, mergeBlock, removeBlock as removeBlockFromList } from '../kbConflict'
 import {
   encodeHello,
   encodePing,
@@ -196,6 +196,21 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
           }
         } else if (msg.type === 'page.presence') {
           if (msg.pageId === openPageIdRef.current) setViewers(msg.viewers)
+        } else if (msg.type === 'page.delete') {
+          // A block was deleted elsewhere — converge by dropping it from the open
+          // page and cleaning up any local draft / open editor for that block.
+          if (msg.pageId !== openPageIdRef.current) return
+          const { blockId } = msg
+          setDetail((prev) =>
+            prev ? { ...prev, blocks: removeBlockFromList(prev.blocks, blockId) } : prev,
+          )
+          setDrafts((prev) => {
+            if (!(blockId in prev)) return prev
+            const next = { ...prev }
+            delete next[blockId]
+            return next
+          })
+          setEditingId((cur) => (cur === blockId ? null : cur))
         }
       }
       ws.onclose = () => {
