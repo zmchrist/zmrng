@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { config, repoById } from './config.js'
+import { config, mergeSecurityPolicy, repoById } from './config.js'
 import type { Db, TaskPatch } from './db.js'
 import {
   defaultRunnerFactory,
@@ -8,6 +8,20 @@ import {
   type RunnerFactory,
   type RunnerLike,
 } from './runner.js'
+import {
+  defaultScanRunnerFactory,
+  ScannerUnavailableError,
+  wellFormedScanOutput,
+  type RawScanOutput,
+  type ScanRunnerFactory,
+} from './scanRunner.js'
+import {
+  evaluateThreshold,
+  formatFindingsForAgent,
+  normalizeFindings,
+  parseOsv,
+  parseSemgrep,
+} from './securityScan.js'
 import { createWorktree, removeWorktree, repoSlug, seedHarness, syncLocalAfterMerge } from './worktree.js'
 import { pruneTask as pruneUiStateTask } from './uiState.js'
 import {
@@ -33,6 +47,8 @@ import {
 export const READY_RE = /^\s*ZMRNG_READY\s*$/m
 export const PLAN_READY_RE = /^\s*ZMRNG_PLAN_READY\b(.*)$/m
 export const VALIDATING_RE = /^\s*ZMRNG_VALIDATING\s*$/m
+/** Worker committed on the branch and handed control back for the security scan. */
+export const SCAN_READY_RE = /^\s*ZMRNG_SCAN_READY\s*$/m
 export const BLOCKED_RE = /^\s*ZMRNG_BLOCKED\s*:?\s*(.*)$/m
 export const PR_RE = /https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/
 /** Global twin of `PR_RE` — a worker line may quote several PR URLs. */
@@ -252,8 +268,33 @@ export function executeKickoff(
     'Finally:',
     "- Run this repo's full validation and ensure every check passes — fix every failure. For a Node repo that is `npm run typecheck && npm run lint && npm test && npm run build` (skip a script this repo does not define).",
     '- MANDATORY before committing: run the `sync-docs` skill (the Skill tool with skill "sync-docs", equivalent to the operator running `/sync-docs`) to bring this repo\'s documentation in sync with your changes, and stage any docs it updates. Do this even if the doc step in the QA chain above already ran. Skip only if the skill is genuinely unavailable in this repo.',
-    `- Stage the plan file itself (\`${planPath ?? 'the plan you wrote under .agents/plans/'}\`) along with your changes — the PR body links it, so an uncommitted plan is a dead link.`,
-    '- Commit with a descriptive Conventional Commit message.',
+    `- Stage the plan file itself (\`${planPath ?? 'the plan you wrote under .agents/plans/'}\`) along with your changes — the PR body will link it, so an uncommitted plan is a dead link.`,
+    '- Commit with a descriptive Conventional Commit message ON THIS BRANCH.',
+    '',
+    'THEN HAND CONTROL BACK FOR THE SECURITY SCAN — do NOT push and do NOT open the PR yourself:',
+    '- Print the exact token ZMRNG_SCAN_READY on its own line, then STOP and wait for the orchestrator\'s next instruction.',
+    '- Do NOT run `git push`. Do NOT run `gh pr create`. Do NOT write a PR body yet.',
+    'After you commit and print ZMRNG_SCAN_READY, the orchestrator runs a deterministic security scan on your branch and will either (a) send you the instruction to open the PR, or (b) hand you a list of security findings to fix. Simply wait for that message.',
+  ].join('\n')
+}
+
+/**
+ * The EXTRACTED push → PR-body → `gh pr create` → print-URL ceremony, sent into
+ * the SAME live worker session once the deterministic security scan is GREEN.
+ * Split out of the execute/direct tails so the PR ceremony is single-sourced
+ * (and `PR_BODY_TEMPLATE` is reused verbatim — `prompts.test.ts` pins it).
+ *
+ * Exported for prompt-contract tests.
+ */
+export function openPrKickoff(
+  branch: string,
+  defaultBranch: string,
+  planPath?: string | null,
+): string {
+  return [
+    'SECURITY SCAN GREEN — the orchestrator ran the deterministic security scan on your branch and it passed the security scan with no blocking findings. You may now open the PR.',
+    `You are on branch \`${branch}\` in this worktree — do NOT create or switch branches.`,
+    `- Make sure the plan file (\`${planPath ?? 'the plan you wrote under .agents/plans/'}\`) is committed on the branch — the PR body links it, so an uncommitted plan is a dead link.`,
     `- Push the branch: git push -u origin ${branch}`,
     `- Write the PR body to \`${PR_BODY_FILE}\` (a path inside the git dir — never tracked, never committed). It MUST follow this template verbatim, with every box honestly checked or explicitly explained:`,
     '',
@@ -262,6 +303,43 @@ export function executeKickoff(
     `- Open the PR with that file (NOT \`--fill\`): gh pr create --base ${defaultBranch} --head ${branch} --title "<conventional commit style title>" --body-file "${PR_BODY_FILE}"`,
     '- Write the PR title and body in normal, professional English regardless of your narration style.',
     'Then output the PR URL on its own line.',
+  ].join('\n')
+}
+
+/**
+ * Sent into the SAME live worker session when the deterministic security scan is
+ * RED. Carries the machine-generated `formatFindingsForAgent` report and orders
+ * the worker to FIX every blocking finding (fix the code / pin or replace the
+ * vulnerable dependency — never merely note it in the PR body), TDD a regression
+ * test where meaningful, re-commit in place, and re-emit ZMRNG_SCAN_READY so the
+ * orchestrator re-scans and machine-asserts green. `scaOnly` frames the prompt
+ * for the `direct` flow (D2 — direct gets the osv/SCA check only, no SAST).
+ *
+ * Exported for prompt-contract tests.
+ */
+export function securityFixKickoff(
+  findings: string,
+  round: number,
+  maxRounds: number,
+  scaOnly = false,
+): string {
+  const scopeLine = scaOnly
+    ? 'This is the DIRECT flow: the gate is SCA-only (dependency vulnerabilities via osv-scanner), so every blocking finding below is a dependency-only issue — there is no SAST/code-scan pass to satisfy here.'
+    : 'This is the full gate: blocking findings may be code-level vulnerabilities (SAST / semgrep — SQLi, path traversal, unsafe deserialization, hard-coded secrets) OR dependency vulnerabilities (SCA / osv-scanner).'
+  return [
+    `SECURITY SCAN RED — the orchestrator ran a deterministic security scan on your committed branch and it found blocking security issues. This is fix round ${round} of ${maxRounds} (round ${round}/${maxRounds}); the gate re-asserts GREEN by machine, so you cannot talk your way past it — you must actually fix the findings.`,
+    scopeLine,
+    '',
+    'Blocking findings (deterministic scanner report):',
+    findings,
+    '',
+    'HOW TO FIX (this is the work, not a suggestion):',
+    '- Fix EVERY blocking finding above. For a code (SAST) finding, fix the vulnerable code. For a dependency (SCA) finding, pin or replace the vulnerable dependency with a fixed version (update the lockfile) — do NOT merely note it in the PR body or add a comment; the scanner re-checks the actual code and lockfile.',
+    '- Where a regression test meaningfully locks in the fix, add or update one using this repo\'s existing test runner, in the SAME commit as the fix.',
+    '- Keep the change tight and on-branch; do NOT switch/create branches, do NOT push, do NOT open the PR.',
+    '- Re-commit in place on the branch with a clear Conventional Commit message describing the security fix.',
+    '',
+    'When every blocking finding is fixed and committed, print the exact token ZMRNG_SCAN_READY on its own line and STOP. The orchestrator re-runs the scan; if it is green you will be told to open the PR, otherwise you get the remaining findings for the next round.',
   ].join('\n')
 }
 
@@ -297,18 +375,15 @@ export function directKickoff(
     '- TESTS (conditional): if the change has behaviour worth locking in, add or update tests using this repo\'s existing test runner and land them in the SAME commit. If the change is a pure fix/config/merge-conflict resolution with nothing meaningful to test-drive, you may skip tests — but say so explicitly under "Testing" in the PR body, naming the reason. Never silently omit.',
     '- DOCS (conditional): only run the `sync-docs` skill if your change actually touches a documented surface (public API, commands, schema, user-facing behaviour). For a self-contained fix that changes no documented surface, skip it.',
     '',
-    'BEFORE OPENING THE PR:',
-    "- Run this repo's full validation INLINE yourself and ensure every check passes — fix every failure. For a Node repo that is `npm run typecheck && npm run lint && npm test && npm run build` (skip a script this repo does not define). This green run is the hard gate; do not open the PR until it passes.",
-    '- Commit with a descriptive Conventional Commit message.',
-    `- Push the branch: git push -u origin ${branch}`,
-    `- Write the PR body to \`${PR_BODY_FILE}\` (a path inside the git dir — never tracked, never committed). It MUST follow this template verbatim, with every box honestly checked or explicitly explained (mark the Plan/Spec/Review boxes as intentionally skipped for the direct flow, and the TDD box honestly per what you did above):`,
+    'BEFORE HANDING OFF:',
+    "- Run this repo's full validation INLINE yourself and ensure every check passes — fix every failure. For a Node repo that is `npm run typecheck && npm run lint && npm test && npm run build` (skip a script this repo does not define). This green run is the hard gate; do not hand off until it passes.",
+    '- Commit with a descriptive Conventional Commit message ON THIS BRANCH.',
     '',
-    PR_BODY_TEMPLATE,
-    '',
-    `- Open the PR with that file (NOT \`--fill\`): gh pr create --base ${defaultBranch} --head ${branch} --title "<conventional commit style title>" --body-file "${PR_BODY_FILE}"`,
-    '- Write the PR title and body in normal, professional English regardless of your narration style.',
+    'THEN HAND CONTROL BACK FOR THE SECURITY SCAN — do NOT push and do NOT open the PR yourself:',
+    '- Print the exact token ZMRNG_SCAN_READY on its own line, then STOP and wait for the orchestrator\'s next instruction.',
+    '- Do NOT run `git push`. Do NOT run `gh pr create`. Do NOT write a PR body yet.',
+    'After you commit and print ZMRNG_SCAN_READY, the orchestrator runs a deterministic dependency (SCA) security scan on your branch and will either send you the instruction to open the PR, or hand you dependency findings to fix. Simply wait for that message.',
     'If you discover mid-flight that this task is genuinely architectural/multi-file and needs a real plan, STOP and output `ZMRNG_BLOCKED: needs the plan flow` on its own line rather than half-planning here.',
-    'Then output the PR URL on its own line.',
   ].join('\n')
 }
 
@@ -395,17 +470,37 @@ export class TaskManager {
    * remote) and PR URLs cannot be repo-scoped — see `prUrlForTask`.
    */
   private repoSlugs = new Map<string, string | null>()
+  /**
+   * The security fix-round count per task (transient, D7-bounded). Incremented
+   * each RED round; absent = no scan run yet. Cleared alongside the other
+   * transient sets on completion/cancel/delete/fail (scan sub-state lives here,
+   * NOT in a new TaskStatus — D6, the task stays in `validating` throughout).
+   */
+  private securityRounds = new Map<string, number>()
+  /**
+   * Tasks whose next security FIX round is queued behind the lane cap (D3): a
+   * red→fix round is real agent work and competes for a lane. Maps the task id
+   * to the fix-kickoff text to send into its EXISTING live session once a lane
+   * frees — routed by `beginPhaseForFlow` so promotion re-sends the fix instead
+   * of spawning a fresh child. Transient by design.
+   */
+  private securityFixPending = new Map<string, string>()
 
   /**
    * @param runnerFactory builds the per-phase worker wrapper. Defaults to the
    *   real `claude`-spawning `Runner`; tests (and, later, pluggable agent
    *   adapters — Appendix A) inject a fake to drive the state machine without a
    *   real process. This one seam is the only test hook into the engine.
+   * @param scanFactory runs the deterministic security scan. Defaults to the
+   *   real semgrep/osv-scanner runner; tests inject a `FakeScanRunner` returning
+   *   fixture JSON so the gate state machine never spawns real scanners, hits the
+   *   network, or needs the binaries installed.
    */
   constructor(
     private db: Db,
     private broadcast: (e: WsEvent) => void,
     private runnerFactory: RunnerFactory = defaultRunnerFactory,
+    private scanFactory: ScanRunnerFactory = defaultScanRunnerFactory,
   ) {}
 
   // ---- helpers ----
@@ -436,6 +531,8 @@ export class TaskManager {
     this.interrupting.delete(taskId)
     this.resuming.delete(taskId)
     this.repoSlugs.delete(taskId)
+    this.securityRounds.delete(taskId)
+    this.securityFixPending.delete(taskId)
     this.freeLane(taskId)
     this.transition(taskId, 'failed', note)
   }
@@ -576,6 +673,19 @@ export class TaskManager {
       this.transition(taskId, 'validating', 'QA/review/docs chain started')
       return
     }
+    // Security gate (D6): the worker committed and printed ZMRNG_SCAN_READY. The
+    // scan folds into `validating` (NOT a new status): the plan flow is already
+    // there (it emitted ZMRNG_VALIDATING first); the direct flow prints the token
+    // straight from `executing`, so onScanReady moves it into `validating` for
+    // the scan. Handle this BEFORE PR detection — the worker no longer prints a
+    // PR from the execute tail; a PR only appears AFTER openPrKickoff on green.
+    if (
+      (task.status === 'validating' || task.status === 'executing') &&
+      SCAN_READY_RE.test(text)
+    ) {
+      void this.onScanReady(task)
+      return
+    }
     const pr = this.prUrlForTask(taskId, text)
     if (pr && (task.status === 'executing' || task.status === 'validating') && !task.prUrl) {
       this.onPr(task, pr)
@@ -628,9 +738,25 @@ export class TaskManager {
   /** Start the correct fresh session for a task's flow (holds an execute lane).
    *  A queued RESTART routes to `beginResume` (resume kickoff) instead. */
   private beginPhaseForFlow(task: Task): void {
+    // A queued security FIX round promotes back into its EXISTING live session
+    // (the worker was never killed at ZMRNG_SCAN_READY) — send the fix kickoff,
+    // do NOT spawn a fresh child.
+    if (this.securityFixPending.has(task.id)) {
+      this.sendSecurityFix(task)
+      return
+    }
     if (this.resuming.has(task.id)) this.beginResume(task)
     else if (task.flow === 'plan') this.beginPlan(task)
     else this.beginDirect(task)
+  }
+
+  /** Send a queued security fix-round kickoff into the task's existing live session. */
+  private sendSecurityFix(task: Task): void {
+    const text = this.securityFixPending.get(task.id)
+    this.securityFixPending.delete(task.id)
+    this.patch(task.id, { queued: false })
+    this.emitEvent(task.id, 'status', { sub: 'status', note: 'security fix round — lane acquired' })
+    if (text) this.runners.get(task.id)?.send(text)
   }
 
   /**
@@ -728,6 +854,163 @@ export class TaskManager {
     // Keep the child alive and the lane held; the operator resumes after adding the agent.
   }
 
+  /** Persist one scan round and broadcast the row's task-facing verdict. */
+  private persistScan(
+    taskId: string,
+    round: number,
+    verdict: 'pass' | 'fail',
+    findings: ReturnType<typeof normalizeFindings>,
+    toolVersions: Record<string, string>,
+  ): void {
+    this.db.insertSecurityScan({ taskId, round, verdict, findings, toolVersions, now: now() })
+  }
+
+  /** Emit the `security` event the UI renders (verdict + round + blocking count + summary). */
+  private emitSecurityEvent(
+    taskId: string,
+    verdict: 'pass' | 'fail',
+    round: number,
+    maxRounds: number,
+    blockingCount: number,
+    summary: string,
+  ): void {
+    this.emitEvent(taskId, 'security', {
+      sub: 'security',
+      verdict,
+      round,
+      maxRounds,
+      blockingCount,
+      text: summary,
+    })
+  }
+
+  /**
+   * The deterministic security gate (D1–D7). Fired when the worker commits and
+   * prints ZMRNG_SCAN_READY. The orchestrator (never the agent) runs the scan and
+   * asserts the verdict; the agent is only ever the fixer. Fails closed: a
+   * scanner crash / unparseable output is treated as RED, never a pass.
+   */
+  private async onScanReady(task: Task): Promise<void> {
+    const repo = repoById(task.repoId)
+    const defaultBranch = repo?.defaultBranch ?? 'main'
+    const branch = task.branch ?? 'unknown-branch'
+    const planPath = task.planPath
+    // Effective per-task policy: the global default merged with the repo override.
+    const policy = mergeSecurityPolicy(config.security, repo?.security)
+
+    // Opt-out (the ONLY silent skip): straight to the PR, no scan row (D6/§5.1).
+    if (policy.enabled === false) {
+      this.patch(task.id, { securityStatus: 'skipped' })
+      this.emitEvent(task.id, 'status', {
+        sub: 'status',
+        note: 'security gate disabled for this repo — skipping scan',
+      })
+      this.runners.get(task.id)?.send(openPrKickoff(branch, defaultBranch, planPath))
+      return
+    }
+
+    // Fold the scan into `validating` (D6): the direct flow prints the token from
+    // `executing`, so move it in for the scan; the plan flow is already there.
+    if (task.status !== 'validating') {
+      this.transition(task.id, 'validating', 'security scan started')
+    }
+
+    // D3 — release the execute lane BEFORE the deterministic scan: it is machine
+    // work needing no live agent, so it must not idle one of the scarce lanes.
+    this.freeLane(task.id)
+
+    const round = (this.securityRounds.get(task.id) ?? 0) + 1
+    const sast = task.flow === 'plan' // D2 — direct flow is SCA-only (osv), no SAST.
+    this.emitEvent(task.id, 'status', {
+      sub: 'status',
+      note: `security scan — round ${round}/${policy.maxRounds} (${sast ? 'SAST + SCA' : 'SCA only (direct flow, D2)'}), lane released`,
+    })
+
+    let raw: RawScanOutput
+    try {
+      raw = await this.scanFactory({
+        worktree: task.worktree ?? '',
+        baseRef: defaultBranch,
+        policy,
+        sast,
+      })
+    } catch (err) {
+      if (err instanceof ScannerUnavailableError) {
+        // D5 — scanners absent AND unprovisionable: park blocked with the install
+        // message (NOT a pass). This is the only non-opt-out block-on-missing path.
+        this.onBlocked(task, `security scan cannot run — ${err.message}`)
+        return
+      }
+      // Fail-closed: any other scanner rejection is RED-BLOCKED, never a pass.
+      this.securityRounds.delete(task.id)
+      this.persistScan(task.id, round, 'fail', [], {})
+      this.patch(task.id, { securityStatus: 'fail' })
+      this.emitSecurityEvent(task.id, 'fail', round, policy.maxRounds, 0, 'security scan failed to complete (scanner error)')
+      this.onBlocked(task, `security scan failed to complete (scanner error) — treating as red (fail-closed): ${errMsg(err)}`)
+      return
+    }
+
+    // Fail-closed on garbage: non-empty output that is not the JSON object shape
+    // both scanners emit must NOT be silently parsed to [] (a false pass).
+    if (!wellFormedScanOutput(raw.semgrep) || !wellFormedScanOutput(raw.osv)) {
+      this.securityRounds.delete(task.id)
+      this.persistScan(task.id, round, 'fail', [], raw.toolVersions)
+      this.patch(task.id, { securityStatus: 'fail' })
+      this.emitSecurityEvent(task.id, 'fail', round, policy.maxRounds, 0, 'security scan produced unparseable output')
+      this.onBlocked(task, 'security scan produced unparseable output — treating as red (fail-closed)')
+      return
+    }
+
+    const findings = normalizeFindings(parseSemgrep(raw.semgrep), parseOsv(raw.osv))
+    const { verdict, blocking } = evaluateThreshold(findings, policy)
+    this.persistScan(task.id, round, verdict, findings, raw.toolVersions)
+    this.patch(task.id, { securityStatus: verdict })
+
+    if (verdict === 'pass') {
+      this.securityRounds.delete(task.id)
+      this.emitSecurityEvent(task.id, 'pass', round, policy.maxRounds, 0, 'security scan passed — no blocking findings')
+      this.runners.get(task.id)?.send(openPrKickoff(branch, defaultBranch, planPath))
+      return
+    }
+
+    // RED.
+    const summary = `security scan red — ${blocking.length} blocking finding(s) (round ${round}/${policy.maxRounds})`
+    this.emitSecurityEvent(task.id, 'fail', round, policy.maxRounds, blocking.length, summary)
+
+    if (round >= policy.maxRounds) {
+      // Rounds exhausted → park blocked with a findings summary; child stays alive.
+      this.securityRounds.delete(task.id)
+      this.onBlocked(
+        task,
+        `security scan still red after ${policy.maxRounds} round(s) — ${blocking.length} blocking finding(s)`,
+      )
+      return
+    }
+
+    // Rounds remain → run a fix round. Re-acquire a lane (queue behind the cap
+    // like any execute work, D3); send the fix kickoff into the SAME live session.
+    this.securityRounds.set(task.id, round)
+    const fixText = securityFixKickoff(
+      formatFindingsForAgent(blocking),
+      round,
+      policy.maxRounds,
+      task.flow === 'direct',
+    )
+    if (this.executeLanes.size < config.maxLanes) {
+      this.executeLanes.add(task.id)
+      this.emitEvent(task.id, 'status', { sub: 'status', note: 'security fix round — lane acquired' })
+      this.runners.get(task.id)?.send(fixText)
+    } else {
+      this.securityFixPending.set(task.id, fixText)
+      this.patch(task.id, { queued: true })
+      this.executeQueue.push(task.id)
+      this.emitEvent(task.id, 'status', {
+        sub: 'status',
+        note: `security fix round queued — ${this.executeLanes.size}/${config.maxLanes} lanes busy`,
+      })
+    }
+  }
+
   /**
    * Pick the PR URL from a worker line that belongs to *this task's* target
    * repo. A worker legitimately quotes other repos' PR URLs (a linked issue, a
@@ -750,6 +1033,8 @@ export class TaskManager {
     this.patch(task.id, { prUrl })
     this.transition(task.id, 'review', 'PR opened')
     this.interrupting.delete(task.id)
+    this.securityRounds.delete(task.id)
+    this.securityFixPending.delete(task.id)
     this.freeLane(task.id)
     // Autonomous work is done; stop the process but keep the worktree for review.
     this.runners.get(task.id)?.kill()
@@ -1048,6 +1333,8 @@ export class TaskManager {
     this.interrupting.delete(taskId)
     this.resuming.delete(taskId)
     this.repoSlugs.delete(taskId)
+    this.securityRounds.delete(taskId)
+    this.securityFixPending.delete(taskId)
     this.freeLane(taskId)
     if (task.stale) this.patch(taskId, { stale: false })
     const repo = repoById(task.repoId)
@@ -1086,6 +1373,8 @@ export class TaskManager {
     this.resuming.delete(taskId)
     this.pendingAttachments.delete(taskId)
     this.repoSlugs.delete(taskId)
+    this.securityRounds.delete(taskId)
+    this.securityFixPending.delete(taskId)
     this.freeLane(taskId)
     if (task.stale) this.patch(taskId, { stale: false })
     if (task.worktree) {
@@ -1117,6 +1406,8 @@ export class TaskManager {
     this.resuming.delete(taskId)
     this.pendingAttachments.delete(taskId)
     this.repoSlugs.delete(taskId)
+    this.securityRounds.delete(taskId)
+    this.securityFixPending.delete(taskId)
     this.freeLane(taskId)
     if (task.worktree) {
       const repoPath = repoById(task.repoId)?.path ?? config.targetRepo

@@ -8,8 +8,10 @@ import {
   clarifyKickoff,
   directKickoff,
   executeKickoff,
+  openPrKickoff,
   planKickoff,
   resumeKickoff,
+  securityFixKickoff,
   systemPrompt,
 } from '../src/phases.js'
 import type { Task, TaskStatus } from '../src/types.js'
@@ -173,13 +175,25 @@ describe('executeKickoff', () => {
     )
   })
 
-  it('opens the PR with --body-file, never --fill', () => {
-    expect(prompt).toContain(`--body-file "${PR_BODY_FILE}"`)
-    expect(prompt).not.toContain('gh pr create --fill')
-  })
-
-  it('embeds the full PR body template', () => {
-    expect(prompt).toContain(PR_BODY_TEMPLATE)
+  // The push/PR ceremony moved OUT of the execute tail (D-gate): the worker now
+  // commits, prints ZMRNG_SCAN_READY, and STOPS — the orchestrator runs the
+  // security scan and only then sends openPrKickoff. A silent regression that
+  // re-adds the push/PR here (or drops the commit-and-wait rule) would let a
+  // worker open a PR that never passed the gate, degrading every future run.
+  it('ends with commit → ZMRNG_SCAN_READY → STOP, and does NOT push or open the PR itself', () => {
+    expect(prompt).toContain('ZMRNG_SCAN_READY')
+    expect(prompt).toMatch(/commit/i)
+    // must NOT actually push or open a PR from the execute tail anymore (the
+    // do-NOT-push prohibition wording is allowed; the executable command is not)
+    expect(prompt).not.toMatch(/git push -u origin/)
+    expect(prompt).not.toMatch(/gh pr create --base/)
+    expect(prompt).not.toContain(PR_BODY_TEMPLATE)
+    // explicit wait-for-orchestrator + do-not-push/PR instruction
+    expect(prompt).toMatch(/do NOT push/i)
+    expect(prompt).toMatch(/do NOT open the PR/i)
+    expect(prompt).toMatch(/wait for the orchestrator/i)
+    // the commit instruction precedes the token, which precedes the STOP.
+    expect(prompt.search(/commit/i)).toBeLessThan(prompt.indexOf('ZMRNG_SCAN_READY'))
   })
 
   it('does not instruct blocking on a bare qa/code-reviewer/doc-updater name', () => {
@@ -224,15 +238,83 @@ describe('directKickoff', () => {
     expect(prompt).not.toMatch(/RED —/)
   })
 
-  it('keeps the hard gates: green validation and a PR via --body-file', () => {
+  it('keeps the green-validation hard gate but hands the PR back via the scan token', () => {
     expect(prompt).toMatch(/green run is the hard gate/)
-    expect(prompt).toContain(`--body-file "${PR_BODY_FILE}"`)
-    expect(prompt).not.toContain('gh pr create --fill')
-    expect(prompt).toContain(PR_BODY_TEMPLATE)
+    // The PR ceremony moved to openPrKickoff; the direct tail now commits and
+    // waits for the orchestrator's scan, same as the plan flow.
+    expect(prompt).toContain('ZMRNG_SCAN_READY')
+    expect(prompt).not.toMatch(/git push -u origin/)
+    expect(prompt).not.toMatch(/gh pr create --base/)
+    expect(prompt).not.toContain(PR_BODY_TEMPLATE)
+    expect(prompt).toMatch(/do NOT push/i)
+    expect(prompt).toMatch(/wait for the orchestrator/i)
   })
 
   it('does not write or reference a plan file', () => {
     expect(prompt).not.toMatch(/\.agents\/plans\//)
+  })
+})
+
+describe('openPrKickoff', () => {
+  const prompt = openPrKickoff('feat/zmrng/x-1', 'main', '.agents/plans/x.md')
+
+  it('is the extracted push → PR-body → gh pr create → print-URL ceremony', () => {
+    expect(prompt).toMatch(/git push -u origin feat\/zmrng\/x-1/)
+    expect(prompt).toContain(`--body-file "${PR_BODY_FILE}"`)
+    expect(prompt).not.toContain('gh pr create --fill')
+    expect(prompt).toMatch(/gh pr create --base main --head feat\/zmrng\/x-1/)
+    expect(prompt).toMatch(/output the PR URL/i)
+  })
+
+  it('reuses PR_BODY_TEMPLATE verbatim (pins it)', () => {
+    expect(prompt).toContain(PR_BODY_TEMPLATE)
+  })
+
+  it('states the security scan passed (why the worker is now allowed to open the PR)', () => {
+    expect(prompt).toMatch(/security scan (is )?green|passed the security scan|scan.*passed/i)
+  })
+
+  it('stages the named plan file, and falls back to a generic mention when null', () => {
+    expect(prompt).toMatch(/`\.agents\/plans\/x\.md`/)
+    const noPlan = openPrKickoff('feat/zmrng/x-1', 'main')
+    expect(noPlan).toMatch(/git push -u origin/)
+    expect(noPlan).toContain(PR_BODY_TEMPLATE)
+  })
+})
+
+describe('securityFixKickoff', () => {
+  const findings = '2 blocking security finding(s):\n- [osv] GHSA-x in lodash — proto pollution (fix available)'
+  const prompt = securityFixKickoff(findings, 1, 2)
+
+  it('embeds the deterministic findings report verbatim', () => {
+    expect(prompt).toContain(findings)
+  })
+
+  it('orders the worker to FIX every blocking finding, not merely note it in the PR body', () => {
+    expect(prompt).toMatch(/fix (every|all)/i)
+    expect(prompt).toMatch(/pin or replace|replace the vulnerable|update the vulnerable/i)
+    expect(prompt).toMatch(/do NOT (merely |just )?note it in the PR body/i)
+  })
+
+  it('asks for a regression test where meaningful and a re-commit in place', () => {
+    expect(prompt).toMatch(/regression test/i)
+    expect(prompt).toMatch(/re-commit|commit in place|commit again/i)
+  })
+
+  it('re-emits ZMRNG_SCAN_READY and states the round budget (machine re-assertion)', () => {
+    expect(prompt).toContain('ZMRNG_SCAN_READY')
+    expect(prompt).toMatch(/round 1 of 2|round 1\/2/i)
+  })
+
+  it('the plan-flow framing covers BOTH SAST (code) and SCA (dependency) fixes', () => {
+    // default scaOnly=false → full framing, mentions code-level vulns too
+    expect(prompt).toMatch(/code|SAST|semgrep/i)
+  })
+
+  it('the direct-flow framing is SCA-only (D2): dependency vulns, no SAST fix wording', () => {
+    const scaOnly = securityFixKickoff(findings, 1, 2, true)
+    expect(scaOnly).toMatch(/dependency|dependencies|SCA|osv/i)
+    expect(scaOnly).toMatch(/SCA-only|dependency-only|only the dependency/i)
   })
 })
 

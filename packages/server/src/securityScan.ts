@@ -234,7 +234,14 @@ function findingKey(f: SecurityFinding): string {
  */
 export function formatFindingsForAgent(blocking: SecurityFinding[]): string {
   if (blocking.length === 0) return 'No blocking security findings.'
-  const sorted = [...blocking].sort((a, b) => findingKey(a).localeCompare(findingKey(b)))
+  const sorted = [...blocking].sort((a, b) => {
+    // Byte-stable code-unit comparison (NOT locale-aware localeCompare, whose
+    // ordering depends on the host OS/locale) so an identical finding set always
+    // produces a byte-identical report — the determinism contract prompts.test.ts pins.
+    const ka = findingKey(a)
+    const kb = findingKey(b)
+    return ka < kb ? -1 : ka > kb ? 1 : 0
+  })
   const lines = sorted.map((f) => {
     if (f.tool === 'semgrep') {
       const loc = f.path ? `${f.path}${f.line ? `:${f.line}` : ''}` : '(unknown location)'
