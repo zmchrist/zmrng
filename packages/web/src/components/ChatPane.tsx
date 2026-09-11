@@ -17,7 +17,7 @@ import {
   type ThreadState,
 } from '../chatThread'
 import { ThinkingDots } from './ThinkingDots'
-import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget } from '../types'
+import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget, WorkflowPreset } from '../types'
 
 interface Props {
   /** Stable id for this chat instance (one WebSocket / claude session per id). */
@@ -31,6 +31,10 @@ interface Props {
    *  the config row's Repo select, same as model/effort/style — picking a
    *  different repo respawns the session. */
   initialRepoId?: string
+  /** The workflow preset chosen at launch (`'none'` = no working-mode
+   *  directive). Changeable live via the config row's Workflow select, same as
+   *  model/effort/style — picking a different workflow respawns the session. */
+  initialWorkflow?: WorkflowPreset
   /** Same repo registry as task creation (`GET /api/repos`), for the live
    *  Repo select. */
   repos: RepoTarget[]
@@ -46,6 +50,7 @@ const STYLE_OPTIONS: readonly CaveStyle[] = [
   'caveman-ultra',
   'wenyan-full',
 ]
+const WORKFLOW_OPTIONS: readonly WorkflowPreset[] = ['none', 'grill', 'teach-me', 'code-review']
 
 /**
  * The standalone agent-chat pane: a classic messaging thread of user/agent
@@ -61,12 +66,14 @@ export function ChatPane({
   initialEffort = 'medium',
   initialStyle = 'caveman-full',
   initialRepoId = '',
+  initialWorkflow = 'none',
   repos,
 }: Props) {
   const [model, setModel] = useState<ModelAlias>(initialModel)
   const [effort, setEffort] = useState<EffortLevel>(initialEffort)
   const [style, setStyle] = useState<CaveStyle>(initialStyle)
   const [repoId, setRepoId] = useState(initialRepoId)
+  const [workflow, setWorkflow] = useState<WorkflowPreset>(initialWorkflow)
   // Hydrate from the saved transcript (if any) so history survives a refresh/
   // rebuild/tab-reopen — the underlying `claude` session is gone regardless,
   // so it always starts idle (`busy: false`). Plain state (not a ref) so its
@@ -94,7 +101,7 @@ export function ChatPane({
     const ws = new WebSocket(`${proto}://${location.host}/ws/chat`)
     wsRef.current = ws
 
-    ws.onopen = () => ws.send(encodeStart(model, effort, style, repoId))
+    ws.onopen = () => ws.send(encodeStart(model, effort, style, repoId, undefined, workflow))
     ws.onmessage = (e) => {
       const msg = parseChatServerMsg(String(e.data))
       if (!msg) return
@@ -121,7 +128,7 @@ export function ChatPane({
       wsRef.current = null
       ws.close()
     }
-  }, [id, model, effort, style, repoId])
+  }, [id, model, effort, style, repoId, workflow])
 
   // Bottom-pin: only follow new items if the operator was already at the
   // bottom; otherwise `hasNew` flips true and a pill offers to jump down.
@@ -222,6 +229,22 @@ export function ChatPane({
           {STYLE_OPTIONS.map((st) => (
             <option key={st} value={st}>
               {st}
+            </option>
+          ))}
+        </select>
+        <select
+          className={styles.select}
+          aria-label="Workflow"
+          value={workflow}
+          disabled={thread.busy}
+          onChange={(e) => {
+            setWorkflow(e.target.value as WorkflowPreset)
+            resetForConfigChange()
+          }}
+        >
+          {WORKFLOW_OPTIONS.map((wf) => (
+            <option key={wf} value={wf}>
+              {wf}
             </option>
           ))}
         </select>

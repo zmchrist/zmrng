@@ -27,6 +27,15 @@ export type CaveStyle =
   | 'wenyan-full'
 
 /**
+ * Named working mode a standalone Chat-card session can adopt. Mechanically a
+ * prompt preset: the selected value maps to a `workflowDirective` block appended
+ * to the chat system prompt (see `chatAgent.ts`), orthogonal to and composing
+ * with `CaveStyle`. `'none'` (the default) appends nothing, so the session is
+ * byte-identical to the pre-workflow behavior. `'code-review'` is reserved for a
+ * later ticket (#159) and currently produces an empty directive. (ADR-0002.) */
+export type WorkflowPreset = 'none' | 'grill' | 'teach-me' | 'code-review'
+
+/**
  * How autonomous a task runs after clarify.
  * - `direct` — clarify → executing. Skip the plan session entirely; the clarify
  *   transcript is the brief. A lean execute chain (inline validation, conditional
@@ -378,6 +387,9 @@ export interface ChatTabMeta {
   model: ModelAlias
   effort: EffortLevel
   style: CaveStyle
+  /** Optional named working mode seeded into the launched pane; defaults to
+   *  `'none'`. A persisted tab lacking the field hydrates as `'none'`. */
+  workflow?: WorkflowPreset
   launched: boolean
 }
 
@@ -558,6 +570,13 @@ export type ChatClientMsg =
       effort: EffortLevel
       style: CaveStyle
       repoId?: string
+      /**
+       * Optional named working mode for this session (`grill`, `teach-me`, …).
+       * Its `workflowDirective` block is appended to the chat system prompt,
+       * composing with `style`. Omitted/`'none'` appends nothing, keeping the
+       * frame byte-identical to the pre-workflow one. Voice sessions ignore it.
+       */
+      workflow?: WorkflowPreset
       /**
        * When true, the session uses the dedicated spoken `voiceSystemPrompt`
        * (a fixed warm, natural-speech register tuned for TTS) instead of the
