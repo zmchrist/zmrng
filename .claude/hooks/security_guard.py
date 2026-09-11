@@ -7,6 +7,7 @@ Blocks:
   - Recursive deletion (rm -rf, find -delete, git clean -d)
   - Force-push to main/master
   - Obfuscated patterns targeting .env files
+  - git reset --hard (discards uncommitted work)
 
 Fires on: Bash, Read, Edit, Write, MultiEdit, NotebookEdit, Glob, Grep
 Fails open on malformed input — never bricks a session.

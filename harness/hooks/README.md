@@ -5,7 +5,22 @@ These are zmrng's own vendored copies of the operator's parent hooks
 task worktree by `seedHarness()` (`packages/server/src/worktree.ts`) under
 `.claude/zmrng-hooks/`.
 
-`security_guard.py` is unchanged — ships verbatim.
+## Hook inventory
+
+All five hooks carry `from __future__ import annotations` so they run on stock
+`python3` 3.9 (PEP-604 `X | None` annotations otherwise crash the interpreter,
+which would fail the hook open and silently disable enforcement).
+
+| Hook | Event | What | Override |
+|------|-------|------|----------|
+| `security_guard.py` | PreToolUse | Blocks `.env` access, recursive deletes, force-push to protected branches, `git reset --hard` | — |
+| `branch_guard.py` | PreToolUse (Edit/Write/MultiEdit) | Blocks edits when the file's repo is on a protected branch (`main`/`master`) — branch first. Worktree-aware (`git -C`). | `HERMES_ALLOW_PROTECTED_EDIT=1` |
+| `pr_shape_guard.py` | PreToolUse (Bash) | Rejects `gh pr create` with `--fill` or without `--body-file` | `HERMES_ALLOW_PR_FILL=1` |
+| `post_tool_use_lint.py` | PostToolUse (Edit/Write/MultiEdit) | Advisory linter for the detected stack — never blocks, always exits 0 | — |
+| `stop_validate.py` | Stop | Runs the project's validation gate; blocks the stop if it fails | — |
+
+`security_guard.py`, `branch_guard.py`, and `pr_shape_guard.py` ship verbatim
+from the parent hooks (`../.claude/hooks/`) — correct as-is for workers.
 
 `stop_validate.py` has intentionally diverged from the parent original and
 must **not** be re-synced from `../.claude/hooks/stop_validate.py`:

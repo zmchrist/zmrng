@@ -75,16 +75,24 @@ zmrng/
 **Annotated per-file map: `.claude/docs/codemap.md`** — read it before hunting for
 where something lives, rather than grepping the tree.
 
-## Inherits the universal Projects harness
-zmrng lives inside a universal Projects workspace and **inherits** the universal
-Projects harness one level up (the `CLAUDE.md` in the parent Projects directory):
-the PIV loop and the five hooks
-(`security_guard.py` blocks `.env`/force-push-to-main/recursive deletes;
-`branch_guard.py` blocks Edit/Write when the repo is on `main`/`master`;
-`pr_shape_guard.py` rejects `gh pr create --fill`/missing `--body-file`;
-`post_tool_use_lint.py` lints after edits; `stop_validate.py` runs lint + build before a
-turn can finish). **Do not restate or duplicate those hooks here.** This file only adds
-zmrng-specific conventions and overrides.
+## Self-contained harness (runs from this repo)
+The enforcing harness lives **inside this repo** so a fresh clone has it with no
+external setup — run Claude Code from the zmrng root and `.claude/settings.json`
+wires five hooks automatically (they are `chmod +x`; stock macOS `python3` 3.9 is
+fine — every hook carries `from __future__ import annotations`):
+
+| Hook | When | What |
+|------|------|------|
+| `security_guard.py` | Before any file/bash op | Blocks `.env` access, recursive deletes, force-push to main, `git reset --hard` |
+| `branch_guard.py` | Before Edit/Write/MultiEdit | Blocks edits when the repo is on `main`/`master` — branch first. Override: `HERMES_ALLOW_PROTECTED_EDIT=1` |
+| `pr_shape_guard.py` | Before Bash | Rejects `gh pr create` with `--fill` or without `--body-file`. Override: `HERMES_ALLOW_PR_FILL=1` |
+| `post_tool_use_lint.py` | After editing code | Advisory linter (tsc for TS) — never blocks |
+| `stop_validate.py` | When the turn tries to end | Runs `.claude/validate.sh` (→ `verify.sh --fast`); blocks the stop if it fails |
+
+Hooks fire only when Claude Code is launched from this repo (project-root
+`.claude/`). zmrng **workers** run inside a target repo and do NOT inherit these
+hooks — their guardrails are the prompt strings in `phases.ts` (pinned by
+`prompts.test.ts`).
 
 ## Key conventions
 

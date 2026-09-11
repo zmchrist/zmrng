@@ -41,7 +41,6 @@ def lint_python(file_path: str, project_root: Path) -> None:
     if not file_path.endswith(".py"):
         return
 
-    # Check for ruff via uv or direct
     if (project_root / "pyproject.toml").exists() and shutil.which("uv"):
         result = subprocess.run(
             ["uv", "run", "--directory", str(project_root), "ruff", "check", file_path],
@@ -100,7 +99,7 @@ def lint_rust(file_path: str, project_root: Path) -> None:
             cwd=str(project_root),
         )
         if result.returncode != 0:
-            print(f"[lint] cargo check issues:", file=sys.stderr)
+            print("[lint] cargo check issues:", file=sys.stderr)
             print(result.stderr[:500], file=sys.stderr)
 
 
@@ -115,7 +114,7 @@ def lint_go(file_path: str, project_root: Path) -> None:
             cwd=str(project_root),
         )
         if result.returncode != 0:
-            print(f"[lint] go vet issues:", file=sys.stderr)
+            print("[lint] go vet issues:", file=sys.stderr)
             print(result.stderr[:500], file=sys.stderr)
 
 
