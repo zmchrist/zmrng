@@ -86,7 +86,9 @@ The phase state machine and orchestration.
   default branch, and apply the per-task caveman `style` to narration only.
 - **Detection (control tokens):** `ZMRNG_READY` (clarify→planning); `ZMRNG_PLAN_READY
   model=… effort=… plan=…` (planning→executing, carries the execute-phase model/effort/
-  plan path); `ZMRNG_VALIDATING` (executing→validating); a GitHub PR URL (→review);
+  plan path); `ZMRNG_VALIDATING` (executing→validating); `ZMRNG_SCAN_READY` (the worker
+  committed and is waiting for the security scan — handled BEFORE PR detection; see the
+  Security-scan gate below); a GitHub PR URL (→review, only after `openPrKickoff`);
   `ZMRNG_BLOCKED: <reason>` (any autonomous phase → `blocked`, lane held, child alive).
 - **Per-phase fresh sessions:** each autonomous phase is its own `claude` child. On
   `ZMRNG_READY` the clarify child is replaced by a planning child (always `opus`/`high`,
@@ -171,8 +173,57 @@ The phase state machine and orchestration.
   `interrupting.delete(taskId)` to prevent flag leakage across a task's lifecycle.
 - `planKickoff` → run `/core_piv_loop:plan-feature`, QA the plan, emit `ZMRNG_PLAN_READY`.
   `executeKickoff(branch, defaultBranch, planPath)` → `/core_piv_loop:execute` →
-  `ZMRNG_VALIDATING` → qa/code-reviewer/doc-updater chain → commit → push →
-  `gh pr create --base <defaultBranch>` → print PR URL.
+  `ZMRNG_VALIDATING` → qa/code-reviewer/doc-updater chain → commit **on the branch** →
+  emit `ZMRNG_SCAN_READY` → **stop and wait** (no self-push, no self-PR). The push/PR
+  ceremony was extracted out of the execute tail into `openPrKickoff` (below), sent by
+  the orchestrator only after the security scan passes. `directKickoff` gets the same
+  commit-and-wait tail.
+
+### Security-scan gate — `packages/server/src/{phases,scanRunner,securityScan}.ts`
+
+A deterministic scan that brackets the probabilistic worker between `validating` and the
+PR (ADR-0001). The task **stays in `validating`** throughout — there is deliberately no
+`scanning` status (D6). Pieces:
+
+- **`SCAN_READY_RE`** (`/^\s*ZMRNG_SCAN_READY\s*$/m`) — the anchored control token the
+  worker prints once it has committed and is ready for the scan.
+- **`openPrKickoff(branch, defaultBranch, planPath?)`** (exported) — the extracted
+  push + `gh pr create` ceremony (reuses `PR_BODY_TEMPLATE` verbatim), sent into the
+  **same live session** when the scan is green. The worker then prints the PR URL and the
+  existing PR detection drives `validating → review` unchanged.
+- **`securityFixKickoff(findings, round, maxRounds)`** (exported) — sent when the scan is
+  red. Carries the `formatFindingsForAgent` report, orders the worker to FIX every
+  blocking finding (patch code / pin or replace the vulnerable dep — not merely note it),
+  TDD where a regression test is meaningful, re-commit in place, and re-emit
+  `ZMRNG_SCAN_READY`. States the round budget. The `direct` flow's fix prompt is framed
+  SCA-only (D2).
+- **`scanFactory: ScanRunnerFactory`** — the injected 4th `TaskManager` constructor arg
+  (defaults to `defaultScanRunnerFactory`); tests pass a `FakeScanRunner`. Plus a private
+  `securityRounds: Map<taskId, number>`, cleared alongside the other transient sets in
+  `fail`/`cancel`/`done`/`deleteTask`.
+- **`onScanReady(task)`** (private) — the core: (1) resolve the effective policy via
+  `mergeSecurityPolicy(config.security, repoOverride)`; if `enabled === false` →
+  `openPrKickoff` + `securityStatus:'skipped'`, no scan row (the only silent skip). (2)
+  **D3:** `freeLane(task.id)` *before* awaiting the scan, so the deterministic machine
+  work never idles one of the 2 lanes. (3) preflight the binaries; missing/unprovisionable
+  → `onBlocked`. (4) `await scanFactory({ worktree, baseRef: defaultBranch, policy, sast })`.
+  (5) normalize + `evaluateThreshold`. (6) persist a `security_scans` row (round, verdict,
+  findings JSON, tool versions), `patch(securityStatus)`, emit a `security` event. (7)
+  **green** → `openPrKickoff`; **red & round < maxRounds** → re-acquire a lane (queues
+  behind the cap like any execute work, routed back into the **existing** live session,
+  never a fresh child), bump the round, `securityFixKickoff`; **rounds exhausted** →
+  `onBlocked` with the findings summary; **any factory rejection / unparseable output** →
+  fail-closed (treated as red-blocked, never a pass).
+- **`ScannerUnavailableError`** (from `scanRunner.ts`) is the seam that distinguishes a
+  missing binary (→ `blocked`, actionable install message) from a scan that ran but
+  errored (→ fail-closed red). `defaultScanRunnerFactory` execFiles semgrep + osv-scanner
+  offline/vendored (`--baseline-commit <git merge-base defaultBranch HEAD>`,
+  `--config <policy.semgrepConfig>`; D4) and auto-provisions on first use (D5). It is
+  exercised by **no automated test** (semgrep/osv absent on dev) — a planted-vuln hand-
+  verification is an orchestrator/user-owned post-merge step.
+- **Route:** `GET /api/tasks/:id/security-scans` → `db.listSecurityScansForTask(id)`.
+- **Web:** `SecurityPanel` (read-only) renders `securityStatus` + round count + latest
+  blocking findings, fed by the route and the live `security` ws event.
 
 ## Terminal — `packages/server/src/terminal.ts`
 
@@ -261,11 +312,14 @@ distinct from the existing per-task `/api/tasks/:id/chat` REST chat (`chat.ts`,
 SQLite (better-sqlite3, WAL).
 
 - **Tables:** `tasks` (id, title, body, status, session_id, branch, worktree, pr_url,
-  model, effort, style, **repo_id**, usage counters, queued, **stale**, timestamps) and
-  `events` (autoincrement id, task_id, ts, kind, payload JSON) + `idx_events_task`.
+  model, effort, style, **repo_id**, usage counters, queued, **stale**, **security_status**,
+  timestamps); `events` (autoincrement id, task_id, ts, kind, payload JSON) +
+  `idx_events_task`; and **`security_scans`** (autoincrement id, task_id, round, verdict,
+  findings JSON, tool_versions JSON, ts) + its task index. All additive.
   `stale INTEGER NOT NULL DEFAULT 0` (additive, `ensureColumns()`) marks a task whose
   worker session was lost to an app restart — see `reconcileOrphans()`/`restartAgent()`
-  in the TaskManager section above.
+  in the TaskManager section above. `security_status` (nullable) carries the latest scan
+  verdict (`pass`/`fail`/`skipped`) for the task.
 - **Migrations:** `ensureColumns()` reads `PRAGMA table_info(tasks)` and `ALTER`s any
   missing column (idempotent); columns also live in `SCHEMA` for fresh DBs.
 - **Durability:** constructor sets `wal_autocheckpoint = 1000` to bound in-run WAL
@@ -275,8 +329,10 @@ SQLite (better-sqlite3, WAL).
   dropped/reset, would revert the DB to a stale checkpoint and "vanish" tasks).
 - **`rowToTask`** maps `repo_id` → `repoId`, backfilling `config.defaultRepoId` when null.
 - **`createTask`**, **`addUsage`** (atomic `col = col + delta`), `getTask`, `listTasks`,
-  `updateTask` (field→column patch), `insertEvent`, `getEvents`, **`taskCount`** (logged
-  at startup alongside `dbPath` to surface which DB loaded).
+  `updateTask` (field→column patch, incl. `securityStatus`), `insertEvent`, `getEvents`,
+  **`insertSecurityScan(...)`** / **`listSecurityScansForTask(taskId)`** (the scan-row
+  persistence reused by `onScanReady` and the `security-scans` route), **`taskCount`**
+  (logged at startup alongside `dbPath` to surface which DB loaded).
 
 ## Config — `packages/server/src/config.ts`
 
@@ -303,6 +359,12 @@ Env parsing + repo registry.
   invalid entries skipped into `repoWarnings`; best-effort keeps candidates if all fail.
 - **`defaultRepoId`:** `ZMRNG_DEFAULT_REPO` if valid, else first entry.
 - **`repoById(id)`** resolves a `RepoTarget` from the registry.
+- **Security policy:** `config.security` is the global default `SecurityPolicy`
+  (`enabled=true`, `maxRounds=2`, `semgrepConfig` with no owasp, `minSeverity='ERROR'`),
+  from **`resolveSecurityPolicy(env)`**. A `RepoTarget` may carry an optional `security`
+  override block (see `config/repos.example.json`); **`mergeSecurityPolicy(global,
+  override)`** is the per-task seam `onScanReady` calls to get a repo's effective policy —
+  never re-implement the merge.
 - Loads `.env` at repo root into `process.env` (dev convenience).
 
 ## Worktree — `packages/server/src/worktree.ts`
@@ -332,7 +394,8 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `workspaceUrl` and `botHandle` for the Team tab — see Team workspace below),
   `GET /api/repos` (the registry), `GET /api/tasks`, `POST /api/tasks`
   (title/body/model/effort/style/repoId/flow/**attachments**), `GET /api/tasks/:id/events`,
-  `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel,restart}`.
+  **`GET /api/tasks/:id/security-scans`** (→ `db.listSecurityScansForTask(id)`, mirrors the
+  events route), `POST /api/tasks/:id/{start,message,interrupt,resume,done,cancel,restart}`.
   `interrupt` is bodyless; mirrors the `resume` route's try/catch + 400 on error shape.
   `POST /api/tasks/:id/restart` (bodyless) calls `manager.restartAgent(id)` — namespaced
   under the task, distinct from the self-update `POST /api/restart` (git-pull + rebuild

@@ -22,8 +22,10 @@ import { ChatCard } from './ChatCard'
 import { TerminalCard } from './TerminalCard'
 import { VoiceView } from './VoiceView'
 import { WorkerLogPanel } from './WorkerLogPanel'
+import { SecurityPanel } from './SecurityPanel'
 import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
 import type { HandoffPrefill } from '../teamHandoff'
+import type { SecurityScan } from '../types'
 
 /** Worker-pane tabs — the fixed Cosmos IDE tab set (replaces the draggable grid). */
 type PaneTab = 'worker' | 'files' | 'terminal' | 'chat' | 'voice'
@@ -38,6 +40,8 @@ const PANE_TABS: ReadonlyArray<{ id: PaneTab; label: string }> = [
 interface Props {
   task: Task | undefined
   events: TaskEvent[]
+  /** Persisted security-scan rounds for the selected task (Security panel). */
+  securityScans: SecurityScan[]
   live: string
   tasks: Task[]
   repos: RepoTarget[]
@@ -104,6 +108,7 @@ interface Loaded {
 export function WorkspaceView({
   task,
   events,
+  securityScans,
   live,
   tasks,
   repos,
@@ -252,6 +257,9 @@ export function WorkspaceView({
               stale={task?.stale}
               onMessage={task ? onMessage : undefined}
             />
+            {task && (task.securityStatus !== undefined || securityScans.length > 0) && (
+              <SecurityPanel securityStatus={task.securityStatus} scans={securityScans} />
+            )}
           </div>
 
           {/* Files */}

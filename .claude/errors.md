@@ -248,3 +248,25 @@ non-obvious root cause, or is likely to recur. Template in
 - **Solution:** vad-web is fine to keep bundled (its JS runs under Rolldown) — just redirect its assets. In the `MicVAD.new({...})` call (VoiceView.tsx) set `baseAssetPath` (its worklet + `silero_vad_*.onnx`) and `onnxWASMBasePath` (its ORT wasm) to CDN URLs pinned to the EXACT installed versions: `@ricky0123/vad-web@0.0.30` and the `onnxruntime-web@1.29.0` it depends on (`^1.17.0` resolved). vad-web 0.0.30 has NO `ortConfig` hook, so single-threading relies on ORT's `!crossOriginIsolated` auto-clamp. After this, hitting Start requests zero `/node_modules/.vite/deps/ort-wasm-*.mjs` — every ORT asset comes from a CDN. **General rule: grep every dependency's `onnxruntime-web` version before assuming one wasmPaths setting covers them all.**
 - **Files:** `packages/web/src/components/VoiceView.tsx`
 - **Date Found:** 2026-08-27
+
+### Security-scan gate: `semgrep`/`osv-scanner` absent on dev → the default runner is untested
+- **Error:** No runtime error in tests — but `defaultScanRunnerFactory` in `scanRunner.ts`
+  (execFile semgrep + osv-scanner) is exercised by **zero** automated tests. Every
+  state-machine test injects a `FakeScanRunner` returning fixture JSON, because `semgrep`
+  and `osv-scanner` are not installed on the dev Mac.
+- **Cause:** By design (D4/D5): the real scanners are heavy, vendored/offline, and
+  auto-provisioned on first use in the target worktree — not something to install on the
+  dev box or hit the network for during CI. So the code path that shells out to the real
+  binaries and parses their real JSON has never run against real output.
+- **Solution:** Treat "the real tools emit exactly these JSON shapes" as a **deferred,
+  orchestrator/user-owned hand-verification**, run post-merge against a repo with a planted
+  vuln (a known-CVE dep for osv, an injectable pattern for semgrep). Until then, trust the
+  gate's *state machine* (fully tested via FakeScanRunner) but not the *parser fidelity*.
+  Two known live-run watch-outs: (1) `semgrep --baseline-commit <merge-base>` needs real
+  git history in the worktree — a **shallow** clone can make the baseline diff empty or
+  error; ensure the worktree has the merge-base commit. (2) fail-closed is intentional —
+  any scanner crash / unparseable output is a red-block, never a pass, so a mis-provisioned
+  scanner parks the task `blocked`, it does not silently green-light a merge.
+- **Files:** `packages/server/src/scanRunner.ts`, `packages/server/src/phases.ts`
+  (`onScanReady`), `packages/server/test/taskManager.test.ts` (`FakeScanRunner`)
+- **Date Found:** 2026-09-10

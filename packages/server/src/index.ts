@@ -14,7 +14,8 @@ import { TerminalManager, parseClientMsg } from './terminal.js'
 import { ChatManager, parseChatClientMsg } from './chatAgent.js'
 import { WorkspaceManager, ChannelManager, parseWorkspaceClientMsg } from './workspace.js'
 import { AgentResponder, resolveBotAgent } from './agentResponder.js'
-import { sanitizeAttachments } from './runner.js'
+import { defaultRunnerFactory, sanitizeAttachments } from './runner.js'
+import { defaultScanRunnerFactory } from './scanRunner.js'
 import { listWorktreeFiles, selfUpdate } from './worktree.js'
 import { startVersionPoller } from './versionPoller.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
@@ -92,7 +93,7 @@ process.on('unhandledRejection', (reason) => {
 
 const db = new Db(config.dbPath)
 const hub = new WsHub()
-const manager = new TaskManager(db, (e: WsEvent) => hub.broadcast(e))
+const manager = new TaskManager(db, (e: WsEvent) => hub.broadcast(e), defaultRunnerFactory, defaultScanRunnerFactory)
 // Boot reconciliation: mark any task still sitting in a live phase (its worker
 // child died with the previous process) `stale`, so the UI surfaces the dead
 // state and offers Restart instead of pretending the worker is alive.
@@ -370,6 +371,13 @@ app.post('/api/tasks', (req, reply) => {
 app.get('/api/tasks/:id/events', (req) => {
   const { id } = req.params as { id: string }
   return db.getEvents(id)
+})
+
+// Every persisted security-scan round for a task (oldest-first), read-only. Feeds
+// the web Security panel; mirrors the events route pattern.
+app.get('/api/tasks/:id/security-scans', (req) => {
+  const { id } = req.params as { id: string }
+  return db.listSecurityScansForTask(id)
 })
 
 // Team-workspace channel list (box 2). Always 200; #general is seeded by default.

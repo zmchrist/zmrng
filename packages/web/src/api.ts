@@ -17,6 +17,7 @@ import type {
   UiState,
   WorkspaceSettings,
   Attachment,
+  SecurityScan,
 } from './types'
 
 /** Pull a text delta out of one parsed SSE `data:` payload (OpenAI-compatible + plain shapes). */
@@ -81,6 +82,8 @@ export const api = {
   getPreflight: () => req<PreflightResult>('/api/preflight'),
   listTasks: () => req<Task[]>('/api/tasks'),
   getEvents: (id: string) => req<TaskEvent[]>(`/api/tasks/${id}/events`),
+  /** Every persisted security-scan round for a task (oldest-first). Feeds the Security panel. */
+  listSecurityScans: (id: string) => req<SecurityScan[]>(`/api/tasks/${id}/security-scans`),
   getFiles: (id: string) => req<WorktreeFileTree>(`/api/tasks/${id}/files`),
   readFile: (id: string, path: string) =>
     req<WorktreeFileContent>(`/api/tasks/${id}/file?path=${encodeURIComponent(path)}`),

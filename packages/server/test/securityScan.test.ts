@@ -72,6 +72,30 @@ describe('parseSemgrep — tolerant', () => {
     expect(out[1].confidence).toBe('LOW')
     expect(out[2].severity).toBe('WARNING')
   })
+
+  // NIT 2 (coverage): the toSeverity→'INFO' and toConfidence→'MEDIUM' default
+  // arms were untested. A well-formed check_id with an unrecognized/absent
+  // severity and confidence must fall back to INFO / MEDIUM.
+  it('defaults unrecognized/absent severity to INFO and confidence to MEDIUM', () => {
+    const raw = JSON.stringify({
+      results: [
+        // absent severity + confidence entirely
+        { check_id: 'no-extra', path: 'a.py' },
+        // present but unrecognized values
+        {
+          check_id: 'weird-values',
+          path: 'b.py',
+          extra: { severity: 'CATASTROPHIC', message: 'm', metadata: { confidence: 'MAYBE' } },
+        },
+      ],
+    })
+    const out = parseSemgrep(raw)
+    expect(out).toHaveLength(2)
+    for (const f of out) {
+      expect(f.severity).toBe('INFO')
+      expect(f.confidence).toBe('MEDIUM')
+    }
+  })
 })
 
 describe('parseOsv — tolerant', () => {
@@ -180,5 +204,20 @@ describe('formatFindingsForAgent — deterministic ordering', () => {
 
   it('returns a stable string for an empty list', () => {
     expect(formatFindingsForAgent([])).toBe(formatFindingsForAgent([]))
+  })
+
+  // NIT 1 (determinism): the sort must be a byte-stable code-unit compare over
+  // findingKey, NOT locale-aware `localeCompare` (whose ordering depends on the
+  // host OS/locale). Uppercase ASCII (code unit 66 for 'B') sorts before
+  // lowercase ('a' is 97) under a code-unit compare, whereas `localeCompare`
+  // in most locales orders 'a' before 'B'. Pin the code-unit ordering.
+  it('orders findings by code-unit comparison, not locale (uppercase before lowercase)', () => {
+    const blocking: SecurityFinding[] = [
+      { tool: 'osv', ruleId: 'a-rule', severity: 'ERROR', title: 'lower', package: 'p', fixAvailable: true },
+      { tool: 'osv', ruleId: 'B-rule', severity: 'ERROR', title: 'upper', package: 'p', fixAvailable: true },
+    ]
+    const out = formatFindingsForAgent(blocking)
+    // 'B-rule' (code unit 66) must appear before 'a-rule' (code unit 97).
+    expect(out.indexOf('B-rule')).toBeLessThan(out.indexOf('a-rule'))
   })
 })
