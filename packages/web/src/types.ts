@@ -455,7 +455,7 @@ export interface WorktreeFileContent {
   content: string
 }
 
-export type EventKind = 'claude' | 'status' | 'operator' | 'error'
+export type EventKind = 'claude' | 'status' | 'operator' | 'error' | 'security'
 
 export type EventSub =
   | 'init'
@@ -468,6 +468,7 @@ export type EventSub =
   | 'tool'
   | 'subagent'
   | 'subagent_result'
+  | 'security'
 
 export interface EventPayload {
   sub: EventSub
@@ -480,6 +481,12 @@ export interface EventPayload {
   isError?: boolean
   tool?: string
   actor?: string
+  // security scan (kind === 'security', sub === 'security') — the round's
+  // verdict + budget + a count of blocking findings; `text` carries the summary.
+  verdict?: SecurityVerdict
+  round?: number
+  maxRounds?: number
+  blockingCount?: number
   subagentType?: string
   summary?: string
 }

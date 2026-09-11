@@ -62,6 +62,7 @@ function Harness() {
     <WorkspaceView
       task={selected}
       events={[]}
+      securityScans={[]}
       live=""
       tasks={TASKS}
       repos={[{ id: 'zmrng', label: 'zmrng', path: '/x', defaultBranch: 'main' }]}
