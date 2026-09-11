@@ -402,7 +402,11 @@ export default function App() {
             className={styles.modeContent}
             style={{ display: mode === 'kb' ? 'flex' : 'none' }}
           >
-            <KbView teamHandle={settings.teamHandle} openTarget={kbTarget} />
+            <KbView
+              teamHandle={settings.teamHandle}
+              onHandleChange={(h) => saveSettings({ teamHandle: h })}
+              openTarget={kbTarget}
+            />
           </div>
         </div>
 
