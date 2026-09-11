@@ -948,6 +948,20 @@ export class Db {
     return row?.channel_id
   }
 
+  /**
+   * One full message row by id, or `undefined` if it does not exist. Mirrors
+   * `getChannel(id)`. Backs the KB "Send to KB" route (T4, #154), which needs
+   * the message BODY + its channel to build a durable page with canonical,
+   * server-side provenance. Reactions are not attached (the promotion cares
+   * only about the authored text).
+   */
+  getMessage(id: number): Message | undefined {
+    const row = this.db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as
+      | MessageRow
+      | undefined
+    return row ? rowToMessage(row) : undefined
+  }
+
   /** Aggregated emoji reactions for ONE message, in reactor order. */
   listReactions(messageId: number): ReactionSummary[] {
     const rows = this.db

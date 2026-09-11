@@ -880,6 +880,22 @@ export interface KbPageDetail {
 }
 
 /**
+ * `POST /api/spaces/:id/pages/from-message` request body (KB "Send to KB", T4
+ * #154): promote a team-channel message into a durable KB page in space `:id`.
+ * `messageId` is the source message to look up server-side (its body + channel
+ * are read canonically — provenance is NEVER trusted from the client).
+ * `folderId` optionally places the page in a folder of the space (null/omitted =
+ * space root). `title` is an optional editable label; when blank it is derived
+ * from the message body server-side. The response is a normal `KbPage`. Mirrored
+ * in `packages/web/src/types.ts`.
+ */
+export interface KbPageFromMessageInput {
+  messageId: number
+  folderId?: number | null
+  title?: string
+}
+
+/**
  * The three POC spaces seeded on construction (INSERT OR IGNORE on the UNIQUE
  * `name`, so reopening a populated db is a no-op). `general` carries a null
  * repoUrl; the repo-scoped spaces carry their GitHub URL.

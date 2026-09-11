@@ -32,6 +32,14 @@ interface Props {
    * no join gate of its own (unlike Team), it just needs an identity to attach.
    */
   teamHandle: string
+  /**
+   * One-shot navigation target from the Team tab's "Send to KB" promotion (T4,
+   * #154): the space + page to select/open when the KB tab is entered. Seeded
+   * via the in-render "adjust state on a prop change" pattern (NOT an effect —
+   * that would trip `react-hooks/set-state-in-effect`). The parent passes a
+   * FRESH object per promotion so the seed fires once each time.
+   */
+  openTarget?: { spaceId: number; pageId: number } | null
 }
 
 const PING_MS = 25000
@@ -62,7 +70,7 @@ function initials(name: string): string {
  * multiplexed workspace socket (GET /ws/workspace, same-origin) for page
  * subscribe/edit/presence — REST covers spaces/tree/page + structural CRUD.
  */
-export function KbView({ teamHandle }: Props) {
+export function KbView({ teamHandle, openTarget = null }: Props) {
   const handle = teamHandle.trim() || 'anon'
 
   const [spaces, setSpaces] = useState<Space[]>([])
@@ -87,6 +95,17 @@ export function KbView({ teamHandle }: Props) {
   const [newPageFolder, setNewPageFolder] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // One-shot "Send to KB" navigation (T4, #154): when the Team tab promotes a
+  // message and hands up a fresh {spaceId, pageId}, select that space + open that
+  // page. In-render prop-change seeding (not an effect) — the fresh object
+  // identity per promotion makes the guard fire exactly once each time.
+  const [targetSeededFrom, setTargetSeededFrom] = useState<Props['openTarget']>(null)
+  if (openTarget && openTarget !== targetSeededFrom) {
+    setTargetSeededFrom(openTarget)
+    setSpaceId(openTarget.spaceId)
+    setOpenPageId(openTarget.pageId)
+  }
 
   const wsRef = useRef<WebSocket | null>(null)
   const openPageIdRef = useRef<number | null>(null)

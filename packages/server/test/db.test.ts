@@ -699,6 +699,20 @@ describe('reactions (team workspace — emoji reactions)', () => {
     expect(db.getMessageChannelId(999999)).toBeUndefined()
   })
 
+  it('getMessage round-trips the full message row, or undefined for an unknown id', () => {
+    const db = new Db(dbPath)
+    const chan = db.createChannel('kb-src', null, '2026-08-25T00:00:00.000Z')
+    const posted = db.addMessage(chan.id, 'Ada', 'promote me', 'human', '2026-08-25T00:00:01.000Z')
+    const got = db.getMessage(posted.id)
+    expect(got?.id).toBe(posted.id)
+    expect(got?.channelId).toBe(chan.id)
+    expect(got?.author).toBe('Ada')
+    expect(got?.body).toBe('promote me')
+    expect(got?.kind).toBe('human')
+    expect(got?.createdAt).toBe('2026-08-25T00:00:01.000Z')
+    expect(db.getMessage(999999)).toBeUndefined()
+  })
+
   it('reactionsForMessages batches, and is empty for an empty id list', () => {
     const db = new Db(dbPath)
     const { channelId, messageId } = seedMessage(db)
