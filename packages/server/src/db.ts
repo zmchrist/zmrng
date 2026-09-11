@@ -468,8 +468,8 @@ export class Db {
     id: string
     title: string
     body: string
-    model: string
-    effort: EffortLevel
+    model: string | null
+    effort: EffortLevel | null
     style: CaveStyle
     flow: FlowMode
     repoId: string

@@ -236,10 +236,14 @@ describe('chatSystemPrompt', () => {
     expect(prompt).toContain('/tmp/projects')
   })
 
-  it('appends the caveman skill directive for a non-normal style', () => {
+  it('appends the inline caveman register for a non-normal style (no skill round-trip)', () => {
+    // D3: the shared styleDirective now inlines the register text directly rather
+    // than telling the session to invoke the `caveman` skill — chat inherits that.
     const prompt = chatSystemPrompt('caveman-full', '/tmp/projects')
-    expect(prompt).toContain('caveman')
-    expect(prompt.toLowerCase()).toContain('skill')
+    expect(prompt).toContain('COMMUNICATION STYLE:')
+    expect(prompt).toContain('Drop articles (a/an/the) and filler')
+    expect(prompt).not.toMatch(/Skill tool/)
+    expect(prompt.toLowerCase()).not.toContain('invoke')
   })
 
   it('omits the caveman directive for the normal style', () => {
