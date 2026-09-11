@@ -6,9 +6,13 @@ import {
   encodeUnsubscribe,
   encodeMessage,
   encodeReact,
+  encodePageSubscribe,
+  encodePageUnsubscribe,
+  encodePageEdit,
   parseWorkspaceServerMsg,
 } from '../src/workspaceProtocol'
 import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from '../src/types'
+import type { KbBlock } from '../src/types'
 
 describe('client encoders', () => {
   it('encodeHello produces a hello frame carrying the display name', () => {
@@ -271,5 +275,103 @@ describe('parseWorkspaceServerMsg', () => {
     expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'roster', members: 'x' }))).toBeUndefined()
     expect(parseWorkspaceServerMsg('')).toBeUndefined()
     expect(parseWorkspaceServerMsg(JSON.stringify(['roster']))).toBeUndefined()
+  })
+})
+
+describe('KB page encoders (T2, #144)', () => {
+  it('encodePageSubscribe / encodePageUnsubscribe carry the page id', () => {
+    expect(JSON.parse(encodePageSubscribe(5))).toEqual({ type: 'page.subscribe', pageId: 5 })
+    expect(JSON.parse(encodePageUnsubscribe(9))).toEqual({ type: 'page.unsubscribe', pageId: 9 })
+  })
+
+  it('encodePageEdit produces a create frame (blockId null) preserving body whitespace', () => {
+    expect(
+      JSON.parse(encodePageEdit(3, null, 'code', '  indented\n', '{"lang":"ts"}', '  Ada  ')),
+    ).toEqual({
+      type: 'page.edit',
+      pageId: 3,
+      blockId: null,
+      kind: 'code',
+      body: '  indented\n', // NOT trimmed
+      meta: '{"lang":"ts"}',
+      author: 'Ada', // trimmed + clamped
+    })
+  })
+
+  it('encodePageEdit produces an update frame (non-null blockId) with null meta', () => {
+    expect(JSON.parse(encodePageEdit(3, 12, 'text', 'hello', null, 'Bo'))).toEqual({
+      type: 'page.edit',
+      pageId: 3,
+      blockId: 12,
+      kind: 'text',
+      body: 'hello',
+      meta: null,
+      author: 'Bo',
+    })
+  })
+
+  it('encodePageEdit clamps an over-long body to the cap', () => {
+    const overCap = 'a'.repeat(MAX_MESSAGE_BODY_LEN + 50)
+    const frame = JSON.parse(encodePageEdit(1, null, 'text', overCap, null, 'Ada')) as {
+      body: string
+    }
+    expect(frame.body.length).toBe(MAX_MESSAGE_BODY_LEN)
+  })
+})
+
+describe('parseWorkspaceServerMsg — KB page frames (T2, #144)', () => {
+  const block: KbBlock = {
+    id: 7,
+    pageId: 3,
+    ord: 0,
+    kind: 'text',
+    body: 'hi',
+    meta: null,
+    updatedAt: '2026-09-10T00:00:00.000Z',
+    updatedBy: 'Ada',
+  }
+
+  it('decodes a page.update frame carrying a well-formed block', () => {
+    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'page.update', pageId: 3, block }))).toEqual(
+      { type: 'page.update', pageId: 3, block },
+    )
+  })
+
+  it('rejects a page.update with a missing/ill-typed block or pageId', () => {
+    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'page.update', pageId: 3 }))).toBeUndefined()
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.update', pageId: '3', block })),
+    ).toBeUndefined()
+    expect(
+      parseWorkspaceServerMsg(
+        JSON.stringify({ type: 'page.update', pageId: 3, block: { ...block, kind: 'bogus' } }),
+      ),
+    ).toBeUndefined()
+  })
+
+  it('decodes a page.presence frame and drops ill-typed viewer entries', () => {
+    const raw = JSON.stringify({
+      type: 'page.presence',
+      pageId: 3,
+      viewers: [
+        { id: 1, displayName: 'Ada', online: true },
+        { id: 2, displayName: 'Bo' }, // missing online — dropped
+        { nope: true }, // junk — dropped
+      ],
+    })
+    expect(parseWorkspaceServerMsg(raw)).toEqual({
+      type: 'page.presence',
+      pageId: 3,
+      viewers: [{ id: 1, displayName: 'Ada', online: true }],
+    })
+  })
+
+  it('rejects a page.presence with a missing/ill-typed pageId or viewers', () => {
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.presence', pageId: 3 })),
+    ).toBeUndefined()
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.presence', pageId: '3', viewers: [] })),
+    ).toBeUndefined()
   })
 })
