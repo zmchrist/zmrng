@@ -62,8 +62,10 @@ where something lives, rather than grepping the tree.
 ## Inherits the universal Projects harness
 zmrng lives inside a universal Projects workspace and **inherits** the universal
 Projects harness one level up (the `CLAUDE.md` in the parent Projects directory):
-the PIV loop and the three hooks
+the PIV loop and the five hooks
 (`security_guard.py` blocks `.env`/force-push-to-main/recursive deletes;
+`branch_guard.py` blocks Edit/Write when the repo is on `main`/`master`;
+`pr_shape_guard.py` rejects `gh pr create --fill`/missing `--body-file`;
 `post_tool_use_lint.py` lints after edits; `stop_validate.py` runs lint + build before a
 turn can finish). **Do not restate or duplicate those hooks here.** This file only adds
 zmrng-specific conventions and overrides.
@@ -189,16 +191,17 @@ npm run desktop:build    # build → bundle:sidecar → tauri build → a .app
 | 3. Validate | `/validate` | PASS/FAIL per check |
 | 4. Review | `/code-review` | `.agents/code-reviews/<slug>.md` |
 
-**Plans before code. Branch before code.** Planning/brainstorming can happen on `main`;
-the moment a session edits a file, create a feature branch first. Always branch from
-`origin/main`: `git fetch origin && git checkout -b feat/zc/<desc> origin/main`.
+**Plans before code. Branch before code.** Planning can happen on `main`; the first
+file edit requires a feature branch off `origin/main` — now enforced by the
+`branch_guard` hook. Full rule: `.claude/rules/coding-lifecycle.md`. Validate via
+`.claude/verify.sh` (the one gate shared by the agent, `loop.sh`, and the Stop hook).
 
 ## Collaboration (solo operator)
 zmrng is a **solo** project — there is no two-developer protocol. Conventions:
 1. **Plans before code** — write a plan in `.agents/plans/` before touching files.
-2. **Branch before code** — never edit on `main`/`master`; branch from `origin/main`.
-3. **Branch convention:** `<type>/zc/<short-description>` (`feat/`, `fix/`, `chore/`, `wip/`).
-4. **End-of-session doc sync** — run the `sync-docs` skill before any non-trivial commit.
+2. **Branch before code** — `<type>/zc/<desc>` off `origin/main` (`branch_guard`-enforced;
+   see `.claude/rules/coding-lifecycle.md`).
+3. **End-of-session doc sync** — run the `sync-docs` skill before any non-trivial commit.
 
 ## Context architecture
 - **Tier 1 — this file.** Always loaded, and kept deliberately small: conventions,
