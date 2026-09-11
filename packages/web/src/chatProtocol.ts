@@ -3,7 +3,7 @@
 // produce exactly the frames the server's `parseChatClientMsg` accepts;
 // `parseChatServerMsg` is a tolerant guard over the server -> client frames.
 
-import type { Attachment, CaveStyle, ChatServerMsg, EffortLevel } from './types'
+import type { Attachment, CaveStyle, ChatServerMsg, EffortLevel, WorkflowPreset } from './types'
 
 /**
  * Encode a client `start` frame — (re)spawn a session with the chosen controls.
@@ -11,7 +11,9 @@ import type { Attachment, CaveStyle, ChatServerMsg, EffortLevel } from './types'
  * (or pass `''`) for "Projects root" (`config.projectsDir`, the default).
  * `voice` opts the session into the server's spoken `voiceSystemPrompt` (set
  * only by the Local Voice Chat surface); when falsy the frame is byte-identical
- * to the pre-voice one, so the text chat path is unchanged.
+ * to the pre-voice one, so the text chat path is unchanged. `workflow` names an
+ * optional working-mode preset; it is omitted when `'none'`/falsy (same as
+ * `repoId`/`voice`), so a default frame stays byte-identical to the pre-workflow one.
  */
 export function encodeStart(
   model: string,
@@ -19,6 +21,7 @@ export function encodeStart(
   style: CaveStyle,
   repoId?: string,
   voice?: boolean,
+  workflow?: WorkflowPreset,
 ): string {
   return JSON.stringify({
     type: 'start',
@@ -27,6 +30,7 @@ export function encodeStart(
     style,
     ...(repoId ? { repoId } : {}),
     ...(voice ? { voice: true } : {}),
+    ...(workflow && workflow !== 'none' ? { workflow } : {}),
   })
 }
 
