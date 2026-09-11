@@ -727,6 +727,132 @@ export const MAX_MESSAGE_PAGE = 200
 /** Name of the fixed channel seeded by default in every workspace. */
 export const GENERAL_CHANNEL_NAME = 'general'
 
+// ---- Knowledge Base (KB) — spaces / folders / pages / blocks / revisions ----
+//
+// Server-side data foundation for the real-time team KB (epic T1, #140). New KB
+// tables are siblings of channels/messages/members and reuse the same Team
+// workspace spine (WAL SQLite, additive-only migrations, INSERT-OR-IGNORE seed).
+// Field-naming: camelCase in these TS types, snake_case in the DB columns (see
+// the rowTo* mappers in db.ts). MANUAL MIRROR in `packages/web/src/types.ts`.
+
+/**
+ * One KB space: the top-level container that groups a knowledge tree. `repoUrl`
+ * optionally ties a space to a GitHub repo (null for the general space). Three
+ * POC spaces are seeded on construction (see `KB_SEED_SPACES`).
+ */
+export interface Space {
+  id: number
+  name: string
+  repoUrl: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * One folder in a space's tree. `parentId` self-references `folders` for
+ * nesting; null means the folder sits at the space root.
+ */
+export interface KbFolder {
+  id: number
+  spaceId: number
+  parentId: number | null
+  name: string
+  createdAt: string
+}
+
+/**
+ * One KB page. `folderId` places the page inside a folder; null means the page
+ * sits at the space root. A page owns an ordered list of blocks.
+ */
+export interface KbPage {
+  id: number
+  spaceId: number
+  folderId: number | null
+  title: string
+  author: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** The block kinds a page body is composed of. */
+export type KbBlockKind = 'text' | 'heading' | 'code' | 'checklist' | 'list'
+
+/** Every valid `KbBlockKind`, for wire validation. Mirrored in web types. */
+export const KB_BLOCK_KINDS: readonly KbBlockKind[] = [
+  'text',
+  'heading',
+  'code',
+  'checklist',
+  'list',
+]
+
+/**
+ * One block of a page's body. `body` is markdown; `meta` is a nullable JSON
+ * string carrying kind-specific extras — `{"level":1}` for a heading level,
+ * `{"checked":true}` for a checklist item. `updatedBy` is the last editor's
+ * self-asserted handle. Each update snapshots the PRIOR state into `revisions`.
+ */
+export interface KbBlock {
+  id: number
+  pageId: number
+  ord: number
+  kind: KbBlockKind
+  body: string
+  meta: string | null
+  updatedAt: string
+  updatedBy: string
+}
+
+/**
+ * A prior-state snapshot of a block, captured on each block update (and on each
+ * restore). Backs the locked-toast + restore-from-revision conflict UX (T2). A
+ * revision row captures the block state that a write is about to replace.
+ */
+export interface KbRevision {
+  id: number
+  blockId: number
+  body: string
+  kind: KbBlockKind
+  meta: string | null
+  author: string
+  createdAt: string
+}
+
+/**
+ * One node in a space's KB tree, assembled server-side by `spaceTree`. Shaped to
+ * be consumed by the existing Files-tab `FileTree` (`WorktreeFileNode[]`) with
+ * ZERO component changes: it carries the same `name`/`path`/`type`/`children`
+ * fields (`type: 'dir'` = folder, `'file'` = page) and is structurally
+ * assignable to `WorktreeFileNode`. It ALSO carries KB-native `id` + `kind` so
+ * T3 can resolve a clicked node without parsing. `path` encodes the id as
+ * `folder/<id>` or `page/<id>` (a stable React key + id carrier).
+ */
+export interface KbTreeNode {
+  id: number
+  name: string
+  path: string
+  type: WorktreeNodeType
+  kind: 'folder' | 'page'
+  children?: KbTreeNode[]
+}
+
+/** `GET /api/pages/:id` response — a page plus its ordered blocks. */
+export interface KbPageDetail {
+  page: KbPage
+  blocks: KbBlock[]
+}
+
+/**
+ * The three POC spaces seeded on construction (INSERT OR IGNORE on the UNIQUE
+ * `name`, so reopening a populated db is a no-op). `general` carries a null
+ * repoUrl; the repo-scoped spaces carry their GitHub URL.
+ */
+export const KB_SEED_SPACES: ReadonlyArray<{ name: string; repoUrl: string | null }> = [
+  { name: 'general', repoUrl: null },
+  { name: 'zmrng', repoUrl: 'https://github.com/zmchrist/zmrng' },
+  { name: 'pheme', repoUrl: 'https://github.com/zmchrist/pheme' },
+]
+
 /**
  * Durable, server-side per-user preferences persisted in `zmrng.db` (the
  * `settings` kv table), read/written over `GET`/`PUT /api/settings`. These were

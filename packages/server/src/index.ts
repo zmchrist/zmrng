@@ -22,7 +22,7 @@ import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } fro
 import { runPreflight } from './preflight.js'
 import { parseStreamedText } from './chat.js'
 import { readUiState, writeUiState } from './uiState.js'
-import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE } from './types.js'
+import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE, KB_BLOCK_KINDS } from './types.js'
 import type {
   WsEvent,
   EffortLevel,
@@ -38,6 +38,14 @@ import type {
   TermServerMsg,
   ChatServerMsg,
   WsWorkspaceServerMsg,
+  Space,
+  KbTreeNode,
+  KbPageDetail,
+  KbFolder,
+  KbPage,
+  KbBlock,
+  KbBlockKind,
+  KbRevision,
 } from './types.js'
 
 function errMsg(e: unknown): string {
@@ -424,6 +432,344 @@ app.get('/api/channels/:id/messages', (req): Message[] => {
       ? Math.min(requested, MAX_MESSAGE_PAGE)
       : DEFAULT_MESSAGE_PAGE
   return db.listMessages(channelId, cursor, page)
+})
+
+// ===================================================================
+// Knowledge Base (KB) — spaces / folders / pages / blocks / revisions (T1 #140)
+// Server-side data foundation. REST CRUD only; NO WebSocket frames (T2), NO UI
+// (T3). Every path/body param is validated (never trust the wire); an unknown
+// space/folder/page/block id is a 404. Structured Pino logging only.
+// ===================================================================
+
+/** Parse a `:id`-style route param to a positive integer, or null if invalid. */
+function kbId(raw: unknown): number | null {
+  const n = Number(raw)
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+/** Trimmed non-empty string, or undefined (rejects blanks / non-strings). */
+function kbName(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const t = raw.trim()
+  return t.length > 0 ? t : undefined
+}
+
+/**
+ * Read a nullable folder/parent id from a request body. Returns `null` for an
+ * explicit null / omitted value (= space root), a positive int when valid, or
+ * `undefined` to signal "invalid" so the route can 400.
+ */
+function kbNullableId(raw: unknown): number | null | undefined {
+  if (raw === null || raw === undefined) return null
+  const n = Number(raw)
+  return Number.isInteger(n) && n > 0 ? n : undefined
+}
+
+/** Validate a block kind off the wire. */
+function kbKind(raw: unknown): KbBlockKind | undefined {
+  return KB_BLOCK_KINDS.includes(raw as KbBlockKind) ? (raw as KbBlockKind) : undefined
+}
+
+/** Nullable JSON meta string: a string, or null (omitted → null). */
+function kbMeta(raw: unknown): string | null {
+  return typeof raw === 'string' ? raw : null
+}
+
+// All KB spaces (the three seeded POC spaces + any created later). Always 200.
+app.get('/api/spaces', (): Space[] => db.listSpaces())
+
+// A space's KB tree (folders + pages), FileTree-shaped. 404 on unknown space.
+app.get('/api/spaces/:id/tree', (req, reply): KbTreeNode[] | undefined => {
+  const spaceId = kbId((req.params as { id: string }).id)
+  if (spaceId === null || !db.getSpace(spaceId)) {
+    reply.code(404).send({ error: 'space not found' })
+    return undefined
+  }
+  return db.spaceTree(spaceId)
+})
+
+// One page plus its ordered blocks. 404 on unknown page.
+app.get('/api/pages/:id', (req, reply): KbPageDetail | undefined => {
+  const pageId = kbId((req.params as { id: string }).id)
+  const page = pageId !== null ? db.getPage(pageId) : undefined
+  if (!page) {
+    reply.code(404).send({ error: 'page not found' })
+    return undefined
+  }
+  return { page, blocks: db.listBlocks(page.id) }
+})
+
+// Create a folder in a space. 404 unknown space; 400 blank name / bad parentId.
+app.post('/api/spaces/:id/folders', (req, reply): KbFolder | undefined => {
+  const spaceId = kbId((req.params as { id: string }).id)
+  if (spaceId === null || !db.getSpace(spaceId)) {
+    reply.code(404).send({ error: 'space not found' })
+    return undefined
+  }
+  const body = req.body as { name?: unknown; parentId?: unknown } | undefined
+  const name = kbName(body?.name)
+  if (!name) {
+    reply.code(400).send({ error: 'name is required' })
+    return undefined
+  }
+  const parentId = kbNullableId(body?.parentId)
+  if (parentId === undefined) {
+    reply.code(400).send({ error: 'invalid parentId' })
+    return undefined
+  }
+  if (parentId !== null && !db.getFolder(parentId)) {
+    reply.code(404).send({ error: 'parent folder not found' })
+    return undefined
+  }
+  const folder = db.createFolder(spaceId, parentId, name, new Date().toISOString())
+  app.log.info({ folderId: folder.id, spaceId }, 'kb folder created')
+  return folder
+})
+
+// Rename and/or move a folder. 404 unknown folder; 400 nothing-to-do / bad args.
+app.patch('/api/folders/:id', (req, reply): KbFolder | undefined => {
+  const id = kbId((req.params as { id: string }).id)
+  if (id === null || !db.getFolder(id)) {
+    reply.code(404).send({ error: 'folder not found' })
+    return undefined
+  }
+  const body = req.body as { name?: unknown; parentId?: unknown } | undefined
+  let result: KbFolder | undefined = db.getFolder(id)
+  if (body?.name !== undefined) {
+    const name = kbName(body.name)
+    if (!name) {
+      reply.code(400).send({ error: 'invalid name' })
+      return undefined
+    }
+    result = db.renameFolder(id, name)
+  }
+  if (body && 'parentId' in body) {
+    const parentId = kbNullableId(body.parentId)
+    if (parentId === undefined) {
+      reply.code(400).send({ error: 'invalid parentId' })
+      return undefined
+    }
+    if (parentId !== null && !db.getFolder(parentId)) {
+      reply.code(404).send({ error: 'parent folder not found' })
+      return undefined
+    }
+    result = db.moveFolder(id, parentId)
+  }
+  app.log.info({ folderId: id }, 'kb folder updated')
+  return result
+})
+
+// Delete a folder. 404 on unknown folder.
+app.delete('/api/folders/:id', (req, reply) => {
+  const id = kbId((req.params as { id: string }).id)
+  if (id === null || !db.getFolder(id)) {
+    return reply.code(404).send({ error: 'folder not found' })
+  }
+  db.deleteFolder(id)
+  app.log.info({ folderId: id }, 'kb folder deleted')
+  return reply.code(204).send()
+})
+
+// Create a page in a space. 404 unknown space/folder; 400 blank title/author.
+app.post('/api/spaces/:id/pages', (req, reply): KbPage | undefined => {
+  const spaceId = kbId((req.params as { id: string }).id)
+  if (spaceId === null || !db.getSpace(spaceId)) {
+    reply.code(404).send({ error: 'space not found' })
+    return undefined
+  }
+  const body = req.body as { title?: unknown; author?: unknown; folderId?: unknown } | undefined
+  const title = kbName(body?.title)
+  const author = kbName(body?.author)
+  if (!title || !author) {
+    reply.code(400).send({ error: 'title and author are required' })
+    return undefined
+  }
+  const folderId = kbNullableId(body?.folderId)
+  if (folderId === undefined) {
+    reply.code(400).send({ error: 'invalid folderId' })
+    return undefined
+  }
+  if (folderId !== null && !db.getFolder(folderId)) {
+    reply.code(404).send({ error: 'folder not found' })
+    return undefined
+  }
+  const page = db.createPage(spaceId, folderId, title, author, new Date().toISOString())
+  app.log.info({ pageId: page.id, spaceId }, 'kb page created')
+  return page
+})
+
+// Rename and/or move a page. 404 unknown page; 400 bad args.
+app.patch('/api/pages/:id', (req, reply): KbPage | undefined => {
+  const id = kbId((req.params as { id: string }).id)
+  if (id === null || !db.getPage(id)) {
+    reply.code(404).send({ error: 'page not found' })
+    return undefined
+  }
+  const body = req.body as { title?: unknown; folderId?: unknown } | undefined
+  const now = new Date().toISOString()
+  let result: KbPage | undefined = db.getPage(id)
+  if (body?.title !== undefined) {
+    const title = kbName(body.title)
+    if (!title) {
+      reply.code(400).send({ error: 'invalid title' })
+      return undefined
+    }
+    result = db.updatePage(id, title, now)
+  }
+  if (body && 'folderId' in body) {
+    const folderId = kbNullableId(body.folderId)
+    if (folderId === undefined) {
+      reply.code(400).send({ error: 'invalid folderId' })
+      return undefined
+    }
+    if (folderId !== null && !db.getFolder(folderId)) {
+      reply.code(404).send({ error: 'folder not found' })
+      return undefined
+    }
+    result = db.movePage(id, folderId, now)
+  }
+  app.log.info({ pageId: id }, 'kb page updated')
+  return result
+})
+
+// Delete a page (and its blocks + revisions). 404 on unknown page.
+app.delete('/api/pages/:id', (req, reply) => {
+  const id = kbId((req.params as { id: string }).id)
+  if (id === null || !db.getPage(id)) {
+    return reply.code(404).send({ error: 'page not found' })
+  }
+  db.deletePage(id)
+  app.log.info({ pageId: id }, 'kb page deleted')
+  return reply.code(204).send()
+})
+
+// Append a block to a page. 404 unknown page; 400 bad kind / non-string body.
+app.post('/api/pages/:id/blocks', (req, reply): KbBlock | undefined => {
+  const pageId = kbId((req.params as { id: string }).id)
+  if (pageId === null || !db.getPage(pageId)) {
+    reply.code(404).send({ error: 'page not found' })
+    return undefined
+  }
+  const body = req.body as
+    | { kind?: unknown; body?: unknown; meta?: unknown; updatedBy?: unknown }
+    | undefined
+  const kind = kbKind(body?.kind)
+  const updatedBy = kbName(body?.updatedBy)
+  if (!kind || typeof body?.body !== 'string' || !updatedBy) {
+    reply.code(400).send({ error: 'kind, body and updatedBy are required' })
+    return undefined
+  }
+  const block = db.createBlock({
+    pageId,
+    ord: null,
+    kind,
+    body: body.body,
+    meta: kbMeta(body.meta),
+    updatedBy,
+    now: new Date().toISOString(),
+  })
+  app.log.info({ blockId: block.id, pageId }, 'kb block created')
+  return block
+})
+
+// Update a block (snapshots the prior state into a revision first). 404 unknown.
+app.patch('/api/blocks/:id', (req, reply): KbBlock | undefined => {
+  const id = kbId((req.params as { id: string }).id)
+  if (id === null || !db.getBlock(id)) {
+    reply.code(404).send({ error: 'block not found' })
+    return undefined
+  }
+  const body = req.body as
+    | { kind?: unknown; body?: unknown; meta?: unknown; updatedBy?: unknown }
+    | undefined
+  const updatedBy = kbName(body?.updatedBy)
+  if (!updatedBy) {
+    reply.code(400).send({ error: 'updatedBy is required' })
+    return undefined
+  }
+  const patch: { kind?: KbBlockKind; body?: string; meta?: string | null } = {}
+  if (body?.kind !== undefined) {
+    const kind = kbKind(body.kind)
+    if (!kind) {
+      reply.code(400).send({ error: 'invalid kind' })
+      return undefined
+    }
+    patch.kind = kind
+  }
+  if (body?.body !== undefined) {
+    if (typeof body.body !== 'string') {
+      reply.code(400).send({ error: 'invalid body' })
+      return undefined
+    }
+    patch.body = body.body
+  }
+  if (body && 'meta' in body) {
+    patch.meta = kbMeta(body.meta)
+  }
+  const block = db.updateBlock(id, patch, updatedBy, new Date().toISOString())
+  app.log.info({ blockId: id }, 'kb block updated')
+  return block
+})
+
+// Delete a block (and its revisions). 404 on unknown block.
+app.delete('/api/blocks/:id', (req, reply) => {
+  const id = kbId((req.params as { id: string }).id)
+  if (id === null || !db.getBlock(id)) {
+    return reply.code(404).send({ error: 'block not found' })
+  }
+  db.deleteBlock(id)
+  app.log.info({ blockId: id }, 'kb block deleted')
+  return reply.code(204).send()
+})
+
+// Reorder a page's blocks. 404 unknown page; 400 non-array / bad ids.
+app.post('/api/pages/:id/blocks/reorder', (req, reply): KbBlock[] | undefined => {
+  const pageId = kbId((req.params as { id: string }).id)
+  if (pageId === null || !db.getPage(pageId)) {
+    reply.code(404).send({ error: 'page not found' })
+    return undefined
+  }
+  const body = req.body as { orderedIds?: unknown } | undefined
+  const raw = body?.orderedIds
+  if (!Array.isArray(raw) || !raw.every((v) => Number.isInteger(v) && (v as number) > 0)) {
+    reply.code(400).send({ error: 'orderedIds must be an array of positive integers' })
+    return undefined
+  }
+  const blocks = db.reorderBlocks(pageId, raw as number[], new Date().toISOString())
+  app.log.info({ pageId }, 'kb blocks reordered')
+  return blocks
+})
+
+// Every revision of a block, oldest first. 404 on unknown block.
+app.get('/api/blocks/:id/revisions', (req, reply): KbRevision[] | undefined => {
+  const id = kbId((req.params as { id: string }).id)
+  if (id === null || !db.getBlock(id)) {
+    reply.code(404).send({ error: 'block not found' })
+    return undefined
+  }
+  return db.listRevisions(id)
+})
+
+// Restore a revision back onto its block (itself recording a revision). 404/400.
+app.post('/api/revisions/:id/restore', (req, reply): KbBlock | undefined => {
+  const id = kbId((req.params as { id: string }).id)
+  if (id === null) {
+    reply.code(404).send({ error: 'revision not found' })
+    return undefined
+  }
+  const body = req.body as { author?: unknown } | undefined
+  const author = kbName(body?.author)
+  if (!author) {
+    reply.code(400).send({ error: 'author is required' })
+    return undefined
+  }
+  const block = db.restoreRevision(id, author, new Date().toISOString())
+  if (!block) {
+    reply.code(404).send({ error: 'revision not found' })
+    return undefined
+  }
+  app.log.info({ revisionId: id, blockId: block.id }, 'kb revision restored')
+  return block
 })
 
 // Directory listing (not contents) of a task's worktree, for the Workspace file
