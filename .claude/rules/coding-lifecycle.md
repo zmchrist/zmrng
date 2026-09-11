@@ -40,6 +40,12 @@ those prompts must say the same thing. **If you change one, change the other**
 - Never force-push, rebase onto, or rewrite published history.
 - Work is delivered as a **pull request**. The operator merges on GitHub.
 
+*Enforced for Claude Code sessions by the `branch_guard.py` PreToolUse hook — it
+blocks Edit/Write while the repo is on `main`/`master` (override for a one-off:
+`HERMES_ALLOW_PROTECTED_EDIT=1`). This is the single source of truth for the
+branch rule; `planning-workflow.md` points here. zmrng **workers** carry the same
+rule in their prompts (`phases.ts`), which run outside these hooks.*
+
 ## Worktree hygiene (hard rule, for workers)
 
 - The worktree is owned by the orchestrator. Never run `git worktree
@@ -51,7 +57,8 @@ those prompts must say the same thing. **If you change one, change the other**
 ## PR body
 
 PRs are opened with `gh pr create --body-file`, **never `--fill`** — `--fill`
-silently drops the checklist. The body follows
+silently drops the checklist. (Enforced for Claude Code sessions by the
+`pr_shape_guard.py` PreToolUse hook; override: `HERMES_ALLOW_PR_FILL=1`.) The body follows
 `.github/PULL_REQUEST_TEMPLATE.md`: What & why, the five-item lifecycle
 checklist (inside the `coding-gate:checklist` markers), **Testing**, and
 **Validation** (the exact commands run and their result). Workers write the body
