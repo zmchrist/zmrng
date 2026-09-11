@@ -13,6 +13,8 @@ Fails open on malformed input — never bricks a session.
 Active even under --dangerously-skip-permissions.
 """
 
+from __future__ import annotations
+
 import json
 import re
 import sys

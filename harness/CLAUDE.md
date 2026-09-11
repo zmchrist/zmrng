@@ -78,8 +78,19 @@ the code (see the `sync-docs` skill). Do this before committing, not after.
 
 ## Safety
 
-A security hook guards this session against a small set of destructive or
-unsafe actions (e.g. reading `.env` files, force-pushing to protected
-branches, recursive deletes). Do not attempt to bypass or disable it. If it
-blocks a legitimate action, find another approach rather than working around
-the check.
+A small set of enforcement hooks guard this session (see `hooks/README.md`):
+
+- a **security** guard blocks destructive or unsafe actions (reading `.env`
+  files, force-pushing to protected branches, recursive deletes,
+  `git reset --hard`);
+- a **branch** guard blocks file edits while the repo is on a protected branch
+  (`main`/`master`) — branch first (override `HERMES_ALLOW_PROTECTED_EDIT=1`);
+- a **pull-request shape** guard rejects opening a PR with `--fill` or without
+  `--body-file`, so PRs carry the template checklist (override
+  `HERMES_ALLOW_PR_FILL=1`);
+- an advisory **lint** hook runs after edits (never blocks);
+- a **validation** hook runs the project's own gate when the turn tries to end
+  and blocks the stop if it fails.
+
+Do not attempt to bypass or disable them. If a hook blocks a legitimate action,
+find another approach rather than working around the check.

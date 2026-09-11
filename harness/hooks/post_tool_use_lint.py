@@ -13,6 +13,8 @@ Supported stacks:
   - Go (go vet) — looks for go.mod
 """
 
+from __future__ import annotations
+
 import json
 import os
 import shutil
