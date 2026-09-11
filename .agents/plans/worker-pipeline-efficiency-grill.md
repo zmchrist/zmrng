@@ -89,6 +89,13 @@ plan/execute phases still get the model they earn (plan forces opus; execute tak
 restate-confirm gate (`phases.ts:166-167`) before `ZMRNG_READY`.
 **Rejected:** clarify on the task model (pays opus rates to ask questions).
 
+**Follow-up resolved (zc, 2026-09-10): clarify effort STAYS `high` (sonnet + high).** The model swap
+(opus→sonnet) captured the 3-5x multiplier; effort is a small knob over clarify's tiny Q&A context,
+so `high` shaves pennies to drop while eroding the one thing clarify exists to do — skeptical,
+thorough probing of vague/thin answers (`phases.ts:166`). Sharp scope caught upstream is cheap;
+ambiguity that leaks into plan+execute is expensive rework — exactly the irreducible judgment worth
+paying for. Not dropped to `medium`.
+
 ### D5 — Keep the planner's agent-judged model/effort pick; do NOT add a deterministic router
 **Decision:** leave `ZMRNG_PLAN_READY model=X effort=Y` as the planner's own complexity assessment
 (`phases.ts:185`). No files-touched / diff-size heuristic.
