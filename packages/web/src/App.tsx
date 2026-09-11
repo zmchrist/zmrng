@@ -15,6 +15,7 @@ import type {
   WorkspaceMode,
   WorkspaceSettings,
   Attachment,
+  SecurityScan,
 } from './types'
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
@@ -52,6 +53,7 @@ export default function App() {
   const [tasks, setTasks] = useState<Record<string, Task>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [events, setEvents] = useState<TaskEvent[]>([])
+  const [securityScans, setSecurityScans] = useState<SecurityScan[]>([])
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
   const [repos, setRepos] = useState<RepoTarget[]>([])
@@ -133,6 +135,10 @@ export default function App() {
         if (e.event.kind === 'claude' && e.event.payload.sub === 'assistant') {
           setLive('')
         }
+        // A security-scan round just landed — refresh the Security panel live.
+        if (e.event.kind === 'security') {
+          api.listSecurityScans(e.taskId).then(setSecurityScans).catch(() => undefined)
+        }
         break
       case 'partial':
         if (e.taskId !== selectedIdRef.current) return
@@ -152,6 +158,7 @@ export default function App() {
           setSelectedId(null)
           setLive('')
           setEvents([])
+          setSecurityScans([])
         }
         break
     }
@@ -178,11 +185,14 @@ export default function App() {
     setSelectedId(id)
     setLive('')
     setEvents([])
+    setSecurityScans([])
     try {
       setEvents(await api.getEvents(id))
     } catch {
       // events load failed — leave empty
     }
+    // Security scan rows are read-only + independent; a failure just leaves the panel empty.
+    api.listSecurityScans(id).then(setSecurityScans).catch(() => undefined)
   }, [])
 
   const onCreate = useCallback(
@@ -315,6 +325,7 @@ export default function App() {
             <WorkspaceView
               task={selected}
               events={events}
+              securityScans={securityScans}
               live={live}
               tasks={sorted}
               repos={repos}

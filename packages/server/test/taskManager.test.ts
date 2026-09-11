@@ -7,6 +7,8 @@ import { TaskManager } from '../src/phases.js'
 import { Db } from '../src/db.js'
 import { config } from '../src/config.js'
 import type { RunnerCallbacks, RunnerFactory, RunnerLike, SpawnOptions } from '../src/runner.js'
+import { ScannerUnavailableError } from '../src/scanRunner.js'
+import type { RawScanOutput, ScanRequest, ScanRunnerFactory } from '../src/scanRunner.js'
 import type { Attachment, WsEvent } from '../src/types.js'
 
 // The state-machine test. It drives the REAL TaskManager over a REAL temp git
@@ -47,6 +49,76 @@ class FakeRunner implements RunnerLike {
   }
 }
 
+/**
+ * A test double for the injected `ScanRunnerFactory`: records every request and
+ * returns SCRIPTED fixture JSON, so the gate state machine never spawns real
+ * semgrep/osv-scanner, hits the network, or needs the binaries installed.
+ */
+class FakeScanRunner {
+  requests: ScanRequest[] = []
+  private queue: Array<{ ok: boolean; out?: RawScanOutput; err?: unknown }> = []
+  factory: ScanRunnerFactory = (req: ScanRequest): Promise<RawScanOutput> => {
+    this.requests.push(req)
+    const next = this.queue.shift()
+    if (!next) return Promise.reject(new Error('FakeScanRunner: no scripted result'))
+    return next.ok ? Promise.resolve(next.out as RawScanOutput) : Promise.reject(next.err)
+  }
+  /** Script a GREEN scan (no findings). */
+  green(): this {
+    this.queue.push({ ok: true, out: GREEN_SCAN })
+    return this
+  }
+  /** Script a RED scan (one blocking osv finding with a fix available). */
+  red(): this {
+    this.queue.push({ ok: true, out: RED_SCAN })
+    return this
+  }
+  /** Script an arbitrary raw output (e.g. garbage → fail-closed). */
+  raw(out: RawScanOutput): this {
+    this.queue.push({ ok: true, out })
+    return this
+  }
+  /** Script a rejection (scanner crash → fail-closed, or ScannerUnavailable → blocked). */
+  fail(err: unknown): this {
+    this.queue.push({ ok: false, err })
+    return this
+  }
+}
+
+const TOOL_VERSIONS = { semgrep: '1.0.0-fake', 'osv-scanner': '1.0.0-fake', mode: 'test' }
+const GREEN_SCAN: RawScanOutput = {
+  semgrep: '{"results":[]}',
+  osv: '{"results":[]}',
+  toolVersions: TOOL_VERSIONS,
+}
+// One osv vuln with a `fixed` event → fixAvailable:true → blocks (D1).
+const RED_SCAN: RawScanOutput = {
+  semgrep: '{"results":[]}',
+  osv: JSON.stringify({
+    results: [
+      {
+        packages: [
+          {
+            package: { name: 'lodash' },
+            vulnerabilities: [
+              {
+                id: 'GHSA-jf85-cpcp-j695',
+                summary: 'Prototype pollution in lodash',
+                aliases: ['CVE-2019-10744'],
+                affected: [{ ranges: [{ events: [{ introduced: '0' }, { fixed: '4.17.21' }] }] }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  }),
+  toolVersions: TOOL_VERSIONS,
+}
+
+/** Let onScanReady's async continuation (post-await) run to completion. */
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
 let repoDir: string
 let dbDir: string
 let db: Db
@@ -54,6 +126,7 @@ let created: FakeRunner[]
 let factory: RunnerFactory
 let events: WsEvent[]
 let mgr: TaskManager
+let scan: FakeScanRunner
 
 // Saved singleton state to restore after each test (config is a module singleton).
 let savedRepos: typeof config.repos
@@ -90,7 +163,8 @@ beforeEach(() => {
     created.push(r)
     return r
   }
-  mgr = new TaskManager(db, (e) => events.push(e), factory)
+  scan = new FakeScanRunner()
+  mgr = new TaskManager(db, (e) => events.push(e), factory, scan.factory)
 
   // Register the temp repo in the config singleton as the sole/default target.
   savedRepos = config.repos
@@ -516,6 +590,233 @@ describe('deleteTask', () => {
         (e) => e.type === 'event' && /\[1 attachment\(s\)\]/.test(e.event.payload.text ?? ''),
       ),
     ).toBe(true)
+  })
+})
+
+describe('security-scan gate (fake scan runner)', () => {
+  const openedPr = (r: FakeRunner): boolean => r.sent.some((m) => /git push -u origin/.test(m))
+  const gotFixKickoff = (r: FakeRunner): string | undefined =>
+    r.sent.find((m) => /SECURITY SCAN RED/.test(m))
+
+  /** Drive a plan-flow task to `validating` (execute child in hand). */
+  async function toValidating(title = 'gate me'): Promise<{ id: string; exec: FakeRunner }> {
+    const id = await startTask(title)
+    latest().say('ZMRNG_READY')
+    latest().say('ZMRNG_PLAN_READY model=opus effort=high plan=p.md')
+    const exec = latest()
+    exec.say('ZMRNG_VALIDATING')
+    expect(status(id)).toBe('validating')
+    return { id, exec }
+  }
+
+  it('scenario 1: green scan → openPrKickoff → PR → review; one pass scan row (task stays validating)', async () => {
+    scan.green()
+    const { id, exec } = await toValidating()
+
+    exec.say('ZMRNG_SCAN_READY')
+    await flush()
+
+    // D6: the task STAYS validating through the scan (no new `scanning` status).
+    expect(status(id)).toBe('validating')
+    expect(db.getTask(id)!.securityStatus).toBe('pass')
+    // The scan ran full SAST+SCA (plan flow, D2) on the worktree.
+    expect(scan.requests).toHaveLength(1)
+    expect(scan.requests[0].sast).toBe(true)
+    expect(scan.requests[0].worktree).toContain('worktrees')
+    // openPrKickoff went into the SAME live session.
+    expect(openedPr(exec)).toBe(true)
+    // Exactly one persisted scan row, verdict pass.
+    const rows = db.listSecurityScansForTask(id)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].verdict).toBe('pass')
+    expect(rows[0].round).toBe(1)
+
+    // The existing PR detection then drives the task to review, unchanged.
+    exec.say('opened https://github.com/anyone/anything/pull/7')
+    expect(status(id)).toBe('review')
+    expect(db.getTask(id)!.prUrl).toBe('https://github.com/anyone/anything/pull/7')
+  })
+
+  it('scenario 2: red round 1 → securityFixKickoff → green round 2 → PR; two scan rows', async () => {
+    scan.red().green()
+    const { id, exec } = await toValidating()
+
+    exec.say('ZMRNG_SCAN_READY')
+    await flush()
+
+    // Round 1 red: fix kickoff with the findings report + round budget.
+    expect(db.getTask(id)!.securityStatus).toBe('fail')
+    const fix = gotFixKickoff(exec)
+    expect(fix).toBeDefined()
+    expect(fix).toMatch(/round 1\/2/)
+    expect(fix).toMatch(/lodash/) // the deterministic findings report
+    expect(status(id)).toBe('validating') // stays validating, child alive
+    expect(exec.killed).toBe(false)
+
+    // Worker fixes, re-commits, re-emits the token → round 2 green.
+    exec.say('ZMRNG_SCAN_READY')
+    await flush()
+    expect(db.getTask(id)!.securityStatus).toBe('pass')
+    expect(openedPr(exec)).toBe(true)
+
+    // TWO persisted rows: fail then pass.
+    const rows = db.listSecurityScansForTask(id)
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.verdict)).toEqual(['fail', 'pass'])
+    expect(rows.map((r) => r.round)).toEqual([1, 2])
+
+    exec.say('opened https://github.com/anyone/anything/pull/2')
+    expect(status(id)).toBe('review')
+  })
+
+  it('scenario 3: rounds exhausted (maxRounds=1) → blocked with findings summary; child alive', async () => {
+    config.repos = [
+      { id: 'sandbox', label: 'sandbox', path: repoDir, defaultBranch: 'main', security: { maxRounds: 1 } },
+    ]
+    scan.red()
+    const { id, exec } = await toValidating()
+
+    exec.say('ZMRNG_SCAN_READY')
+    await flush()
+
+    expect(status(id)).toBe('blocked')
+    expect(db.getTask(id)!.securityStatus).toBe('fail')
+    // No fix kickoff — the budget was exhausted at round 1.
+    expect(gotFixKickoff(exec)).toBeUndefined()
+    // Child kept alive (operator inspects/resumes), like the missing-subagent block.
+    expect(exec.killed).toBe(false)
+    // The blocked reason carries a findings summary.
+    expect(
+      events.some(
+        (e) => e.type === 'event' && e.event.kind === 'error' && /still red after 1 round/.test(e.event.payload.text ?? ''),
+      ),
+    ).toBe(true)
+    const rows = db.listSecurityScansForTask(id)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].verdict).toBe('fail')
+  })
+
+  it('scenario 4: opt-out (security.enabled=false) → straight to openPrKickoff, skipped, NO scan row', async () => {
+    config.repos = [
+      { id: 'sandbox', label: 'sandbox', path: repoDir, defaultBranch: 'main', security: { enabled: false } },
+    ]
+    const { id, exec } = await toValidating()
+
+    exec.say('ZMRNG_SCAN_READY')
+    await flush()
+
+    expect(db.getTask(id)!.securityStatus).toBe('skipped')
+    expect(openedPr(exec)).toBe(true)
+    // The scanner was NEVER invoked and NO scan row was written (the only silent skip).
+    expect(scan.requests).toHaveLength(0)
+    expect(db.listSecurityScansForTask(id)).toHaveLength(0)
+  })
+
+  it('scenario 5: scanners unavailable/unprovisionable → blocked with install message; never a pass', async () => {
+    scan.fail(
+      new ScannerUnavailableError(
+        'semgrep and osv-scanner not found on PATH and could not be auto-provisioned — install semgrep / osv-scanner',
+      ),
+    )
+    const { id, exec } = await toValidating()
+
+    exec.say('ZMRNG_SCAN_READY')
+    await flush()
+
+    expect(status(id)).toBe('blocked')
+    expect(db.getTask(id)!.securityStatus).not.toBe('pass')
+    expect(openedPr(exec)).toBe(false)
+    // The block reason surfaces the install guidance.
+    expect(
+      events.some(
+        (e) => e.type === 'event' && e.event.kind === 'error' && /install/i.test(e.event.payload.text ?? ''),
+      ),
+    ).toBe(true)
+    expect(exec.killed).toBe(false)
+  })
+
+  it('scenario 6a: scan factory rejects (crash) → fail-closed to RED-BLOCKED, never a pass', async () => {
+    scan.fail(new Error('semgrep segfaulted'))
+    const { id, exec } = await toValidating()
+
+    exec.say('ZMRNG_SCAN_READY')
+    await flush()
+
+    expect(status(id)).toBe('blocked')
+    expect(db.getTask(id)!.securityStatus).toBe('fail')
+    expect(openedPr(exec)).toBe(false)
+    // A fail-closed row is persisted so the operator sees the failed scan.
+    const rows = db.listSecurityScansForTask(id)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].verdict).toBe('fail')
+  })
+
+  it('scenario 6b: garbage (non-empty, non-JSON) output → fail-closed, never parsed to a false pass', async () => {
+    scan.raw({ semgrep: 'not json at all', osv: 'also garbage', toolVersions: {} })
+    const { id, exec } = await toValidating()
+
+    exec.say('ZMRNG_SCAN_READY')
+    await flush()
+
+    expect(status(id)).toBe('blocked')
+    expect(db.getTask(id)!.securityStatus).toBe('fail')
+    expect(openedPr(exec)).toBe(false)
+  })
+
+  it('scenario 7 (D3): the execute lane is FREE during the scan — a queued task takes it', async () => {
+    config.maxLanes = 1
+    scan.green()
+
+    // Task A takes the only lane and reaches validating.
+    const a = await startTask('task A')
+    latest().say('ZMRNG_READY')
+    const aPlan = latest()
+    aPlan.say('ZMRNG_PLAN_READY model=opus effort=high plan=p.md')
+    const aExec = latest()
+    aExec.say('ZMRNG_VALIDATING')
+    expect(status(a)).toBe('validating')
+
+    // Task B reaches READY but no lane is free → queued.
+    const b = await startTask('task B')
+    latest().say('ZMRNG_READY')
+    expect(db.getTask(b)!.queued).toBe(true)
+    const createdBeforeScan = created.length
+
+    // A hands off to the deterministic scan. freeLane runs SYNCHRONOUSLY before
+    // the scan await, so B is promoted immediately — proving the lane is free
+    // (not idled on machine work) while A's scan is in flight (D3).
+    aExec.say('ZMRNG_SCAN_READY')
+    expect(db.getTask(b)!.queued).toBe(false)
+    expect(created.length).toBe(createdBeforeScan + 1) // B's plan child spawned
+    expect(latest().sent.some((m) => /PLAN PHASE/.test(m))).toBe(true)
+
+    // A's scan resolves green → openPrKickoff into A's still-alive session; A did
+    // NOT need to re-acquire a lane for a green verdict.
+    await flush()
+    expect(openedPr(aExec)).toBe(true)
+    expect(db.getTask(a)!.securityStatus).toBe('pass')
+  })
+
+  it('scenario 8 (D2): plan flow scans SAST+SCA; direct flow scans SCA-only', async () => {
+    // Plan flow → full gate (sast true).
+    scan.green()
+    const { exec: pExec } = await toValidating('plan task')
+    pExec.say('ZMRNG_SCAN_READY')
+    await flush()
+    expect(scan.requests.at(-1)!.sast).toBe(true)
+
+    // Direct flow → SCA-only (sast false). The direct worker prints the token
+    // straight from `executing`; onScanReady folds it into validating for the scan.
+    scan.green()
+    const d = await startTask('direct task', 'direct')
+    latest().say('ZMRNG_READY')
+    expect(status(d)).toBe('executing')
+    const dExec = latest()
+    dExec.say('ZMRNG_SCAN_READY')
+    await flush()
+    expect(scan.requests.at(-1)!.sast).toBe(false)
+    expect(db.getTask(d)!.securityStatus).toBe('pass')
+    expect(openedPr(dExec)).toBe(true)
   })
 })
 

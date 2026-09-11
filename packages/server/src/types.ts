@@ -468,7 +468,7 @@ export interface WorktreeFileContent {
   content: string
 }
 
-export type EventKind = 'claude' | 'status' | 'operator' | 'error'
+export type EventKind = 'claude' | 'status' | 'operator' | 'error' | 'security'
 
 /** Discriminator carried inside an event payload so the UI can render it. */
 export type EventSub =
@@ -482,6 +482,7 @@ export type EventSub =
   | 'tool'
   | 'subagent'
   | 'subagent_result'
+  | 'security'
 
 export interface EventPayload {
   sub: EventSub
@@ -498,6 +499,12 @@ export interface EventPayload {
   // activity (tool calls / subagents) — Q3/Q4/Q5
   tool?: string // tool name (e.g. Bash, Edit, Task)
   actor?: string // 'main' or a subagent_type — drives color
+  // security scan (kind === 'security', sub === 'security') — the round's
+  // verdict + budget + a count of blocking findings; `text` carries the summary.
+  verdict?: SecurityVerdict
+  round?: number
+  maxRounds?: number
+  blockingCount?: number
   subagentType?: string // for subagent / subagent_result events
   summary?: string // compact one-line activity summary
 }
