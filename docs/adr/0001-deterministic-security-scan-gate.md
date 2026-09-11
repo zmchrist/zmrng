@@ -1,9 +1,22 @@
 # ADR-0001 — Deterministic security-scan gate (lightweight profile)
 
-- **Status:** Accepted (implementation not started)
+- **Status:** Implemented (Slice 1 #135, Slice 2 #137 — both merged 2026-09-11)
 - **Date:** 2026-09-10
 - **Deciders:** zc
 - **Plan:** `.agents/plans/security-scan-gate.md` (Rev 2, post-grill)
+
+> **Implementation record.** Shipped in two slices. **Slice 1 (#135)** — the pure core:
+> `securityScan.ts` (tolerant `parseSemgrep`/`parseOsv`, `normalizeFindings`,
+> `evaluateThreshold`, `formatFindingsForAgent`), the security types, `resolveSecurityPolicy`
+> /`mergeSecurityPolicy`, and the additive `security_scans` table + `securityStatus` column.
+> **Slice 2 (#137)** — the wiring: `SCAN_READY_RE` + commit-and-wait kickoff tails, the
+> injected `scanRunner.ts` seam (`defaultScanRunnerFactory` execFile semgrep + osv-scanner),
+> `onScanReady` orchestration (D3 lane-release, D6 stays-in-`validating`, fail-closed),
+> the `security-scans` route, and the read-only web `SecurityPanel`. D6 honored throughout —
+> no `scanning` TaskStatus was added. **Deferred:** `defaultScanRunnerFactory` is exercised
+> by no automated test (semgrep/osv-scanner absent on dev); the "real tools emit exactly
+> these JSON shapes" check is an orchestrator/user-owned planted-vuln hand-verification,
+> recorded in `.claude/errors.md`.
 
 ## Context
 
