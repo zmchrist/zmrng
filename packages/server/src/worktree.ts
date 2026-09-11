@@ -112,6 +112,28 @@ function zmrngHooksConfig(): Record<string, unknown[]> {
           },
         ],
       },
+      {
+        matcher: 'Edit|Write|MultiEdit',
+        hooks: [
+          {
+            type: 'command',
+            command: `python3 "${hookPath('branch_guard.py')}"`,
+            timeout: 8,
+            statusMessage: 'Branch guard...',
+          },
+        ],
+      },
+      {
+        matcher: 'Bash',
+        hooks: [
+          {
+            type: 'command',
+            command: `python3 "${hookPath('pr_shape_guard.py')}"`,
+            timeout: 5,
+            statusMessage: 'PR shape check...',
+          },
+        ],
+      },
     ],
     PostToolUse: [
       {

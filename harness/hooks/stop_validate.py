@@ -16,6 +16,8 @@ Uses a flag file to prevent infinite loops — if validation was already
 attempted this turn, it passes through.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os

@@ -11,12 +11,21 @@ Contents:
 - `skills/` — 2 generic skills (`caveman`, `sync-docs`), copied whole.
 - `rules/` — 4 stack-agnostic rules (coding lifecycle, planning workflow,
   error handling, testing).
-- `hooks/` — 3 hook scripts copied down from `../.claude/hooks/` (one level
-  up in this repo layout) so the payload is self-contained:
-  - `security_guard.py` — universal safety hook, registered live in
-    `settings.json`.
-  - `post_tool_use_lint.py`, `stop_validate.py` — copied in as-is; not yet
-    wired into `settings.json` (capability-gated wiring lands separately).
-- `settings.json` — registers only `security_guard.py` as a `PreToolUse`
-  hook, plus a baseline permissions allow/deny list. No MCP servers.
+- `hooks/` — 5 hook scripts copied down from `../.claude/hooks/` (one level
+  up in this repo layout) so the payload is self-contained. All five carry
+  `from __future__ import annotations` so they run on stock macOS `python3`
+  3.9:
+  - `security_guard.py` — blocks `.env` access, recursive deletes,
+    force-push to main, `git reset --hard`.
+  - `branch_guard.py` — blocks Edit/Write while the repo is on
+    `main`/`master`. Override: `HERMES_ALLOW_PROTECTED_EDIT=1`.
+  - `pr_shape_guard.py` — rejects `gh pr create --fill` / missing
+    `--body-file`. Override: `HERMES_ALLOW_PR_FILL=1`.
+  - `post_tool_use_lint.py` — advisory linter (never blocks).
+  - `stop_validate.py` — runs the target's validation gate on turn-end.
+  Hook *registration* is not read from any settings file — it is hardcoded
+  in `zmrngHooksConfig()` (`packages/server/src/worktree.ts`), which
+  `seedHarness()` merges into each worker worktree's
+  `.claude/settings.local.json`. That function is the single source of truth
+  for which hooks are wired.
 - `CLAUDE.md` — generic PIV-lifecycle instructions for a seeded worker.
