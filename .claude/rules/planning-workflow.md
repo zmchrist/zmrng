@@ -26,7 +26,6 @@ The plan then goes to you for review and approval before implementation begins.
 
 ## Branch & Commit Discipline (solo operator)
 - **Plans before code.** No plan = no implementation.
-- **Branch before code.** Planning/brainstorming can happen on `main`; the moment a
-  session edits a file, create a feature branch first.
-- **Always branch from `origin/main`:** `git fetch origin && git checkout -b feat/zc/<desc> origin/main`.
-- **Branch convention:** `<type>/zc/<short-description>` (`feat/`, `fix/`, `chore/`, `wip/`).
+- **Branch before code**, from `origin/main`, `<type>/zc/<desc>` convention. The full
+  rule (and the `branch_guard`/`pr_shape_guard` hooks that enforce it) lives in
+  `coding-lifecycle.md` — the single source of truth. Not restated here.
