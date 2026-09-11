@@ -4,6 +4,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import { Db } from '../src/db.js'
+import { resolvePageTitle, buildPageBody } from '../src/kbFromMessage.js'
 
 let dir: string
 let dbPath: string
@@ -441,5 +442,65 @@ describe('KB additive-migration idempotency', () => {
     expect(db2.getPage(page.id)?.title).toBe('Guide')
     expect(db2.getBlock(block.id)?.body).toBe('hello')
     db2.close()
+  })
+})
+
+describe('KB "Send to KB" composition (T4, #154)', () => {
+  // Round-trips the exact db composition the POST /api/spaces/:id/pages/from-message
+  // route performs (the repo has no HTTP-inject harness, #91): look up the source
+  // message + its channel, derive a title, build the SERVER-SIDE provenance body,
+  // then createPage + createBlock. The result must be an ordinary KB page.
+  it('promotes a channel message into a normal page whose first block carries body + server provenance', () => {
+    const db = new Db(dbPath)
+    const channel = db.createChannel('zmrng-dev', 'zmrng', NOW)
+    const message = db.addMessage(channel.id, 'Ada', 'Investigate the retry bug\nmore detail', 'human', NOW)
+    const space = db.listSpaces()[1] // zmrng space
+
+    // The route's composition, using the real db reads it relies on.
+    const src = db.getMessage(message.id)!
+    const srcChannel = db.getChannel(src.channelId)!
+    const title = resolvePageTitle(undefined, src.body)
+    const page = db.createPage(space.id, null, title, src.author, NOW)
+    const block = db.createBlock({
+      pageId: page.id,
+      ord: null,
+      kind: 'text',
+      body: buildPageBody(src.body, srcChannel.name, src.id),
+      meta: null,
+      updatedBy: src.author,
+      now: NOW,
+    })
+
+    // Title derived from the message's first line.
+    expect(page.title).toBe('Investigate the retry bug')
+    expect(page.spaceId).toBe(space.id)
+    expect(page.folderId).toBeNull()
+
+    // First block is at ord 0 and carries the message body + canonical provenance.
+    expect(block.ord).toBe(0)
+    expect(block.body).toBe(
+      'Investigate the retry bug\nmore detail\n\n---\nFrom team channel #zmrng-dev (message #' +
+        message.id +
+        ')',
+    )
+
+    // It is a NORMAL page: it appears in the space's page list and its block reads back.
+    expect(db.listPages(space.id).some((p) => p.id === page.id)).toBe(true)
+    expect(db.listBlocks(page.id).map((b) => b.body)).toEqual([block.body])
+    db.close()
+  })
+
+  it('places the page in a given folder of the space', () => {
+    const db = new Db(dbPath)
+    const channel = db.createChannel('design', null, NOW)
+    const message = db.addMessage(channel.id, 'Bo', 'Design notes', 'human', NOW)
+    const space = db.listSpaces()[0]
+    const folder = db.createFolder(space.id, null, 'Notes', NOW)
+
+    const src = db.getMessage(message.id)!
+    const page = db.createPage(space.id, folder.id, resolvePageTitle('Custom', src.body), src.author, NOW)
+    expect(page.folderId).toBe(folder.id)
+    expect(page.title).toBe('Custom') // explicit client title honored
+    db.close()
   })
 })

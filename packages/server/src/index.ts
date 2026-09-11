@@ -22,6 +22,7 @@ import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } fro
 import { runPreflight } from './preflight.js'
 import { parseStreamedText } from './chat.js'
 import { readUiState, writeUiState } from './uiState.js'
+import { resolvePageTitle, buildPageBody } from './kbFromMessage.js'
 import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE, KB_BLOCK_KINDS } from './types.js'
 import type {
   WsEvent,
@@ -620,6 +621,69 @@ app.post('/api/spaces/:id/pages', (req, reply): KbPage | undefined => {
   }
   const page = db.createPage(spaceId, folderId, title, author, new Date().toISOString())
   app.log.info({ pageId: page.id, spaceId }, 'kb page created')
+  return page
+})
+
+// Promote a team-channel message into a durable KB page (T4, #154). Looks up the
+// message + its channel server-side and creates a NORMAL page in space :id whose
+// first block carries the message body + a canonical, SERVER-BUILT provenance
+// line (channel name + message id). Provenance is never trusted from the client.
+// 404 unknown space/message/folder; 400 blank/invalid ids or cross-space folder.
+app.post('/api/spaces/:id/pages/from-message', (req, reply): KbPage | undefined => {
+  const spaceId = kbId((req.params as { id: string }).id)
+  if (spaceId === null || !db.getSpace(spaceId)) {
+    reply.code(404).send({ error: 'space not found' })
+    return undefined
+  }
+  const body = req.body as
+    | { messageId?: unknown; folderId?: unknown; title?: unknown }
+    | undefined
+  const messageId = kbId(body?.messageId)
+  if (messageId === null) {
+    reply.code(400).send({ error: 'messageId is required' })
+    return undefined
+  }
+  const message = db.getMessage(messageId)
+  if (!message) {
+    reply.code(404).send({ error: 'message not found' })
+    return undefined
+  }
+  const channel = db.getChannel(message.channelId)
+  if (!channel) {
+    reply.code(404).send({ error: 'channel not found' })
+    return undefined
+  }
+  const folderId = kbNullableId(body?.folderId)
+  if (folderId === undefined) {
+    reply.code(400).send({ error: 'invalid folderId' })
+    return undefined
+  }
+  if (folderId !== null && !db.getFolder(folderId)) {
+    reply.code(404).send({ error: 'folder not found' })
+    return undefined
+  }
+  if (folderId !== null && db.getFolder(folderId)?.spaceId !== spaceId) {
+    reply.code(400).send({ error: 'folder belongs to a different space' })
+    return undefined
+  }
+  // Title is an editable label (client value wins, else derived server-side).
+  // The page author + block editor are the canonical message author.
+  const title = resolvePageTitle(kbName(body?.title), message.body)
+  const now = new Date().toISOString()
+  const page = db.createPage(spaceId, folderId, title, message.author, now)
+  db.createBlock({
+    pageId: page.id,
+    ord: null,
+    kind: 'text',
+    body: buildPageBody(message.body, channel.name, message.id),
+    meta: null,
+    updatedBy: message.author,
+    now,
+  })
+  app.log.info(
+    { pageId: page.id, spaceId, messageId, channelId: channel.id },
+    'kb page created from message',
+  )
   return page
 })
 

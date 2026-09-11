@@ -112,6 +112,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   // One-shot "Send to my zmrng" pre-fill from the Team tab (T3).
   const [handoffPrefill, setHandoffPrefill] = useState<HandoffPrefill | null>(null)
+  // One-shot "Send to KB" navigation target from the Team tab (T4, #154): the
+  // space + page to open in the KB tab after a message is promoted. A fresh
+  // object per promotion lets KbView's one-shot seed fire once each time.
+  const [kbTarget, setKbTarget] = useState<{ spaceId: number; pageId: number } | null>(null)
   // WS-B / D3: the newer origin/main sha the workspace socket advertised, once
   // it differs from this instance's headSha. Drives the global update banner.
   const [updateSha, setUpdateSha] = useState<string | null>(null)
@@ -247,6 +251,15 @@ export default function App() {
   )
   const onPrefillConsumed = useCallback(() => setHandoffPrefill(null), [])
 
+  // Team tab "Send to KB": switch to the KB tab and open the promoted page.
+  const onOpenKbPage = useCallback(
+    (spaceId: number, pageId: number) => {
+      setMode('kb')
+      setKbTarget({ spaceId, pageId })
+    },
+    [setMode],
+  )
+
   // A `new-version` frame from the workspace socket (relayed by TeamView). Store
   // the advertised sha unconditionally; whether it is genuinely ahead of ours is
   // decided at render by the pure `updateAvailable` gate. Deferring the compare
@@ -380,6 +393,7 @@ export default function App() {
               botHandle={cfg?.botHandle ?? '@agent'}
               repos={repos}
               onSendToZmrng={onSendToZmrng}
+              onOpenKbPage={onOpenKbPage}
               onNewVersion={onNewVersion}
             />
           </div>
@@ -388,7 +402,7 @@ export default function App() {
             className={styles.modeContent}
             style={{ display: mode === 'kb' ? 'flex' : 'none' }}
           >
-            <KbView teamHandle={settings.teamHandle} />
+            <KbView teamHandle={settings.teamHandle} openTarget={kbTarget} />
           </div>
         </div>
 
