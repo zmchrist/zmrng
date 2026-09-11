@@ -12,6 +12,7 @@ import {
   planKickoff,
   resumeKickoff,
   securityFixKickoff,
+  styleDirective,
   systemPrompt,
 } from '../src/phases.js'
 import type { Task, TaskStatus } from '../src/types.js'
@@ -77,6 +78,44 @@ describe('systemPrompt', () => {
     expect(prompt).toMatch(/zmrng-code-reviewer/)
     expect(prompt).toMatch(/zmrng-doc-updater/)
     expect(prompt).toMatch(/guaranteed present/i)
+  })
+})
+
+describe('styleDirective (D3 — inline caveman register, no skill round-trip)', () => {
+  it('normal style yields no communication-style block', () => {
+    expect(styleDirective('normal')).toBe('')
+  })
+
+  it('inlines the mapped register directly and does NOT tell the worker to invoke the caveman skill', () => {
+    const directive = styleDirective('caveman-full')
+    expect(directive).toMatch(/COMMUNICATION STYLE:/)
+    // The inline register text is present verbatim (mapped CAVEMAN_RULES entry).
+    expect(directive).toMatch(/Drop articles \(a\/an\/the\) and filler/)
+    // The per-session skill-invoke directive is GONE — zero tool round-trips.
+    expect(directive).not.toMatch(/invoke/i)
+    expect(directive).not.toMatch(/caveman` skill/)
+    expect(directive).not.toMatch(/Skill tool/)
+    expect(directive).not.toMatch(/\/caveman/)
+    expect(directive).not.toMatch(/VERY FIRST action/)
+    expect(directive).not.toMatch(/Fallback if the caveman skill/)
+    // The English carve-out for code/commits/PR/plan files stays.
+    expect(directive).toMatch(/EXCEPTION: write code, commit messages/)
+  })
+
+  it('maps wenyan-full to its inline register like the others (no special skill path)', () => {
+    const directive = styleDirective('wenyan-full')
+    expect(directive).toMatch(/Classical Chinese/)
+    expect(directive).not.toMatch(/invoke/i)
+    expect(directive).not.toMatch(/Skill tool/)
+  })
+
+  it('systemPrompt embeds the inline register for a non-normal style and none for normal', () => {
+    const caveman = systemPrompt('feat/zmrng/x-1', '/repos/example', 'main', 'caveman-ultra')
+    expect(caveman).toMatch(/COMMUNICATION STYLE:/)
+    expect(caveman).toMatch(/Abbreviate \(DB\/auth\/config\/fn\/impl\)/)
+    expect(caveman).not.toMatch(/Skill tool/)
+    const normal = systemPrompt('feat/zmrng/x-1', '/repos/example', 'main', 'normal')
+    expect(normal).not.toMatch(/COMMUNICATION STYLE:/)
   })
 })
 

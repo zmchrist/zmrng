@@ -24,6 +24,7 @@ import { TeamView } from './components/TeamView'
 import { UpdateBanner } from './components/UpdateBanner'
 import { SettingsModal } from './components/SettingsModal'
 import { updateAvailable } from './updateGate'
+import { modelEffortLabel } from './taskLabels'
 import { useUiState } from './uiState'
 import { nextRailState } from './railState'
 import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState, type TerminalTabState } from './windowTabs'
@@ -265,7 +266,7 @@ export default function App() {
   const running = sorted.filter((t) => t.status === 'executing').length
   const queued = sorted.filter((t) => t.queued).length
   const branch = selected?.branch ?? 'main'
-  const modelLabel = selected ? `${selected.model} / ${selected.effort}` : 'idle'
+  const modelLabel = modelEffortLabel(selected)
 
   return (
     <div className={styles.app} data-native={isNativeApp || undefined}>
