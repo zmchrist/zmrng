@@ -416,6 +416,7 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null }: Props)
 
   /** Restore a revision onto the conflicted block, then close the toast. */
   const restore = (revisionId: number): void => {
+    if (!canEdit) return
     api
       .restoreRevision(revisionId, editHandle)
       .then((block) => {
@@ -432,6 +433,7 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null }: Props)
 
   const createFolder = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
+    if (!canEdit) return
     const name = newFolder.trim()
     if (!name || spaceId === null || busy) return
     setBusy(true)
