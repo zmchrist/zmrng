@@ -49,3 +49,29 @@ runs holding NO execute lane (D3). A lane is re-acquired only if the scan is red
 fix round is needed.
 _Avoid_: "scanning phase holds a lane" (the rejected design that idles a scarce lane
 on machine work).
+
+## Agent efficiency monitor
+
+**Efficiency profile** — the advisory artifact the efficiency monitor emits: a
+per-agent/per-task ranked list of detected habits, each scored by estimated wasted
+tokens/time and tagged with a lever pointer. Derived purely by reading the existing
+`events` rows (`db.getEvents`) + the task's aggregate `usage`; it mutates nothing.
+_Avoid_: "operator log" (the raw live per-event firehose — this is the aggregated
+diagnosis OVER those events, not the stream itself); "efficiency report" (informal —
+the profile is the named durable artifact zc calls the "efficiency file").
+
+**Habit (finding)** — one recurring waste pattern the monitor detects from the aggregate
+(e.g. repeated failed tool calls, opus-on-menial, subagent thrash), carrying
+`{habit, wastedEstimate, lever}`. Keyed off tool-call FREQUENCY/counts + result-error
+rates + task-level token totals, because `TaskUsage` is aggregate-per-task, not per-event.
+_Avoid_: "event" (a single captured tool use / thought — a habit is a pattern across many
+events); "bug" (a habit is wasteful-but-working behaviour, not a defect).
+
+**Lever pointer** — the tag on a finding naming where its fix would land: `control`
+(per-task `model`/`effort`/`flow` on the `tasks` row — bounded, reversible, the only
+eventual auto-apply candidate), `phase-prompt` (`phases.ts` — human-only), or
+`target-context` (the target repo's `CLAUDE.md`/rules token tax — out of zmrng's control
+on arbitrary repos).
+_Avoid_: "fix" (the pointer names the SURFACE, not the applied change — v1 applies
+nothing); "auto-apply" (only `control` is ever an auto-apply target, and only later,
+opt-in, operator-confirmed).
