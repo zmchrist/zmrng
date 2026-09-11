@@ -1145,9 +1145,56 @@ export class Db {
     return this.getFolder(id)
   }
 
-  /** Delete a folder row. Child folders/pages are not cascaded here (T1 scope). */
+  /**
+   * Delete a folder and everything it contains, recursively, in one transaction.
+   *
+   * Cascade semantics (matches `deletePage`, which cascades page→blocks→revisions):
+   * the target folder, all of its descendant subfolders (at any depth), every page
+   * in any of those folders, and each page's blocks + revisions are removed. This
+   * leaves no orphan rows pointing at a deleted parent_id/folder_id and matches the
+   * user expectation that deleting a folder removes its contents. The delete order is
+   * revisions → blocks → pages → folders, and the whole thing runs inside a single
+   * better-sqlite3 transaction so any failure rolls back cleanly.
+   */
   deleteFolder(id: number): void {
-    this.db.prepare('DELETE FROM folders WHERE id = ?').run(id)
+    const run = this.db.transaction((rootId: number) => {
+      // Collect the target plus all descendant folder ids (BFS over parent_id).
+      const folderIds: number[] = [rootId]
+      let frontier: number[] = [rootId]
+      while (frontier.length > 0) {
+        const placeholders = frontier.map(() => '?').join(', ')
+        const children = this.db
+          .prepare(`SELECT id FROM folders WHERE parent_id IN (${placeholders})`)
+          .all(...frontier) as { id: number }[]
+        frontier = children.map((c) => c.id)
+        folderIds.push(...frontier)
+      }
+      // For every folder in the set, cascade its pages → blocks → revisions.
+      for (const fid of folderIds) {
+        const pageIds = (
+          this.db.prepare('SELECT id FROM pages WHERE folder_id = ?').all(fid) as {
+            id: number
+          }[]
+        ).map((p) => p.id)
+        for (const pid of pageIds) {
+          const blockIds = (
+            this.db.prepare('SELECT id FROM blocks WHERE page_id = ?').all(pid) as {
+              id: number
+            }[]
+          ).map((b) => b.id)
+          for (const bid of blockIds) {
+            this.db.prepare('DELETE FROM revisions WHERE block_id = ?').run(bid)
+          }
+          this.db.prepare('DELETE FROM blocks WHERE page_id = ?').run(pid)
+          this.db.prepare('DELETE FROM pages WHERE id = ?').run(pid)
+        }
+      }
+      // Finally remove the folder rows themselves (order is irrelevant once collected).
+      for (const fid of folderIds) {
+        this.db.prepare('DELETE FROM folders WHERE id = ?').run(fid)
+      }
+    })
+    run(id)
   }
 
   /** Every page in a space, in insertion order. */
