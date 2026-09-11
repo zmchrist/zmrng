@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import styles from './TeamView.module.css'
-import type { Channel, Message, RepoTarget, WorkspaceMember } from '../types'
+import type { Channel, Message, RepoTarget, WorkspaceMember, Space } from '../types'
 import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from '../types'
 import {
   mentionCandidates,
@@ -25,6 +25,8 @@ import { REACTION_EMOJI } from '../emojiSet'
 import { useAutoScroll } from '../useAutoScroll'
 import { api } from '../api'
 import { buildHandoffPrefill, type HandoffPrefill } from '../teamHandoff'
+import { resolveDefaultSpace, deriveKbTitle } from '../kbFromMessage'
+import { collectFolders, type KbFolderOption } from '../kbTree'
 import { workspaceSocketUrl, workspaceHttpOrigin } from '../teamConfig'
 import { ThinkingDots } from './ThinkingDots'
 import { formatMessageTime } from '../teamTime'
@@ -49,6 +51,10 @@ interface Props {
   /** Lift a "Send to my zmrng" handoff up to App: switch to Workspace and seed
    *  the local new-task box with this brief (T3, decision D6). */
   onSendToZmrng: (prefill: HandoffPrefill) => void
+  /** After promoting a message into a KB page (T4, #154), switch to the KB tab
+   *  and open the freshly created page. Optional — the promotion still succeeds
+   *  server-side without navigating. */
+  onOpenKbPage?: (spaceId: number, pageId: number) => void
   /** Bubble a `new-version` frame's sha up to App (WS-B / D3). TeamView owns the
    *  socket but NOT the update banner — the phase-gate needs App's `tasks`. */
   onNewVersion?: (sha: string) => void
@@ -81,6 +87,7 @@ export function TeamView({
   botHandle,
   repos,
   onSendToZmrng,
+  onOpenKbPage,
   onNewVersion,
 }: Props) {
   const socketUrl = workspaceSocketUrl(workspaceUrl)
@@ -124,6 +131,17 @@ export function TeamView({
   const [newRepo, setNewRepo] = useState('')
   const [createBusy, setCreateBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  // "Send to KB" picker state (T4, #154). `kbFor` is the {channel, message}
+  // being promoted (null = picker closed). Space/folder/title are the editable
+  // target; the server rebuilds the canonical provenance regardless.
+  const [kbFor, setKbFor] = useState<{ channel: Channel; message: Message } | null>(null)
+  const [kbSpaces, setKbSpaces] = useState<Space[]>([])
+  const [kbSpaceId, setKbSpaceId] = useState<number | null>(null)
+  const [kbFolders, setKbFolders] = useState<KbFolderOption[]>([])
+  const [kbFolderId, setKbFolderId] = useState('') // '' = space root
+  const [kbTitle, setKbTitle] = useState('')
+  const [kbBusy, setKbBusy] = useState(false)
+  const [kbError, setKbError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   // Latest open-channel id, readable inside the stable socket onmessage closure.
   const openIdRef = useRef<number | null>(null)
@@ -448,6 +466,71 @@ export function TeamView({
     onSendToZmrng(buildHandoffPrefill(channel, message))
   }
 
+  /** Load a space's folders (flattened) into the KB picker's folder select. */
+  const loadKbFolders = async (spaceId: number): Promise<void> => {
+    try {
+      const tree = await api.getSpaceTree(spaceId)
+      setKbFolders(collectFolders(tree))
+    } catch {
+      setKbFolders([])
+    }
+  }
+
+  /** Open the "Send to KB" picker for a message (T4). Loads the KB spaces, best-
+   *  effort defaults the target space by channel-name match (→ general), and
+   *  seeds an editable title derived from the message body. */
+  const openKbPicker = async (channel: Channel, message: Message): Promise<void> => {
+    setKbFor({ channel, message })
+    setKbTitle(deriveKbTitle(message.body))
+    setKbFolderId('')
+    setKbFolders([])
+    setKbError(null)
+    try {
+      const spaces = await api.getSpaces()
+      setKbSpaces(spaces)
+      const target = resolveDefaultSpace(channel.name, spaces)
+      const sid = target?.id ?? null
+      setKbSpaceId(sid)
+      if (sid !== null) await loadKbFolders(sid)
+    } catch (err) {
+      setKbError(err instanceof Error ? err.message : 'Failed to load KB spaces')
+    }
+  }
+
+  /** Switch the picker's target space and refresh its folder list. */
+  const onKbSpaceChange = (value: string): void => {
+    const sid = value ? Number(value) : null
+    setKbSpaceId(sid)
+    setKbFolderId('')
+    if (sid !== null) void loadKbFolders(sid)
+    else setKbFolders([])
+  }
+
+  /** Promote the selected message into a durable KB page (T4). The server builds
+   *  the page body + provenance canonically; on success, navigate to the page. */
+  const submitKb = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault()
+    if (!kbFor || kbSpaceId === null || kbBusy) return
+    setKbBusy(true)
+    setKbError(null)
+    try {
+      const page = await api.createPageFromMessage(kbSpaceId, {
+        messageId: kbFor.message.id,
+        folderId: kbFolderId ? Number(kbFolderId) : null,
+        title: kbTitle.trim() || undefined,
+      })
+      setKbFor(null)
+      onOpenKbPage?.(page.spaceId, page.id)
+    } catch (err) {
+      setKbError(err instanceof Error ? err.message : 'Failed to create page')
+    } finally {
+      setKbBusy(false)
+    }
+  }
+
+  /** Close the KB picker without promoting. */
+  const closeKbPicker = (): void => setKbFor(null)
+
   if (!socketUrl) {
     return (
       <div className={styles.team}>
@@ -624,6 +707,14 @@ export function TeamView({
                       >
                         Send to my zmrng
                       </button>
+                      <button
+                        type="button"
+                        className={styles.sendKb}
+                        onClick={() => void openKbPicker(openChannel, m)}
+                        title="Promote this message into a durable KB page"
+                      >
+                        Send to KB
+                      </button>
                       <time className={styles.messageTime} dateTime={m.createdAt}>
                         {formatMessageTime(m.createdAt)}
                       </time>
@@ -780,6 +871,79 @@ export function TeamView({
           )}
         </div>
       </div>
+
+      {kbFor && (
+        <div
+          className={styles.kbOverlay}
+          role="dialog"
+          aria-label="Send to KB"
+          onClick={closeKbPicker}
+        >
+          <form
+            className={styles.kbCard}
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => void submitKb(e)}
+          >
+            <span className={styles.kbHead}>Send to KB</span>
+            <span className={styles.kbSub}>
+              Promote this message from {channelLabel(kbFor.channel.name)} into a durable KB page.
+            </span>
+            <label className={styles.kbLabel}>
+              Space
+              <select
+                className={styles.kbSelect}
+                value={kbSpaceId ?? ''}
+                onChange={(e) => onKbSpaceChange(e.target.value)}
+              >
+                {kbSpaces.length === 0 && <option value="">No spaces</option>}
+                {kbSpaces.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.kbLabel}>
+              Folder
+              <select
+                className={styles.kbSelect}
+                value={kbFolderId}
+                onChange={(e) => setKbFolderId(e.target.value)}
+              >
+                <option value="">(space root)</option>
+                {kbFolders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.path}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.kbLabel}>
+              Title
+              <input
+                className={styles.kbInput}
+                type="text"
+                value={kbTitle}
+                onChange={(e) => setKbTitle(e.target.value)}
+                placeholder="Page title"
+              />
+            </label>
+            {kbError && <span className={styles.kbError}>{kbError}</span>}
+            <div className={styles.kbActions}>
+              <button type="button" className={styles.kbCancel} onClick={closeKbPicker}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={styles.kbSubmit}
+                disabled={kbSpaceId === null || kbBusy}
+              >
+                {kbBusy ? 'Creating…' : 'Create page'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }
