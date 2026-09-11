@@ -10,8 +10,23 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import { seedHarness } from '../src/worktree.js'
+
+// The repo's REAL harness/ dir, resolved relative to this test file
+// (packages/server/test/ → repo root → harness/).
+const REPO_HARNESS_DIR = fileURLToPath(new URL('../../../harness', import.meta.url))
+
+/** True if `python3` resolves to a runnable interpreter in this test env. */
+function python3Available(): boolean {
+  try {
+    execFileSync('python3', ['--version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
 
 // seedHarness copies zmrng's own harness/ tree into a task worktree so a worker
 // picks up the same rules/skills/agents/hooks, without ever letting `git add -A`
@@ -43,6 +58,8 @@ function initFakeHarness(): string {
   writeFileSync(path.join(dir, 'skills', 'demo-skill', 'SKILL.md'), '# demo skill\n')
   writeFileSync(path.join(dir, 'agents', 'qa.md'), '# qa agent\n')
   writeFileSync(path.join(dir, 'hooks', 'security_guard.py'), '# guard\n')
+  writeFileSync(path.join(dir, 'hooks', 'branch_guard.py'), '# branch\n')
+  writeFileSync(path.join(dir, 'hooks', 'pr_shape_guard.py'), '# pr shape\n')
   writeFileSync(path.join(dir, 'hooks', 'post_tool_use_lint.py'), '# lint\n')
   writeFileSync(path.join(dir, 'hooks', 'stop_validate.py'), '# validate\n')
   writeFileSync(path.join(dir, 'CLAUDE.md'), '# harness CLAUDE\n')
@@ -81,7 +98,13 @@ describe('seedHarness', () => {
     const settings = JSON.parse(
       readFileSync(path.join(worktreeDir, '.claude', 'settings.local.json'), 'utf8'),
     )
+    // security_guard must stay the first PreToolUse registration.
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('security_guard.py')
+    // branch_guard + pr_shape_guard must also be registered somewhere in PreToolUse.
+    const preCommands = (settings.hooks.PreToolUse as Array<{ hooks: Array<{ command: string }> }>)
+      .flatMap((group) => group.hooks.map((h) => h.command))
+    expect(preCommands.some((c) => c.includes('branch_guard.py'))).toBe(true)
+    expect(preCommands.some((c) => c.includes('pr_shape_guard.py'))).toBe(true)
   })
 
   it('copies core_piv_loop commands unprefixed — slash resolution needs the exact name', async () => {
@@ -193,5 +216,56 @@ describe('seedHarness', () => {
       readFileSync(path.join(worktreeDir, '.claude', 'settings.local.json'), 'utf8'),
     )
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('security_guard.py')
+  })
+
+  // The decisive worker-parity check: seed from the REAL repo harness/ dir (not
+  // the fake fixture) and prove a freshly seeded worker worktree carries all five
+  // enforcement hooks, wired across PreToolUse/PostToolUse/Stop, none crashing on
+  // python3 3.9 (guards against a future PEP-604 `X | None` regression).
+  it('seeds all five real harness hooks + registrations, none crashing on python3', async () => {
+    await seedHarness(worktreeDir, '/some/target/repo', REPO_HARNESS_DIR, 'python3')
+
+    const FIVE_HOOKS = [
+      'security_guard.py',
+      'branch_guard.py',
+      'pr_shape_guard.py',
+      'post_tool_use_lint.py',
+      'stop_validate.py',
+    ]
+
+    // (a) all five scripts land in .claude/zmrng-hooks/
+    const hooksDir = path.join(worktreeDir, '.claude', 'zmrng-hooks')
+    for (const name of FIVE_HOOKS) {
+      expect(existsSync(path.join(hooksDir, name)), `${name} should be seeded`).toBe(true)
+    }
+
+    // (b) settings.local.json carries all five registrations across the events.
+    const settings = JSON.parse(
+      readFileSync(path.join(worktreeDir, '.claude', 'settings.local.json'), 'utf8'),
+    )
+    const allCommands = ['PreToolUse', 'PostToolUse', 'Stop']
+      .flatMap((event) => (settings.hooks[event] ?? []) as Array<{ hooks: Array<{ command: string }> }>)
+      .flatMap((group) => group.hooks.map((h) => h.command))
+    for (const name of FIVE_HOOKS) {
+      expect(
+        allCommands.some((c) => c.includes(name)),
+        `${name} should be registered in settings.local.json`,
+      ).toBe(true)
+    }
+
+    // (c) each seeded hook runs exit-0 under python3 with `{}` on stdin. Skip
+    //     gracefully if python3 isn't resolvable in this test env.
+    if (!python3Available()) return
+    for (const name of FIVE_HOOKS) {
+      expect(() => {
+        execFileSync('python3', [path.join(hooksDir, name)], {
+          input: '{}',
+          stdio: ['pipe', 'ignore', 'ignore'],
+          // stop_validate would auto-detect + run this worktree's stack; run it
+          // from the fresh temp worktree (empty git repo) so it detects nothing.
+          cwd: worktreeDir,
+        })
+      }, `${name} should exit 0 on python3 with {} stdin`).not.toThrow()
+    }
   })
 })

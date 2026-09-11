@@ -199,3 +199,25 @@ leave lift changes up). `teamConfig.ts` shed its localStorage/resolve helpers, k
 the pure `workspaceSocketUrl`/`workspaceHttpOrigin` coercers. The sidecar DB lives in the
 persistent per-user data dir, so the values now survive close/reopen, `desktop:build`, and
 reboot.
+
+## Worker-harness parity — five enforcement hooks in the seed harness (2026-09-10)
+zmrng has two independent harnesses: `.claude/` (direct sessions launched from the repo
+root) and `harness/` (the stack-agnostic tree `seedHarness()` copies into every worker
+worktree). Piece A vendored the full enforcing `.claude/` harness; this piece brought
+`harness/` to parity so headless workers get the same guardrails. Added `branch_guard.py`
+(protected-branch edit guard, override `HERMES_ALLOW_PROTECTED_EDIT=1`) and
+`pr_shape_guard.py` (rejects `gh pr create --fill`/missing `--body-file`, override
+`HERMES_ALLOW_PR_FILL=1`) to `harness/hooks/`, verbatim from the `.claude/` copies. Fixed
+the py3.9 crash by adding `from __future__ import annotations` to the three existing seed
+hooks (`post_tool_use_lint.py` was silently dead on stock macOS `python3` 3.9.6 via a
+PEP-604 `X | None` annotation; the other two got it defensively). `zmrngHooksConfig()`
+(`worktree.ts`) now registers all five hooks — PreToolUse is a 3-element array
+(security_guard, branch_guard, pr_shape_guard), plus PostToolUse (lint) and Stop
+(validate). Deleted the dead, misleading `harness/settings.json` (never read by
+`seedHarness` — registration is hardcoded in `zmrngHooksConfig()`; grep confirmed no
+consumer). `stop_validate.py`'s intentional divergence (dropped `find_active_project`,
+per-worktree stop-flag) is preserved — only the `__future__` line was added. Added a
+decisive integration test in `seedHarness.test.ts` that seeds from the REAL repo
+`harness/` dir and asserts all five scripts land in `.claude/zmrng-hooks/`, all five
+registrations appear in `settings.local.json`, and each seeded hook exits 0 under
+`python3` with `{}` on stdin (guards against a future PEP-604 regression).
