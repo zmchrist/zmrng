@@ -75,3 +75,24 @@ on arbitrary repos).
 _Avoid_: "fix" (the pointer names the SURFACE, not the applied change — v1 applies
 nothing); "auto-apply" (only `control` is ever an auto-apply target, and only later,
 opt-in, operator-confirmed).
+
+## Chat workflows
+
+**Workflow preset** — a named, user-selectable working mode for a standalone Chat-card
+session (`/ws/chat`): the operator picks one from a `workflow` dropdown alongside
+model/effort/style, and the session adopts that mode (e.g. `grill`, `teach-me`). Mechanically
+it is a prompt preset (see **Workflow directive**), NOT seeded skill files and NOT the
+worker's PIV pipeline. zmrng owns its own committed copies of the preset bodies; they are
+allowed to drift from the operator's personal Hermes skills of the same name (ADR-0002 D3).
+_Avoid_: "skill" (a workflow preset is not a discoverable `.claude/` skill — it never
+touches the filesystem; the harness skills the worker gets are a different mechanism);
+"workflow" bare when you mean the task lifecycle (the worker's plan→execute→validate→PR
+pipeline is also "a workflow" — say "the pipeline" for that, "workflow preset" for this).
+
+**Workflow directive** — the block of instructions a selected **Workflow preset** appends
+to the Chat session's system prompt at spawn, produced by `workflowDirective(workflow)` in
+`chatAgent.ts`. Structurally identical to `styleDirective` (`phases.ts`) — inlined into the
+prompt with zero tool round-trips — and COMPOSES with it: style governs how narration reads,
+the workflow directive governs what the session does. `workflow = 'none'` appends nothing.
+_Avoid_: "system prompt" (the directive is one appended block, not the whole prompt);
+"style directive" (orthogonal — style is register, workflow is behavior; both append, ADR-0002 D5).

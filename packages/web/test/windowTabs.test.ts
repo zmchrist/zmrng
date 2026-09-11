@@ -58,6 +58,7 @@ describe('addChatTab', () => {
       effort: 'medium',
       style: 'caveman-full',
       repoId: '',
+      workflow: 'none',
     })
     expect(ids(s)).toEqual(['chat-1'])
     expect(s.activeId).toBe('chat-1')
@@ -68,15 +69,27 @@ describe('addChatTab', () => {
       effort: 'medium',
       style: 'caveman-full',
       repoId: '',
+      workflow: 'none',
       launched: false,
     })
+  })
+
+  it('seeds a non-default workflow when one is supplied', () => {
+    const s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', {
+      model: 'sonnet',
+      effort: 'medium',
+      style: 'normal',
+      repoId: '',
+      workflow: 'grill',
+    })
+    expect(s.tabs[0].workflow).toBe('grill')
   })
 })
 
 describe('launchChatTab', () => {
   it('flips launched on the target tab only', () => {
-    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'normal', repoId: '' })
-    s = addChatTab(s, 'chat-2', 'Chat 2', { model: 'opus', effort: 'high', style: 'normal', repoId: '' })
+    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'normal', repoId: '', workflow: 'none' })
+    s = addChatTab(s, 'chat-2', 'Chat 2', { model: 'opus', effort: 'high', style: 'normal', repoId: '', workflow: 'none' })
     s = launchChatTab(s, 'chat-1')
     expect(s.tabs.find((t) => t.id === 'chat-1')?.launched).toBe(true)
     expect(s.tabs.find((t) => t.id === 'chat-2')?.launched).toBe(false)
@@ -85,9 +98,15 @@ describe('launchChatTab', () => {
 
 describe('setChatTabConfig', () => {
   it('patches only the targeted tab, leaving launched untouched', () => {
-    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'normal', repoId: '' })
+    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'normal', repoId: '', workflow: 'none' })
     s = setChatTabConfig(s, 'chat-1', { model: 'opus', effort: 'xhigh', repoId: 'repo-a' })
     expect(s.tabs[0]).toMatchObject({ model: 'opus', effort: 'xhigh', style: 'normal', repoId: 'repo-a', launched: false })
+  })
+
+  it('patches the workflow field on the targeted tab', () => {
+    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', { model: 'sonnet', effort: 'medium', style: 'normal', repoId: '', workflow: 'none' })
+    s = setChatTabConfig(s, 'chat-1', { workflow: 'teach-me' })
+    expect(s.tabs[0]).toMatchObject({ workflow: 'teach-me', launched: false })
   })
 })
 
