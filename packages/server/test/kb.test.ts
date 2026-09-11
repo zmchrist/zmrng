@@ -150,6 +150,55 @@ describe('KB folders + pages (nesting / placement)', () => {
     db.close()
   })
 
+  it('deleteFolder cascades to nested folders/pages/blocks/revisions but leaves siblings intact', () => {
+    const db = new Db(dbPath)
+    const space = db.listSpaces()[0]
+
+    // Target subtree: A → B, with a page (+block+revision) in each.
+    const a = db.createFolder(space.id, null, 'A', NOW)
+    const b = db.createFolder(space.id, a.id, 'B', NOW)
+    const pageA = db.createPage(space.id, a.id, 'Page A', 'Ada', NOW)
+    const pageB = db.createPage(space.id, b.id, 'Page B', 'Ada', NOW)
+    const blockA = db.createBlock({
+      pageId: pageA.id, ord: null, kind: 'text', body: 'a', meta: null, updatedBy: 'Ada', now: NOW,
+    })
+    const blockB = db.createBlock({
+      pageId: pageB.id, ord: null, kind: 'text', body: 'b', meta: null, updatedBy: 'Ada', now: NOW,
+    })
+    // updateBlock records a revision of the prior state on each block.
+    db.updateBlock(blockA.id, { body: 'a2' }, 'Ada', '2026-09-10T01:00:00.000Z')
+    db.updateBlock(blockB.id, { body: 'b2' }, 'Ada', '2026-09-10T01:00:00.000Z')
+    expect(db.listRevisions(blockA.id)).toHaveLength(1)
+    expect(db.listRevisions(blockB.id)).toHaveLength(1)
+
+    // Sibling subtree in the SAME space, NOT under A — must survive the cascade.
+    const other = db.createFolder(space.id, null, 'Other', NOW)
+    const otherPage = db.createPage(space.id, other.id, 'Other page', 'Ada', NOW)
+    const otherBlock = db.createBlock({
+      pageId: otherPage.id, ord: null, kind: 'text', body: 'keep', meta: null, updatedBy: 'Ada', now: NOW,
+    })
+    db.updateBlock(otherBlock.id, { body: 'keep2' }, 'Ada', '2026-09-10T01:00:00.000Z')
+
+    db.deleteFolder(a.id)
+
+    // Whole A subtree is gone: folders, pages, blocks, revisions.
+    expect(db.getFolder(a.id)).toBeUndefined()
+    expect(db.getFolder(b.id)).toBeUndefined()
+    expect(db.getPage(pageA.id)).toBeUndefined()
+    expect(db.getPage(pageB.id)).toBeUndefined()
+    expect(db.getBlock(blockA.id)).toBeUndefined()
+    expect(db.getBlock(blockB.id)).toBeUndefined()
+    expect(db.listRevisions(blockA.id)).toHaveLength(0)
+    expect(db.listRevisions(blockB.id)).toHaveLength(0)
+
+    // Sibling subtree is untouched (cascade is scoped, not a space-wide wipe).
+    expect(db.getFolder(other.id)?.name).toBe('Other')
+    expect(db.getPage(otherPage.id)?.title).toBe('Other page')
+    expect(db.getBlock(otherBlock.id)?.body).toBe('keep2')
+    expect(db.listRevisions(otherBlock.id)).toHaveLength(1)
+    db.close()
+  })
+
   it('places pages at the space root (folder_id null) or inside a folder', () => {
     const db = new Db(dbPath)
     const space = db.listSpaces()[0]
