@@ -804,13 +804,26 @@ app.patch('/api/blocks/:id', (req, reply): KbBlock | undefined => {
   return block
 })
 
-// Delete a block (and its revisions). 404 on unknown block.
+// Delete a block (and its revisions). 404 on unknown block. Fans a live
+// `page.delete` tombstone (#151) so the block converges (is removed) on every
+// subscribed viewer of the page without a reload — the delete analogue of the
+// `page.update` fan-out. The page id is resolved BEFORE deleting so the frame
+// carries the owning page; the PageManager only fans for a real block on a real
+// page. Delete stays a REST call — no new client frame.
 app.delete('/api/blocks/:id', (req, reply) => {
   const id = kbId((req.params as { id: string }).id)
   if (id === null || !db.getBlock(id)) {
     return reply.code(404).send({ error: 'block not found' })
   }
-  db.deleteBlock(id)
+  const pageId = db.getBlockPageId(id)
+  if (pageId !== undefined) {
+    // Deletes the block AND fans the page.delete tombstone to subscribers.
+    pages.deleteBlock(pageId, id)
+  } else {
+    // Defensive fallback (a block that passed getBlock always has a page):
+    // keep the 204 contract even if the owning page can't be resolved.
+    db.deleteBlock(id)
+  }
   app.log.info({ blockId: id }, 'kb block deleted')
   return reply.code(204).send()
 })
