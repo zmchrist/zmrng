@@ -21,8 +21,15 @@ import type {
   SecurityFinding,
   SecurityStatus,
   SecurityVerdict,
+  Space,
+  KbFolder,
+  KbPage,
+  KbBlock,
+  KbBlockKind,
+  KbRevision,
+  KbTreeNode,
 } from './types.js'
-import { GENERAL_CHANNEL_NAME } from './types.js'
+import { GENERAL_CHANNEL_NAME, KB_SEED_SPACES } from './types.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -121,6 +128,52 @@ CREATE TABLE IF NOT EXISTS security_scans (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_security_scans_task ON security_scans(task_id, id);
+CREATE TABLE IF NOT EXISTS spaces (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  repo_url TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS folders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  space_id INTEGER NOT NULL,
+  parent_id INTEGER,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_folders_space ON folders(space_id, parent_id);
+CREATE TABLE IF NOT EXISTS pages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  space_id INTEGER NOT NULL,
+  folder_id INTEGER,
+  title TEXT NOT NULL,
+  author TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pages_space ON pages(space_id, folder_id);
+CREATE TABLE IF NOT EXISTS blocks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  page_id INTEGER NOT NULL,
+  ord INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  body TEXT NOT NULL,
+  meta TEXT,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_blocks_page ON blocks(page_id, ord);
+CREATE TABLE IF NOT EXISTS revisions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  block_id INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  meta TEXT,
+  author TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_revisions_block ON revisions(block_id, id);
 `
 
 interface TaskRow {
@@ -341,6 +394,112 @@ function foldReactions(rows: ReactionRow[]): ReactionSummary[] {
   return [...byEmoji.entries()].map(([emoji, handles]) => ({ emoji, handles }))
 }
 
+// ---- KB row interfaces + mappers (snake_case columns → camelCase types) ----
+
+interface SpaceRow {
+  id: number
+  name: string
+  repo_url: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface FolderRow {
+  id: number
+  space_id: number
+  parent_id: number | null
+  name: string
+  created_at: string
+}
+
+interface PageRow {
+  id: number
+  space_id: number
+  folder_id: number | null
+  title: string
+  author: string
+  created_at: string
+  updated_at: string
+}
+
+interface BlockRow {
+  id: number
+  page_id: number
+  ord: number
+  kind: string
+  body: string
+  meta: string | null
+  updated_at: string
+  updated_by: string
+}
+
+interface RevisionRow {
+  id: number
+  block_id: number
+  body: string
+  kind: string
+  meta: string | null
+  author: string
+  created_at: string
+}
+
+function rowToSpace(r: SpaceRow): Space {
+  return {
+    id: r.id,
+    name: r.name,
+    repoUrl: r.repo_url,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+function rowToFolder(r: FolderRow): KbFolder {
+  return {
+    id: r.id,
+    spaceId: r.space_id,
+    parentId: r.parent_id,
+    name: r.name,
+    createdAt: r.created_at,
+  }
+}
+
+function rowToPage(r: PageRow): KbPage {
+  return {
+    id: r.id,
+    spaceId: r.space_id,
+    folderId: r.folder_id,
+    title: r.title,
+    author: r.author,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+function rowToBlock(r: BlockRow): KbBlock {
+  return {
+    id: r.id,
+    pageId: r.page_id,
+    ord: r.ord,
+    kind: r.kind as KbBlockKind,
+    body: r.body,
+    meta: r.meta,
+    updatedAt: r.updated_at,
+    updatedBy: r.updated_by,
+  }
+}
+
+function rowToRevision(r: RevisionRow): KbRevision {
+  return {
+    id: r.id,
+    blockId: r.block_id,
+    body: r.body,
+    kind: r.kind as KbBlockKind,
+    meta: r.meta,
+    author: r.author,
+    createdAt: r.created_at,
+  }
+}
+
 /** Fields a caller may patch on a task. Usage accumulators are excluded — use `addUsage`. */
 export type TaskPatch = Partial<
   Pick<
@@ -393,6 +552,7 @@ export class Db {
     this.db.exec(SCHEMA)
     this.ensureColumns()
     this.seedGeneralChannel()
+    this.seedKbSpaces()
   }
 
   /**
@@ -404,6 +564,22 @@ export class Db {
     this.db
       .prepare('INSERT OR IGNORE INTO channels (name, repo_id, created_at) VALUES (?, NULL, ?)')
       .run(GENERAL_CHANNEL_NAME, new Date().toISOString())
+  }
+
+  /**
+   * Idempotently seed the three fixed POC KB spaces (general, zmrng, pheme).
+   * Mirrors `seedGeneralChannel`: `INSERT OR IGNORE` on the UNIQUE `name` column
+   * makes reopening a populated `zmrng.db` a no-op — each space is created
+   * exactly once and never duplicated, and existing rows (including any pages a
+   * team wrote under them) are left untouched. `general` carries a null
+   * repo_url; the repo-scoped spaces carry their GitHub URL.
+   */
+  private seedKbSpaces(): void {
+    const now = new Date().toISOString()
+    const stmt = this.db.prepare(
+      'INSERT OR IGNORE INTO spaces (name, repo_url, created_at, updated_at) VALUES (?, ?, ?, ?)',
+    )
+    for (const s of KB_SEED_SPACES) stmt.run(s.name, s.repoUrl, now, now)
   }
 
   /**
@@ -876,5 +1052,359 @@ export class Db {
       this.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
     })
     run(id)
+  }
+
+  // ===================================================================
+  // Knowledge Base (KB) — spaces / folders / pages / blocks / revisions
+  // Siblings of channels/messages; mirror the listChannels/createChannel/
+  // addMessage/listMessages patterns with rowTo* mappers + *Row interfaces.
+  // ===================================================================
+
+  /** Every KB space, in insertion order (general is first). */
+  listSpaces(): Space[] {
+    const rows = this.db.prepare('SELECT * FROM spaces ORDER BY id ASC').all() as SpaceRow[]
+    return rows.map(rowToSpace)
+  }
+
+  /** One space by id, or `undefined` if it does not exist. */
+  getSpace(id: number): Space | undefined {
+    const row = this.db.prepare('SELECT * FROM spaces WHERE id = ?').get(id) as
+      | SpaceRow
+      | undefined
+    return row ? rowToSpace(row) : undefined
+  }
+
+  /** Every folder in a space, in insertion order. */
+  listFolders(spaceId: number): KbFolder[] {
+    const rows = this.db
+      .prepare('SELECT * FROM folders WHERE space_id = ? ORDER BY id ASC')
+      .all(spaceId) as FolderRow[]
+    return rows.map(rowToFolder)
+  }
+
+  /** One folder by id, or `undefined` if it does not exist. */
+  getFolder(id: number): KbFolder | undefined {
+    const row = this.db.prepare('SELECT * FROM folders WHERE id = ?').get(id) as
+      | FolderRow
+      | undefined
+    return row ? rowToFolder(row) : undefined
+  }
+
+  /**
+   * Create a folder. `parentId` null = space root; a non-null `parentId`
+   * self-references `folders` for nesting.
+   */
+  createFolder(
+    spaceId: number,
+    parentId: number | null,
+    name: string,
+    now: string,
+  ): KbFolder {
+    const info = this.db
+      .prepare(
+        'INSERT INTO folders (space_id, parent_id, name, created_at) VALUES (?, ?, ?, ?)',
+      )
+      .run(spaceId, parentId, name, now)
+    return { id: Number(info.lastInsertRowid), spaceId, parentId, name, createdAt: now }
+  }
+
+  /** Rename a folder in place. Returns the updated folder, or `undefined`. */
+  renameFolder(id: number, name: string): KbFolder | undefined {
+    this.db.prepare('UPDATE folders SET name = ? WHERE id = ?').run(name, id)
+    return this.getFolder(id)
+  }
+
+  /** Move a folder under a new parent (null = space root). */
+  moveFolder(id: number, parentId: number | null): KbFolder | undefined {
+    this.db.prepare('UPDATE folders SET parent_id = ? WHERE id = ?').run(parentId, id)
+    return this.getFolder(id)
+  }
+
+  /** Delete a folder row. Child folders/pages are not cascaded here (T1 scope). */
+  deleteFolder(id: number): void {
+    this.db.prepare('DELETE FROM folders WHERE id = ?').run(id)
+  }
+
+  /** Every page in a space, in insertion order. */
+  listPages(spaceId: number): KbPage[] {
+    const rows = this.db
+      .prepare('SELECT * FROM pages WHERE space_id = ? ORDER BY id ASC')
+      .all(spaceId) as PageRow[]
+    return rows.map(rowToPage)
+  }
+
+  /** One page by id, or `undefined` if it does not exist. */
+  getPage(id: number): KbPage | undefined {
+    const row = this.db.prepare('SELECT * FROM pages WHERE id = ?').get(id) as
+      | PageRow
+      | undefined
+    return row ? rowToPage(row) : undefined
+  }
+
+  /** Create a page. `folderId` null = space root. */
+  createPage(
+    spaceId: number,
+    folderId: number | null,
+    title: string,
+    author: string,
+    now: string,
+  ): KbPage {
+    const info = this.db
+      .prepare(
+        `INSERT INTO pages (space_id, folder_id, title, author, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(spaceId, folderId, title, author, now, now)
+    return {
+      id: Number(info.lastInsertRowid),
+      spaceId,
+      folderId,
+      title,
+      author,
+      createdAt: now,
+      updatedAt: now,
+    }
+  }
+
+  /** Rename a page (updates `updated_at`). Returns the updated page. */
+  updatePage(id: number, title: string, now: string): KbPage | undefined {
+    this.db
+      .prepare('UPDATE pages SET title = ?, updated_at = ? WHERE id = ?')
+      .run(title, now, id)
+    return this.getPage(id)
+  }
+
+  /** Move a page into a folder (null = space root). Updates `updated_at`. */
+  movePage(id: number, folderId: number | null, now: string): KbPage | undefined {
+    this.db
+      .prepare('UPDATE pages SET folder_id = ?, updated_at = ? WHERE id = ?')
+      .run(folderId, now, id)
+    return this.getPage(id)
+  }
+
+  /** Delete a page and its blocks + revisions (owned children). */
+  deletePage(id: number): void {
+    const run = this.db.transaction((pageId: number) => {
+      const blockIds = (
+        this.db.prepare('SELECT id FROM blocks WHERE page_id = ?').all(pageId) as {
+          id: number
+        }[]
+      ).map((b) => b.id)
+      for (const bid of blockIds) {
+        this.db.prepare('DELETE FROM revisions WHERE block_id = ?').run(bid)
+      }
+      this.db.prepare('DELETE FROM blocks WHERE page_id = ?').run(pageId)
+      this.db.prepare('DELETE FROM pages WHERE id = ?').run(pageId)
+    })
+    run(id)
+  }
+
+  /** Every block of a page, ordered by `ord` then id (stable). */
+  listBlocks(pageId: number): KbBlock[] {
+    const rows = this.db
+      .prepare('SELECT * FROM blocks WHERE page_id = ? ORDER BY ord ASC, id ASC')
+      .all(pageId) as BlockRow[]
+    return rows.map(rowToBlock)
+  }
+
+  /** One block by id, or `undefined` if it does not exist. */
+  getBlock(id: number): KbBlock | undefined {
+    const row = this.db.prepare('SELECT * FROM blocks WHERE id = ?').get(id) as
+      | BlockRow
+      | undefined
+    return row ? rowToBlock(row) : undefined
+  }
+
+  /** The page a block belongs to, or `undefined` — used to validate the wire. */
+  getBlockPageId(blockId: number): number | undefined {
+    const row = this.db.prepare('SELECT page_id FROM blocks WHERE id = ?').get(blockId) as
+      | { page_id: number }
+      | undefined
+    return row?.page_id
+  }
+
+  /**
+   * Create a block. `ord` null appends at the end of the page (max ord + 1).
+   * `meta` is a nullable JSON string (heading level / checklist checked).
+   */
+  createBlock(input: {
+    pageId: number
+    ord: number | null
+    kind: KbBlockKind
+    body: string
+    meta: string | null
+    updatedBy: string
+    now: string
+  }): KbBlock {
+    const ord = input.ord ?? this.nextBlockOrd(input.pageId)
+    const info = this.db
+      .prepare(
+        `INSERT INTO blocks (page_id, ord, kind, body, meta, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(input.pageId, ord, input.kind, input.body, input.meta, input.now, input.updatedBy)
+    return {
+      id: Number(info.lastInsertRowid),
+      pageId: input.pageId,
+      ord,
+      kind: input.kind,
+      body: input.body,
+      meta: input.meta,
+      updatedAt: input.now,
+      updatedBy: input.updatedBy,
+    }
+  }
+
+  /** Next append ord for a page (max existing ord + 1, or 0 when empty). */
+  private nextBlockOrd(pageId: number): number {
+    const row = this.db
+      .prepare('SELECT COALESCE(MAX(ord), -1) AS m FROM blocks WHERE page_id = ?')
+      .get(pageId) as { m: number }
+    return row.m + 1
+  }
+
+  /**
+   * Update a block. FIRST snapshots the PRIOR block state into `revisions`
+   * (body/kind/meta + its last editor as `author`), THEN applies the patch —
+   * this ordering is the load-bearing revision-on-update property backing the
+   * restore-from-revision conflict UX. Only the provided fields change; omitted
+   * fields keep their current value (`meta` uses `undefined` to mean "unchanged"
+   * so an explicit `null` can still clear it). Returns the updated block.
+   */
+  updateBlock(
+    id: number,
+    patch: { kind?: KbBlockKind; body?: string; meta?: string | null },
+    updatedBy: string,
+    now: string,
+  ): KbBlock | undefined {
+    const run = this.db.transaction((): KbBlock | undefined => {
+      const existing = this.db.prepare('SELECT * FROM blocks WHERE id = ?').get(id) as
+        | BlockRow
+        | undefined
+      if (!existing) return undefined
+      this.insertRevision(existing, now)
+      const kind = patch.kind ?? (existing.kind as KbBlockKind)
+      const body = patch.body ?? existing.body
+      const meta = patch.meta !== undefined ? patch.meta : existing.meta
+      this.db
+        .prepare(
+          'UPDATE blocks SET kind = ?, body = ?, meta = ?, updated_at = ?, updated_by = ? WHERE id = ?',
+        )
+        .run(kind, body, meta, now, updatedBy, id)
+      return this.getBlock(id)
+    })
+    return run()
+  }
+
+  /** Delete a block and its revisions. */
+  deleteBlock(id: number): void {
+    const run = this.db.transaction((blockId: number) => {
+      this.db.prepare('DELETE FROM revisions WHERE block_id = ?').run(blockId)
+      this.db.prepare('DELETE FROM blocks WHERE id = ?').run(blockId)
+    })
+    run(id)
+  }
+
+  /**
+   * Reorder a page's blocks to match `orderedIds` (index becomes the new `ord`).
+   * Ids not belonging to the page are ignored. Returns the reordered blocks.
+   */
+  reorderBlocks(pageId: number, orderedIds: number[], now: string): KbBlock[] {
+    const run = this.db.transaction((ids: number[]) => {
+      const stmt = this.db.prepare(
+        'UPDATE blocks SET ord = ?, updated_at = ? WHERE id = ? AND page_id = ?',
+      )
+      ids.forEach((blockId, i) => stmt.run(i, now, blockId, pageId))
+    })
+    run(orderedIds)
+    return this.listBlocks(pageId)
+  }
+
+  /** Every revision of a block, oldest first (id ASC). */
+  listRevisions(blockId: number): KbRevision[] {
+    const rows = this.db
+      .prepare('SELECT * FROM revisions WHERE block_id = ? ORDER BY id ASC')
+      .all(blockId) as RevisionRow[]
+    return rows.map(rowToRevision)
+  }
+
+  /**
+   * Restore a revision's body/kind/meta back onto its block. Itself records a
+   * revision of the state it replaces FIRST (so a restore is undoable), then
+   * applies the snapshot. `restoredBy` becomes the block's new `updated_by`.
+   * Returns the restored block, or `undefined` if the revision/block is gone.
+   */
+  restoreRevision(revisionId: number, restoredBy: string, now: string): KbBlock | undefined {
+    const run = this.db.transaction((): KbBlock | undefined => {
+      const rev = this.db.prepare('SELECT * FROM revisions WHERE id = ?').get(revisionId) as
+        | RevisionRow
+        | undefined
+      if (!rev) return undefined
+      const block = this.db.prepare('SELECT * FROM blocks WHERE id = ?').get(rev.block_id) as
+        | BlockRow
+        | undefined
+      if (!block) return undefined
+      this.insertRevision(block, now)
+      this.db
+        .prepare(
+          'UPDATE blocks SET kind = ?, body = ?, meta = ?, updated_at = ?, updated_by = ? WHERE id = ?',
+        )
+        .run(rev.kind, rev.body, rev.meta, now, restoredBy, block.id)
+      return this.getBlock(block.id)
+    })
+    return run()
+  }
+
+  /** Snapshot the given block's CURRENT state into `revisions` (prior-state capture). */
+  private insertRevision(block: BlockRow, now: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO revisions (block_id, body, kind, meta, author, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(block.id, block.body, block.kind, block.meta, block.updated_by, now)
+  }
+
+  /**
+   * Assemble a space's folders + pages into a `FileTree`-shaped node tree
+   * (server-side assembly). Folders become `type: 'dir'` nodes, pages become
+   * `type: 'file'` leaves; nesting follows `parent_id` / `folder_id`, with root
+   * (null parent/folder) items at the top. Orphan rows (dangling parent) fall
+   * back to the root so nothing is silently dropped.
+   */
+  spaceTree(spaceId: number): KbTreeNode[] {
+    const folders = this.listFolders(spaceId)
+    const pages = this.listPages(spaceId)
+    const folderNodes = new Map<number, KbTreeNode>()
+    for (const f of folders) {
+      folderNodes.set(f.id, {
+        id: f.id,
+        name: f.name,
+        path: `folder/${f.id}`,
+        type: 'dir',
+        kind: 'folder',
+        children: [],
+      })
+    }
+    const roots: KbTreeNode[] = []
+    for (const f of folders) {
+      const node = folderNodes.get(f.id)!
+      const parent = f.parentId !== null ? folderNodes.get(f.parentId) : undefined
+      if (parent) parent.children!.push(node)
+      else roots.push(node)
+    }
+    for (const p of pages) {
+      const node: KbTreeNode = {
+        id: p.id,
+        name: p.title,
+        path: `page/${p.id}`,
+        type: 'file',
+        kind: 'page',
+      }
+      const parent = p.folderId !== null ? folderNodes.get(p.folderId) : undefined
+      if (parent) parent.children!.push(node)
+      else roots.push(node)
+    }
+    return roots
   }
 }
