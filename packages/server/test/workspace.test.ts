@@ -794,6 +794,26 @@ describe('PageManager fan-out (T2, #144 — acceptance-critical)', () => {
     expect(last.viewers).toEqual([{ id: 1, displayName: 'Ada', online: true }])
   })
 
+  it('unsubscribeAll re-broadcasts the shrunken viewer set to remaining viewers of each left page', () => {
+    const { mgr, received } = setup()
+    const sockA = {}
+    const sockB = {}
+    // Bo views pages 1 and 2; Ada stays on page 1 only.
+    mgr.subscribe(sockA, 1, member(1, 'Ada'))
+    mgr.subscribe(sockB, 1, member(2, 'Bo'))
+    mgr.subscribe(sockB, 2, member(2, 'Bo'))
+    // Bo disconnects: dropped from every page, and page 1's remaining viewer
+    // (Ada) must be told Bo is gone.
+    mgr.unsubscribeAll(sockB)
+    const toAda = received.filter(
+      (r) => r.frame.type === 'page.presence' && r.socket === sockA,
+    )
+    const last = toAda[toAda.length - 1].frame
+    if (last.type !== 'page.presence') throw new Error('expected page.presence')
+    expect(last.pageId).toBe(1)
+    expect(last.viewers).toEqual([{ id: 1, displayName: 'Ada', online: true }])
+  })
+
   it('dedupes viewers by member id (multi-tab: two sockets, one viewer)', () => {
     const { mgr } = setup()
     mgr.subscribe({}, 1, member(1, 'Ada'))

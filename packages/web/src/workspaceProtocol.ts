@@ -4,7 +4,7 @@
 // `parseWorkspaceClientMsg` accepts; `parseWorkspaceServerMsg` is a tolerant
 // guard over the server -> client frames (mirrors `chatProtocol.ts`).
 
-import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from './types'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN, KB_BLOCK_KINDS } from './types'
 import type {
   Channel,
   KbBlock,
@@ -196,7 +196,7 @@ function asBlock(v: unknown): KbBlock | undefined {
   const obj = asRecord(v)
   if (!obj) return undefined
   const kind = obj.kind
-  if (kind !== 'text' && kind !== 'heading' && kind !== 'code' && kind !== 'checklist' && kind !== 'list')
+  if (typeof kind !== 'string' || !(KB_BLOCK_KINDS as readonly string[]).includes(kind))
     return undefined
   const meta = obj.meta
   if (meta !== null && typeof meta !== 'string') return undefined
@@ -214,7 +214,9 @@ function asBlock(v: unknown): KbBlock | undefined {
     id: obj.id,
     pageId: obj.pageId,
     ord: obj.ord,
-    kind,
+    // `includes` above validates membership but doesn't narrow the `string`;
+    // the cast is safe because we just confirmed `kind` is a KbBlockKind.
+    kind: kind as KbBlockKind,
     body: obj.body,
     meta,
     updatedAt: obj.updatedAt,
