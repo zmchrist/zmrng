@@ -168,6 +168,20 @@ function listEntries(dir: string): string[] {
   return readdirSync(dir).sort()
 }
 
+/**
+ * List `<dir>/*` regular files only (skipping subdirectories), or `[]` if `dir`
+ * doesn't exist. Used for the flat, file-only categories (hooks) where a stray
+ * subdir — e.g. python's `__pycache__` bytecode cache — would otherwise crash a
+ * `copyFileSync` loop.
+ */
+function listFiles(dir: string): string[] {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => e.name)
+    .sort()
+}
+
 /** Strip a file extension for use as a `zmrng-<name>` suffix. */
 function stem(fileName: string): string {
   return fileName.replace(/\.[^.]+$/, '')
@@ -194,7 +208,7 @@ function stem(fileName: string): string {
 export async function seedHarness(
   worktreePath: string,
   targetRepoPath: string,
-  harnessDir: string = path.join(config.repoRoot, 'harness'),
+  harnessDir: string = config.harnessDir,
   pythonBin: string = process.env.ZMRNG_PYTHON_BIN ?? 'python3',
 ): Promise<string[]> {
   const notes: string[] = []
@@ -255,7 +269,7 @@ export async function seedHarness(
   }
 
   if (hooksAvailable) {
-    for (const name of listEntries(path.join(harnessDir, 'hooks'))) {
+    for (const name of listFiles(path.join(harnessDir, 'hooks'))) {
       copyFileSync(path.join(harnessDir, 'hooks', name), path.join(hooksDestDir, name))
     }
     seeded.push('.claude/zmrng-hooks/')

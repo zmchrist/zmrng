@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import {
   config,
   resolveRegistry,
   resolveAuthMode,
+  resolveHarnessDir,
   resolveAgents,
   resolveSecurityPolicy,
   mergeSecurityPolicy,
@@ -181,6 +182,29 @@ describe('resolveAuthMode', () => {
     expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'garbage' })).toBe('oauth')
     expect(resolveAuthMode({ ZMRNG_AUTH_MODE: 'oauth' })).toBe('oauth')
     expect(resolveAuthMode({ ZMRNG_AUTH_MODE: '' })).toBe('oauth')
+  })
+})
+
+describe('resolveHarnessDir', () => {
+  const REPO = '/fake/repo/root'
+
+  it('falls back to <repoRoot>/harness when unset (dev behaviour)', () => {
+    expect(resolveHarnessDir({}, REPO)).toBe(path.join(REPO, 'harness'))
+  })
+
+  it('honours ZMRNG_HARNESS_DIR (the packaged bundle path wins)', () => {
+    const bundled = '/Apps/zmrng.app/Contents/Resources/sidecar/harness'
+    expect(resolveHarnessDir({ ZMRNG_HARNESS_DIR: bundled }, REPO)).toBe(bundled)
+  })
+
+  it('expands a leading ~ and resolves the override', () => {
+    expect(resolveHarnessDir({ ZMRNG_HARNESS_DIR: '~/custom/harness' }, REPO)).toBe(
+      path.join(homedir(), 'custom', 'harness'),
+    )
+  })
+
+  it('treats a blank/whitespace override as unset', () => {
+    expect(resolveHarnessDir({ ZMRNG_HARNESS_DIR: '   ' }, REPO)).toBe(path.join(REPO, 'harness'))
   })
 })
 
