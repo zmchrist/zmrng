@@ -8,11 +8,13 @@ import type {
   Space,
   WorkspaceMember,
 } from '../types'
+import { MAX_DISPLAY_NAME_LEN } from '../types'
 import { FileTree } from './FileTree'
 import { api } from '../api'
 import { detectKind, renderKbBlock, toEditableMarkdown } from '../kbMarkdown'
 import { filterKbTree, pageBreadcrumb, parseKbNodePath } from '../kbTree'
-import { isBlockConflict, mergeBlock } from '../kbConflict'
+import { isBlockConflict, mergeBlock, removeBlock as removeBlockFromList } from '../kbConflict'
+import { kbHandles } from '../kbHandles'
 import {
   encodeHello,
   encodePing,
@@ -24,12 +26,19 @@ import {
 
 interface Props {
   /**
-   * The teammate's self-asserted display-name handle (server-side settings).
-   * Used both for the workspace `hello` (the page-presence identity) and as the
-   * author of block edits. Falls back to `anon` when unset — the KB surface has
-   * no join gate of its own (unlike Team), it just needs an identity to attach.
+   * The teammate's self-asserted display-name handle (server-side settings —
+   * the SAME `settings.teamHandle` the Team surface persists). Presence/viewing
+   * falls back to `anon` when unset, but EDITING requires a non-empty handle:
+   * no KB block may be authored as `anon` (#150). See `kbHandles`.
    */
   teamHandle: string
+  /**
+   * Persist a new display handle (mirrors how App wires TeamView's
+   * `onHandleChange`). Reused by the inline "set a display name to edit"
+   * affordance so a viewer can enable editing without leaving the KB surface —
+   * one identity across Team + KB, no second store.
+   */
+  onHandleChange: (handle: string) => void
   /**
    * One-shot navigation target from the Team tab's "Send to KB" promotion (T4,
    * #154): the space + page to select/open when the KB tab is entered. Seeded
@@ -38,10 +47,56 @@ interface Props {
    * FRESH object per promotion so the seed fires once each time.
    */
   openTarget?: { spaceId: number; pageId: number } | null
+  /**
+   * Whether the KB tab is the ACTIVE mode. The view is always mounted (App
+   * keeps it in the DOM via `display:none`), so the workspace socket is gated
+   * on this flag: an idle client on another mode opens ZERO sockets, entering
+   * the KB tab opens exactly one, and leaving tears it down (the socket
+   * effect's cleanup closes the ws + clears timers). Prevents the always-
+   * mounted view from holding a permanent /ws/workspace socket + duplicate
+   * page-presence membership (#149).
+   */
+  active: boolean
 }
 
 const PING_MS = 25000
 const RECONNECT_MS = 2000
+
+/**
+ * Inline "set a display name" affordance (#150) — NOT a blocking modal. Shown
+ * wherever a KB write is gated because no display handle is set; setting a name
+ * here reuses the SAME `settings.teamHandle` the Team surface persists (via
+ * `onSet` → App's `saveSettings`), so it immediately enables editing across
+ * both surfaces. Mirrors the Team join input's styling/tokens.
+ */
+function HandleGate({ onSet, action }: { onSet: (handle: string) => void; action: string }) {
+  const [draft, setDraft] = useState('')
+  const submit = (e: React.FormEvent): void => {
+    e.preventDefault()
+    const name = draft.trim()
+    if (!name) return
+    onSet(name)
+  }
+  return (
+    <form className={styles.handleGate} onSubmit={submit}>
+      <span className={styles.handleGateLabel}>Set a display name to {action}</span>
+      <div className={styles.handleGateRow}>
+        <input
+          className={styles.handleGateInput}
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="e.g. Ada"
+          maxLength={MAX_DISPLAY_NAME_LEN}
+          aria-label="Display name"
+        />
+        <button type="submit" className={styles.handleGateBtn} disabled={!draft.trim()}>
+          Set name
+        </button>
+      </div>
+    </form>
+  )
+}
 
 /** Two-letter avatar initials for a viewer's presence chip. */
 function initials(name: string): string {
@@ -64,8 +119,12 @@ function initials(name: string): string {
  * code) rather than picked from a dropdown, and ⌘B/⌘I/⌘K/⌘↵ shortcuts drive
  * emphasis/links/save inside the textarea.
  */
-export function KbView({ teamHandle, openTarget = null }: Props) {
-  const handle = teamHandle.trim() || 'anon'
+export function KbView({ teamHandle, onHandleChange, openTarget = null, active }: Props) {
+  // Split identity (#150): `presenceHandle` (may be `anon`) drives the workspace
+  // hello + page presence; `editHandle` (EMPTY when no handle is set) authors
+  // block edits. `canEdit` gates every write affordance — read-only viewing
+  // works with no handle, but nothing is ever authored as `anon`.
+  const { presenceHandle, editHandle, canEdit } = kbHandles(teamHandle)
 
   const [spaces, setSpaces] = useState<Space[]>([])
   const [spaceId, setSpaceId] = useState<number | null>(null)
@@ -141,7 +200,12 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
   }
 
   // ---- socket lifecycle (page presence + live block deltas) ----
+  // Gated on `active` (#149): only the active KB mode holds a workspace socket.
+  // When `active` flips false the effect cleanup below runs (closes the ws,
+  // clears timers, nulls wsRef, setConnected(false)) — so leaving the tab tears
+  // the socket down; returning re-runs the effect and connects fresh.
   useEffect(() => {
+    if (!active) return
     const socketUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/workspace`
     let closed = false
     let ws: WebSocket | null = null
@@ -158,7 +222,7 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
       wsRef.current = ws
       ws.onopen = () => {
         setConnected(true)
-        ws?.send(encodeHello(handle))
+        ws?.send(encodeHello(presenceHandle))
         // Re-subscribe to the open page after a reconnect.
         const pid = openPageIdRef.current
         if (pid !== null) ws?.send(encodePageSubscribe(pid))
@@ -178,7 +242,10 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
             autoEditNextRef.current = false
             setEditingId(block.id)
           }
-          const conflicted = isBlockConflict(block, dirtyIdsRef.current, handle)
+          // Edit-author identity feeds the conflict predicate: a dirty block only
+          // exists when the local user is editing, which requires `editHandle`
+          // to be non-empty — so this correctly distinguishes two real handles.
+          const conflicted = isBlockConflict(block, dirtyIdsRef.current, editHandle)
           // Block-LWW: the server already accepted the last write, so merge the
           // incoming block regardless. On a conflict, drop our stale draft +
           // surface the restore toast rather than silently clobbering the editor.
@@ -201,6 +268,21 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
           }
         } else if (msg.type === 'page.presence') {
           if (msg.pageId === openPageIdRef.current) setViewers(msg.viewers)
+        } else if (msg.type === 'page.delete') {
+          // A block was deleted elsewhere — converge by dropping it from the open
+          // page and cleaning up any local draft / open editor for that block.
+          if (msg.pageId !== openPageIdRef.current) return
+          const { blockId } = msg
+          setDetail((prev) =>
+            prev ? { ...prev, blocks: removeBlockFromList(prev.blocks, blockId) } : prev,
+          )
+          setDrafts((prev) => {
+            if (!(blockId in prev)) return prev
+            const next = { ...prev }
+            delete next[blockId]
+            return next
+          })
+          setEditingId((cur) => (cur === blockId ? null : cur))
         }
       }
       ws.onclose = () => {
@@ -220,7 +302,7 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
       wsRef.current = null
       setConnected(false)
     }
-  }, [handle])
+  }, [presenceHandle, editHandle, active])
 
   // ---- load spaces once; default to the first space ----
   useEffect(() => {
@@ -376,6 +458,7 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
    * operator never picks a kind from a dropdown. Plain prose stays `text`.
    */
   const saveBlock = (block: KbBlock): void => {
+    if (!canEdit) return
     const body = drafts[block.id]
     if (body === undefined) {
       setEditingId(null)
@@ -384,7 +467,7 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
     const inferred = detectKind(body)
     const kind = inferred?.kind ?? 'text'
     const meta = inferred?.meta ?? null
-    sendFrame(encodePageEdit(openPageId!, block.id, kind, body, meta, handle))
+    sendFrame(encodePageEdit(openPageId!, block.id, kind, body, meta, editHandle))
     // Optimistically apply locally; the server echo re-merges with a fresh ts.
     setDetail((prev) =>
       prev
@@ -404,9 +487,9 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
 
   /** Append a fresh (empty text) block and open it for editing (live create). */
   const addBlock = (): void => {
-    if (openPageId === null) return
+    if (!canEdit || openPageId === null) return
     autoEditNextRef.current = true
-    sendFrame(encodePageEdit(openPageId, null, 'text', '', null, handle))
+    sendFrame(encodePageEdit(openPageId, null, 'text', '', null, editHandle))
   }
 
   /** Delete a block over REST, then drop it from the open page locally. */
@@ -423,12 +506,13 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
 
   /** Restore a revision onto the conflicted block, then close the toast. */
   const restore = (revisionId: number): void => {
+    if (!canEdit) return
     api
-      .restoreRevision(revisionId, handle)
+      .restoreRevision(revisionId, editHandle)
       .then((block) => {
         setDetail((prev) => (prev ? { ...prev, blocks: mergeBlock(prev.blocks, block) } : prev))
         // Re-broadcast so other viewers converge on the restored version.
-        sendFrame(encodePageEdit(block.pageId, block.id, block.kind, block.body, block.meta, handle))
+        sendFrame(encodePageEdit(block.pageId, block.id, block.kind, block.body, block.meta, editHandle))
         setConflict(null)
       })
       .catch(() => setError('Failed to restore revision'))
@@ -444,7 +528,7 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
   const submitCreate = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     const name = createDraft.trim()
-    if (!name || spaceId === null || busy || !creating) return
+    if (!canEdit || !name || spaceId === null || busy || !creating) return
     setBusy(true)
     setError(null)
     try {
@@ -452,7 +536,7 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
         await api.createFolder(spaceId, name, null)
         refreshTree()
       } else {
-        const page = await api.createPage(spaceId, name, handle, null)
+        const page = await api.createPage(spaceId, name, editHandle, null)
         refreshTree()
         onOpenNode(`page/${page.id}`)
       }
@@ -544,71 +628,78 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
           )}
         </div>
 
-        <div className={styles.treeFooter}>
-          {creating ? (
-            <form className={styles.createInline} onSubmit={submitCreate}>
-              <input
-                className={styles.createInlineInput}
-                type="text"
-                value={createDraft}
-                onChange={(e) => setCreateDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    e.preventDefault()
-                    setCreating(null)
-                    setCreateDraft('')
-                  }
-                }}
-                onBlur={() => {
-                  if (!createDraft.trim()) setCreating(null)
-                }}
-                placeholder={creating === 'page' ? 'Page name…' : 'Folder name…'}
-                aria-label={creating === 'page' ? 'New page name' : 'New folder name'}
-                autoFocus
-              />
-            </form>
-          ) : (
-            <>
-              <button
-                type="button"
-                className={styles.iconBtn}
-                onClick={() => startCreate('page')}
-                title="New page"
-                aria-label="New page"
-                disabled={busy || spaceId === null}
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <path
-                    d="M4 1.5h4.5L13 6v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                    strokeLinejoin="round"
-                  />
-                  <path d="M8.25 1.75V6H12.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-                  <path d="M8 8.5v4M6 10.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className={styles.iconBtn}
-                onClick={() => startCreate('folder')}
-                title="New folder"
-                aria-label="New folder"
-                disabled={busy || spaceId === null}
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <path
-                    d="M1.5 4a1 1 0 0 1 1-1h3l1.5 1.5H13.5a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4Z"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                    strokeLinejoin="round"
-                  />
-                  <path d="M8 7v3.5M6.25 8.75h3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-                </svg>
-              </button>
-            </>
-          )}
-        </div>
+        {canEdit ? (
+          <div className={styles.treeFooter}>
+            {creating ? (
+              <form className={styles.createInline} onSubmit={submitCreate}>
+                <input
+                  className={styles.createInlineInput}
+                  type="text"
+                  value={createDraft}
+                  onChange={(e) => setCreateDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      setCreating(null)
+                      setCreateDraft('')
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!createDraft.trim()) setCreating(null)
+                  }}
+                  placeholder={creating === 'page' ? 'Page name…' : 'Folder name…'}
+                  aria-label={creating === 'page' ? 'New page name' : 'New folder name'}
+                  maxLength={MAX_DISPLAY_NAME_LEN}
+                  autoFocus
+                />
+              </form>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={styles.iconBtn}
+                  onClick={() => startCreate('page')}
+                  title="New page"
+                  aria-label="New page"
+                  disabled={busy || spaceId === null}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path
+                      d="M4 1.5h4.5L13 6v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinejoin="round"
+                    />
+                    <path d="M8.25 1.75V6H12.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                    <path d="M8 8.5v4M6 10.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className={styles.iconBtn}
+                  onClick={() => startCreate('folder')}
+                  title="New folder"
+                  aria-label="New folder"
+                  disabled={busy || spaceId === null}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path
+                      d="M1.5 4a1 1 0 0 1 1-1h3l1.5 1.5H13.5a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4Z"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinejoin="round"
+                    />
+                    <path d="M8 7v3.5M6.25 8.75h3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className={styles.treeFooter}>
+            <HandleGate onSet={onHandleChange} action="create pages" />
+          </div>
+        )}
         {error && <p className={styles.error}>{error}</p>}
       </aside>
 
@@ -683,27 +774,31 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
                       </div>
                     ) : (
                       <div className={styles.rendered}>
-                        <button
-                          type="button"
-                          className={styles.editToggle}
-                          onClick={() => setEditingId(block.id)}
-                          aria-label="Edit block"
-                          title="Edit block"
-                        >
-                          ✎
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.removeToggle}
-                          onClick={() => removeBlock(block)}
-                          aria-label="Delete block"
-                          title="Delete block"
-                        >
-                          ×
-                        </button>
+                        {canEdit && (
+                          <>
+                            <button
+                              type="button"
+                              className={styles.editToggle}
+                              onClick={() => setEditingId(block.id)}
+                              aria-label="Edit block"
+                              title="Edit block"
+                            >
+                              ✎
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.removeToggle}
+                              onClick={() => removeBlock(block)}
+                              aria-label="Delete block"
+                              title="Delete block"
+                            >
+                              ×
+                            </button>
+                          </>
+                        )}
                         <div
                           className={styles.markdown}
-                          onClick={() => setEditingId(block.id)}
+                          onClick={canEdit ? () => setEditingId(block.id) : undefined}
                           dangerouslySetInnerHTML={{
                             __html:
                               renderKbBlock(block.body, block.kind, block.meta) ||
@@ -717,16 +812,22 @@ export function KbView({ teamHandle, openTarget = null }: Props) {
               })}
             </div>
 
-            <div className={styles.addBar}>
-              <button
-                type="button"
-                className={styles.addBtn}
-                onClick={() => addBlock()}
-                disabled={!connected}
-              >
-                + Add block
-              </button>
-            </div>
+            {canEdit ? (
+              <div className={styles.addBar}>
+                <button
+                  type="button"
+                  className={styles.addBtn}
+                  onClick={() => addBlock()}
+                  disabled={!connected}
+                >
+                  + Add block
+                </button>
+              </div>
+            ) : (
+              <div className={styles.addBar}>
+                <HandleGate onSet={onHandleChange} action="edit this page" />
+              </div>
+            )}
           </>
         ) : (
           <div className={styles.detailEmpty}>

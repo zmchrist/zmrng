@@ -692,6 +692,12 @@ export type WsWorkspaceServerMsg =
   // ---- KB real-time sync (T2, #144) — mirror of server types ----
   | { type: 'page.update'; pageId: number; block: KbBlock }
   | { type: 'page.presence'; pageId: number; viewers: WorkspaceMember[] }
+  // `page.delete` (T2 follow-up, #151) is the delete tombstone that mirrors
+  // `page.update`: it fans a deleted block's id out to every socket subscribed
+  // to that page so the block converges (is removed) on all viewers without a
+  // reload. Delete itself stays a REST call (`DELETE /api/blocks/:id`); this is
+  // the SERVER->client convergence frame only — there is no new client frame.
+  | { type: 'page.delete'; pageId: number; blockId: number }
 
 /**
  * Max length of a self-asserted display-name handle, measured after trimming.

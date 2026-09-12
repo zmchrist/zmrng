@@ -283,6 +283,10 @@ export function parseWorkspaceServerMsg(raw: string): WsWorkspaceServerMsg | und
         .filter((m): m is WorkspaceMember => m !== undefined)
       return { type: 'page.presence', pageId: obj.pageId, viewers }
     }
+    case 'page.delete':
+      return typeof obj.pageId === 'number' && typeof obj.blockId === 'number'
+        ? { type: 'page.delete', pageId: obj.pageId, blockId: obj.blockId }
+        : undefined
     default:
       return undefined
   }

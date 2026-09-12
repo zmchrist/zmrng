@@ -58,6 +58,14 @@ interface Props {
   /** Bubble a `new-version` frame's sha up to App (WS-B / D3). TeamView owns the
    *  socket but NOT the update banner — the phase-gate needs App's `tasks`. */
   onNewVersion?: (sha: string) => void
+  /** Whether the Team tab is the ACTIVE mode. The view is always mounted (App
+   *  keeps it in the DOM via `display:none`), so the workspace socket is gated
+   *  on this flag: an idle client on another mode opens ZERO sockets, entering
+   *  the Team tab opens exactly one, and leaving tears it down (the socket
+   *  effect's cleanup closes the ws + clears timers). Prevents the always-
+   *  mounted view from holding a permanent /ws/workspace socket + duplicate
+   *  presence membership (#149). */
+  active: boolean
 }
 
 const PING_MS = 25000
@@ -89,6 +97,7 @@ export function TeamView({
   onSendToZmrng,
   onOpenKbPage,
   onNewVersion,
+  active,
 }: Props) {
   const socketUrl = workspaceSocketUrl(workspaceUrl)
   // The VPS http origin for channel REST (list/create/scrollback). Channel data
@@ -175,8 +184,12 @@ export function TeamView({
   }
 
   // ---- socket lifecycle (presence + live message delivery) ----
+  // Gated on `active` (#149): only the active Team mode holds a workspace
+  // socket. When `active` flips false the effect cleanup below runs (closes the
+  // ws, clears timers, nulls wsRef, setConnected(false)) — so leaving the tab
+  // tears the socket down; returning re-runs the effect and connects fresh.
   useEffect(() => {
-    if (!handle || !socketUrl) return
+    if (!active || !handle || !socketUrl) return
     let closed = false
     let ws: WebSocket | null = null
     let ping: ReturnType<typeof setInterval> | undefined
@@ -240,7 +253,7 @@ export function TeamView({
       setConnected(false)
       setRoster(emptyRoster())
     }
-  }, [handle, socketUrl])
+  }, [handle, socketUrl, active])
 
   // ---- load the channel list once connected; default to the first channel ----
   useEffect(() => {

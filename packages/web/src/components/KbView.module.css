@@ -663,3 +663,65 @@
   border-color: var(--accent-line);
   color: var(--text);
 }
+
+/* Inline "set a display name to edit" affordance (#150) — mirrors TeamView's
+   join input styling/tokens. Shown wherever a KB write is gated because no
+   display handle is set; NOT a blocking modal. */
+.handleGate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+}
+
+.handleGateLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.handleGateRow {
+  display: flex;
+  gap: 8px;
+}
+
+.handleGateInput {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  transition: border-color var(--transition);
+}
+
+.handleGateInput:focus {
+  outline: none;
+  border-color: var(--accent-line);
+}
+
+.handleGateBtn {
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent-grad);
+  color: var(--accent-ink);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.handleGateBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

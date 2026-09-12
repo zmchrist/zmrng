@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isBlockConflict, mergeBlock } from '../src/kbConflict'
+import { isBlockConflict, mergeBlock, removeBlock } from '../src/kbConflict'
 import type { KbBlock } from '../src/types'
 
 const block = (id: number, ord: number, over: Partial<KbBlock> = {}): KbBlock => ({
@@ -52,5 +52,27 @@ describe('mergeBlock', () => {
     const blocks = [block(1, 0)]
     const incoming = block(2, 1)
     expect(mergeBlock(blocks, incoming).map((b) => b.id)).toEqual([1, 2])
+  })
+})
+
+describe('removeBlock', () => {
+  it('removes the block with the given id, leaving the others in order', () => {
+    const blocks = [block(1, 0), block(2, 1), block(3, 2)]
+    const out = removeBlock(blocks, 2)
+    expect(out.map((b) => b.id)).toEqual([1, 3])
+  })
+
+  it('returns the SAME array reference (no-op) when the id is absent', () => {
+    const blocks = [block(1, 0), block(2, 1)]
+    const out = removeBlock(blocks, 99)
+    expect(out).toBe(blocks)
+  })
+
+  it('does not mutate the input array', () => {
+    const blocks = [block(1, 0), block(2, 1)]
+    const out = removeBlock(blocks, 1)
+    expect(blocks.map((b) => b.id)).toEqual([1, 2]) // input unchanged
+    expect(out.map((b) => b.id)).toEqual([2])
+    expect(out).not.toBe(blocks)
   })
 })
