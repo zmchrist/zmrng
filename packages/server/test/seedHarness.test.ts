@@ -107,6 +107,20 @@ describe('seedHarness', () => {
     expect(preCommands.some((c) => c.includes('pr_shape_guard.py'))).toBe(true)
   })
 
+  it('tolerates a subdirectory in hooks/ (e.g. python __pycache__) — copies files, skips dirs', async () => {
+    // python compiling the hooks drops a __pycache__ dir alongside the .py files;
+    // the copy loop must skip it, not crash on copyFileSync of a directory.
+    mkdirSync(path.join(harnessDir, 'hooks', '__pycache__'), { recursive: true })
+    writeFileSync(path.join(harnessDir, 'hooks', '__pycache__', 'security_guard.pyc'), 'bytecode')
+
+    await expect(seedHarness(worktreeDir, '/some/target/repo', harnessDir)).resolves.toBeDefined()
+
+    expect(existsSync(path.join(worktreeDir, '.claude', 'zmrng-hooks', 'security_guard.py'))).toBe(
+      true,
+    )
+    expect(existsSync(path.join(worktreeDir, '.claude', 'zmrng-hooks', '__pycache__'))).toBe(false)
+  })
+
   it('copies core_piv_loop commands unprefixed — slash resolution needs the exact name', async () => {
     await seedHarness(worktreeDir, '/some/target/repo', harnessDir)
 

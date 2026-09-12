@@ -179,6 +179,21 @@ if (!existsSync(webDistSrc)) throw new Error(`web build missing at ${webDistSrc}
 cpSync(webDistSrc, webDistDst, { recursive: true })
 log('copied packages/web/dist → src-tauri/web-dist')
 
+// 5b. Copy zmrng's own harness so seedHarness() has a source dir in the packaged
+// app. repoRoot resolves *inside* the read-only .app there and ships no harness/,
+// so the sidecar is pointed at this bundled copy via ZMRNG_HARNESS_DIR (main.rs).
+const harnessSrc = path.join(repoRoot, 'harness')
+if (!existsSync(harnessSrc)) throw new Error(`harness dir missing at ${harnessSrc}`)
+const harnessDst = path.join(sidecarDir, 'harness')
+cpSync(harnessSrc, harnessDst, {
+  recursive: true,
+  dereference: true,
+  // Skip python bytecode caches — machine-specific and unused (seedHarness copies
+  // only .py source; the .app's python recompiles on first run).
+  filter: (src) => !src.includes(`${path.sep}__pycache__`),
+})
+log('copied harness → src-tauri/sidecar/harness')
+
 // 6. Seed the repo registry into the bundle. config/repos.json is gitignored and
 // machine-specific, and the app's writable data dir starts empty — so without this
 // the bundled app falls back to legacy/auto-scan and never sees the curated labels.

@@ -44,7 +44,7 @@
       "icons/icon.icns"
     ],
     "externalBin": ["sidecar/node"],
-    "resources": ["sidecar/server.mjs", "sidecar/node_modules/**/*", "sidecar/config/**/*", "web-dist/**/*"],
+    "resources": ["sidecar/server.mjs", "sidecar/node_modules/**/*", "sidecar/config/**/*", "sidecar/harness/**/*", "web-dist/**/*"],
     "macOS": {
       "minimumSystemVersion": "11.0"
     }
