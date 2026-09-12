@@ -120,11 +120,15 @@ fn main() {
             let resource_dir = app.path().resource_dir()?;
             let server_js = resource_dir.join("sidecar/server.mjs");
             let web_dist = resource_dir.join("web-dist");
+            // Harness source for seedHarness(): repoRoot resolves inside the
+            // read-only .app, so point the sidecar at the bundled copy instead.
+            let harness_dir = resource_dir.join("sidecar/harness");
 
             let envs: HashMap<String, String> = HashMap::from([
                 ("ZMRNG_PORT".into(), port.to_string()),
                 ("ZMRNG_DATA_DIR".into(), data_dir.to_string_lossy().into_owned()),
                 ("ZMRNG_WEB_DIST".into(), web_dist.to_string_lossy().into_owned()),
+                ("ZMRNG_HARNESS_DIR".into(), harness_dir.to_string_lossy().into_owned()),
                 ("PATH".into(), path),
             ]);
 

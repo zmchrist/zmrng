@@ -98,6 +98,12 @@ export interface Config {
   defaultModel: string
   maxLanes: number
   repoRoot: string
+  /**
+   * Source dir `seedHarness()` copies zmrng's harness from. `<repoRoot>/harness`
+   * in dev; the bundled `sidecar/harness` in the packaged app (via
+   * `ZMRNG_HARNESS_DIR`, since `repoRoot` resolves inside the read-only `.app`).
+   */
+  harnessDir: string
   /** Writable per-user data dir (db, worktrees, config). REPO_ROOT in dev. */
   dataDir: string
   dbPath: string
@@ -181,6 +187,19 @@ export type AuthMode = 'oauth' | 'apikey'
  */
 export function resolveAuthMode(env: { ZMRNG_AUTH_MODE?: string }): AuthMode {
   return env.ZMRNG_AUTH_MODE?.trim().toLowerCase() === 'apikey' ? 'apikey' : 'oauth'
+}
+
+/**
+ * Source directory `seedHarness()` copies zmrng's own harness from. Honours a
+ * `ZMRNG_HARNESS_DIR` override (home-expanded, resolved) — set by the Tauri shell
+ * to the bundled `sidecar/harness` because `repoRoot` resolves *inside* the
+ * read-only `.app` there and carries no `harness/`. Falls back to
+ * `<repoRoot>/harness`, which is today's dev behaviour byte-for-byte. Mirrors the
+ * `ZMRNG_WEB_DIST` seam.
+ */
+export function resolveHarnessDir(env: { ZMRNG_HARNESS_DIR?: string }, repoRoot: string): string {
+  const override = env.ZMRNG_HARNESS_DIR?.trim()
+  return override ? path.resolve(expandHome(override)) : path.join(repoRoot, 'harness')
 }
 
 /**
@@ -666,6 +685,7 @@ function buildConfig(): Config {
     defaultModel: process.env.ZMRNG_MODEL ?? 'opus',
     maxLanes: Number(process.env.ZMRNG_MAX_LANES ?? 2),
     repoRoot: REPO_ROOT,
+    harnessDir: resolveHarnessDir(process.env, REPO_ROOT),
     dataDir: DATA_DIR,
     dbPath: path.join(DATA_DIR, 'zmrng.db'),
     webDist: process.env.ZMRNG_WEB_DIST ?? path.join(REPO_ROOT, 'packages', 'web', 'dist'),
