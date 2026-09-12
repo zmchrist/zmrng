@@ -2,18 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import styles from './KbView.module.css'
 import type {
   KbBlock,
-  KbBlockKind,
   KbPageDetail,
   KbRevision,
   KbTreeNode,
   Space,
   WorkspaceMember,
 } from '../types'
-import { KB_BLOCK_KINDS, MAX_DISPLAY_NAME_LEN } from '../types'
+import { MAX_DISPLAY_NAME_LEN } from '../types'
 import { FileTree } from './FileTree'
 import { api } from '../api'
-import { renderMarkdown } from '../kbMarkdown'
-import { filterKbTree, collectFolders, pageBreadcrumb, parseKbNodePath } from '../kbTree'
+import { detectKind, renderKbBlock, toEditableMarkdown } from '../kbMarkdown'
+import { filterKbTree, pageBreadcrumb, parseKbNodePath } from '../kbTree'
 import { isBlockConflict, mergeBlock, removeBlock as removeBlockFromList } from '../kbConflict'
 import { kbHandles } from '../kbHandles'
 import {
@@ -62,15 +61,6 @@ interface Props {
 
 const PING_MS = 25000
 const RECONNECT_MS = 2000
-
-/** Human label for a block kind, shown in the per-block kind selector. */
-const KIND_LABELS: Record<KbBlockKind, string> = {
-  text: 'Text',
-  heading: 'Heading',
-  code: 'Code',
-  checklist: 'Checklist',
-  list: 'List',
-}
 
 /**
  * Inline "set a display name" affordance (#150) — NOT a blocking modal. Shown
@@ -123,6 +113,11 @@ function initials(name: string): string {
  * per block, with live presence and block-LWW conflict UX. It owns ONE
  * multiplexed workspace socket (GET /ws/workspace, same-origin) for page
  * subscribe/edit/presence — REST covers spaces/tree/page + structural CRUD.
+ *
+ * The editor is Obsidian-native: block kinds are INFERRED from the markdown a
+ * user types (`# ` → heading, `- ` → list, `- [ ] ` → checklist, a ``` fence →
+ * code) rather than picked from a dropdown, and ⌘B/⌘I/⌘K/⌘↵ shortcuts drive
+ * emphasis/links/save inside the textarea.
  */
 export function KbView({ teamHandle, onHandleChange, openTarget = null, active }: Props) {
   // Split identity (#150): `presenceHandle` (may be `anon`) drives the workspace
@@ -146,11 +141,11 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
   const [editingId, setEditingId] = useState<number | null>(null)
   // The conflict toast: an incoming update replaced a block we were editing.
   const [conflict, setConflict] = useState<{ block: KbBlock; revisions: KbRevision[] } | null>(null)
-  // Create affordances (folder + page) in the sidebar.
-  const [newFolder, setNewFolder] = useState('')
-  const [newFolderParent, setNewFolderParent] = useState('')
-  const [newPage, setNewPage] = useState('')
-  const [newPageFolder, setNewPageFolder] = useState('')
+  // Create affordance (page + folder) — compact icon buttons at the tree footer
+  // that expand into a single inline name input (Obsidian-style). Both create at
+  // the space root; reorganize into folders later.
+  const [creating, setCreating] = useState<null | 'page' | 'folder'>(null)
+  const [createDraft, setCreateDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -170,6 +165,11 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
   useEffect(() => {
     openPageIdRef.current = openPageId
   }, [openPageId])
+
+  // When the operator clicks "+ Add block" the new block's id is only known once
+  // the server echoes it back — this flag makes the incoming page.update open
+  // that fresh block for editing immediately (Obsidian-style add-and-type).
+  const autoEditNextRef = useRef(false)
 
   // The saved blocks of the open page (for conflict + draft diffing) readable
   // inside the stable socket closure.
@@ -236,6 +236,12 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
         if (msg.type === 'page.update') {
           if (msg.pageId !== openPageIdRef.current) return
           const block = msg.block
+          // A freshly-added block (unknown id) echoed back after "+ Add block":
+          // open it for editing straight away so the user just starts typing.
+          if (autoEditNextRef.current && !blocksRef.current.some((b) => b.id === block.id)) {
+            autoEditNextRef.current = false
+            setEditingId(block.id)
+          }
           // Edit-author identity feeds the conflict predicate: a dirty block only
           // exists when the local user is editing, which requires `editHandle`
           // to be non-empty — so this correctly distinguishes two real handles.
@@ -391,7 +397,66 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
     setDrafts((prev) => ({ ...prev, [blockId]: body }))
   }
 
-  /** Save one block via the live `page.edit` fan-out, then close its editor. */
+  /** Abandon a block's unsaved draft and close its editor (Esc). */
+  const cancelEdit = (block: KbBlock): void => {
+    setDrafts((prev) => {
+      const next = { ...prev }
+      delete next[block.id]
+      return next
+    })
+    setEditingId(null)
+  }
+
+  /**
+   * Wrap the textarea's current selection with markdown markers (⌘B/⌘I/⌘K),
+   * updating the draft and restoring the caret/selection after React re-renders.
+   */
+  const wrapSelection = (
+    el: HTMLTextAreaElement,
+    block: KbBlock,
+    before: string,
+    after: string,
+  ): void => {
+    const { selectionStart: s, selectionEnd: e, value } = el
+    const next = value.slice(0, s) + before + value.slice(s, e) + after + value.slice(e)
+    setDraft(block.id, next)
+    requestAnimationFrame(() => {
+      el.selectionStart = s + before.length
+      el.selectionEnd = e + before.length
+      el.focus()
+    })
+  }
+
+  /** Obsidian-style editor shortcuts: ⌘B/⌘I emphasis, ⌘K link, ⌘↵ save, Esc cancel. */
+  const onEditorKeyDown = (
+    e: React.KeyboardEvent<HTMLTextAreaElement>,
+    block: KbBlock,
+  ): void => {
+    const mod = e.metaKey || e.ctrlKey
+    if (mod && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
+      e.preventDefault()
+      wrapSelection(e.currentTarget, block, '**', '**')
+    } else if (mod && !e.shiftKey && (e.key === 'i' || e.key === 'I')) {
+      e.preventDefault()
+      wrapSelection(e.currentTarget, block, '*', '*')
+    } else if (mod && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault()
+      wrapSelection(e.currentTarget, block, '[', '](url)')
+    } else if (mod && e.key === 'Enter') {
+      e.preventDefault()
+      saveBlock(block)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelEdit(block)
+    }
+  }
+
+  /**
+   * Save one block via the live `page.edit` fan-out, then close its editor. The
+   * block's KIND is INFERRED from the markdown body (Obsidian-style: `# ` → a
+   * heading, `- ` → a list, `- [ ] ` → a checklist, a ``` fence → code) so the
+   * operator never picks a kind from a dropdown. Plain prose stays `text`.
+   */
   const saveBlock = (block: KbBlock): void => {
     if (!canEdit) return
     const body = drafts[block.id]
@@ -399,11 +464,17 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
       setEditingId(null)
       return
     }
-    sendFrame(encodePageEdit(openPageId!, block.id, block.kind, body, block.meta, editHandle))
+    const inferred = detectKind(body)
+    const kind = inferred?.kind ?? 'text'
+    const meta = inferred?.meta ?? null
+    sendFrame(encodePageEdit(openPageId!, block.id, kind, body, meta, editHandle))
     // Optimistically apply locally; the server echo re-merges with a fresh ts.
     setDetail((prev) =>
       prev
-        ? { ...prev, blocks: prev.blocks.map((b) => (b.id === block.id ? { ...b, body } : b)) }
+        ? {
+            ...prev,
+            blocks: prev.blocks.map((b) => (b.id === block.id ? { ...b, body, kind, meta } : b)),
+          }
         : prev,
     )
     setDrafts((prev) => {
@@ -414,22 +485,11 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
     setEditingId(null)
   }
 
-  /** Change a block's kind (persists immediately via the live fan-out). */
-  const changeKind = (block: KbBlock, kind: KbBlockKind): void => {
-    if (!canEdit) return
-    const body = drafts[block.id] ?? block.body
-    sendFrame(encodePageEdit(openPageId!, block.id, kind, body, block.meta, editHandle))
-    setDetail((prev) =>
-      prev
-        ? { ...prev, blocks: prev.blocks.map((b) => (b.id === block.id ? { ...b, kind } : b)) }
-        : prev,
-    )
-  }
-
-  /** Append a fresh block of the given kind to the open page (live create). */
-  const addBlock = (kind: KbBlockKind): void => {
+  /** Append a fresh (empty text) block and open it for editing (live create). */
+  const addBlock = (): void => {
     if (!canEdit || openPageId === null) return
-    sendFrame(encodePageEdit(openPageId, null, kind, '', null, editHandle))
+    autoEditNextRef.current = true
+    sendFrame(encodePageEdit(openPageId, null, 'text', '', null, editHandle))
   }
 
   /** Delete a block over REST, then drop it from the open page locally. */
@@ -458,44 +518,32 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
       .catch(() => setError('Failed to restore revision'))
   }
 
-  // ---- structural create (folder + page) ----
-  const folderOptions = useMemo(() => collectFolders(tree), [tree])
-
-  const createFolder = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault()
-    if (!canEdit) return
-    const name = newFolder.trim()
-    if (!name || spaceId === null || busy) return
-    setBusy(true)
+  // ---- structural create (page + folder) ----
+  const startCreate = (kind: 'page' | 'folder'): void => {
+    setCreating(kind)
+    setCreateDraft('')
     setError(null)
-    try {
-      const parentId = newFolderParent ? Number(newFolderParent) : null
-      await api.createFolder(spaceId, name, parentId)
-      setNewFolder('')
-      setNewFolderParent('')
-      refreshTree()
-    } catch {
-      setError('Failed to create folder')
-    } finally {
-      setBusy(false)
-    }
   }
 
-  const createPage = async (e: React.FormEvent): Promise<void> => {
+  const submitCreate = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
-    const title = newPage.trim()
-    if (!canEdit || !title || spaceId === null || busy) return
+    const name = createDraft.trim()
+    if (!canEdit || !name || spaceId === null || busy || !creating) return
     setBusy(true)
     setError(null)
     try {
-      const folderId = newPageFolder ? Number(newPageFolder) : null
-      const page = await api.createPage(spaceId, title, editHandle, folderId)
-      setNewPage('')
-      setNewPageFolder('')
-      refreshTree()
-      onOpenNode(`page/${page.id}`)
+      if (creating === 'folder') {
+        await api.createFolder(spaceId, name, null)
+        refreshTree()
+      } else {
+        const page = await api.createPage(spaceId, name, editHandle, null)
+        refreshTree()
+        onOpenNode(`page/${page.id}`)
+      }
+      setCreating(null)
+      setCreateDraft('')
     } catch {
-      setError('Failed to create page')
+      setError(creating === 'folder' ? 'Failed to create folder' : 'Failed to create page')
     } finally {
       setBusy(false)
     }
@@ -581,63 +629,74 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
         </div>
 
         {canEdit ? (
-          <>
-            <form className={styles.createForm} onSubmit={createPage}>
-              <input
-                className={styles.search}
-                type="text"
-                value={newPage}
-                onChange={(e) => setNewPage(e.target.value)}
-                placeholder="New page title…"
-                aria-label="New page title"
-              />
-              <select
-                className={styles.select}
-                value={newPageFolder}
-                onChange={(e) => setNewPageFolder(e.target.value)}
-                aria-label="Page folder"
-              >
-                <option value="">Space root</option>
-                {folderOptions.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.path}
-                  </option>
-                ))}
-              </select>
-              <button type="submit" className={styles.createBtn} disabled={!newPage.trim() || busy}>
-                + Page
-              </button>
-            </form>
-
-            <form className={styles.createForm} onSubmit={createFolder}>
-              <input
-                className={styles.search}
-                type="text"
-                value={newFolder}
-                onChange={(e) => setNewFolder(e.target.value)}
-                placeholder="New folder name…"
-                aria-label="New folder name"
-              />
-              <select
-                className={styles.select}
-                value={newFolderParent}
-                onChange={(e) => setNewFolderParent(e.target.value)}
-                aria-label="Parent folder"
-              >
-                <option value="">Space root</option>
-                {folderOptions.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.path}
-                  </option>
-                ))}
-              </select>
-              <button type="submit" className={styles.createBtn} disabled={!newFolder.trim() || busy}>
-                + Folder
-              </button>
-            </form>
-          </>
+          <div className={styles.treeFooter}>
+            {creating ? (
+              <form className={styles.createInline} onSubmit={submitCreate}>
+                <input
+                  className={styles.createInlineInput}
+                  type="text"
+                  value={createDraft}
+                  onChange={(e) => setCreateDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      setCreating(null)
+                      setCreateDraft('')
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!createDraft.trim()) setCreating(null)
+                  }}
+                  placeholder={creating === 'page' ? 'Page name…' : 'Folder name…'}
+                  aria-label={creating === 'page' ? 'New page name' : 'New folder name'}
+                  maxLength={MAX_DISPLAY_NAME_LEN}
+                  autoFocus
+                />
+              </form>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={styles.iconBtn}
+                  onClick={() => startCreate('page')}
+                  title="New page"
+                  aria-label="New page"
+                  disabled={busy || spaceId === null}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path
+                      d="M4 1.5h4.5L13 6v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinejoin="round"
+                    />
+                    <path d="M8.25 1.75V6H12.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                    <path d="M8 8.5v4M6 10.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className={styles.iconBtn}
+                  onClick={() => startCreate('folder')}
+                  title="New folder"
+                  aria-label="New folder"
+                  disabled={busy || spaceId === null}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path
+                      d="M1.5 4a1 1 0 0 1 1-1h3l1.5 1.5H13.5a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4Z"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinejoin="round"
+                    />
+                    <path d="M8 7v3.5M6.25 8.75h3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </>
+            )}
+          </div>
         ) : (
-          <div className={styles.createForm}>
+          <div className={styles.treeFooter}>
             <HandleGate onSet={onHandleChange} action="create pages" />
           </div>
         )}
@@ -690,31 +749,28 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
                   <div key={block.id} className={`${styles.block} ${dirty ? styles.blockDirty : ''}`}>
                     {editing ? (
                       <div className={styles.editor}>
-                        <div className={styles.editorBar}>
-                          <select
-                            className={styles.select}
-                            value={block.kind}
-                            onChange={(e) => changeKind(block, e.target.value as KbBlockKind)}
-                            aria-label="Block kind"
-                          >
-                            {KB_BLOCK_KINDS.map((k) => (
-                              <option key={k} value={k}>
-                                {KIND_LABELS[k]}
-                              </option>
-                            ))}
-                          </select>
-                          <button type="button" className={styles.saveBtn} onClick={() => saveBlock(block)}>
-                            Save
-                          </button>
-                        </div>
                         <textarea
                           className={styles.textarea}
-                          value={draft ?? block.body}
+                          value={draft ?? toEditableMarkdown(block.body, block.kind, block.meta)}
                           onChange={(e) => setDraft(block.id, e.target.value)}
+                          onKeyDown={(e) => onEditorKeyDown(e, block)}
                           onBlur={() => saveBlock(block)}
                           aria-label="Block markdown"
                           autoFocus
                         />
+                        <div className={styles.editorBar}>
+                          <span className={styles.editorHint}>
+                            # heading · - list · ⌘B bold · ⌘I italic · ⌘↵ save · esc cancel
+                          </span>
+                          <button
+                            type="button"
+                            className={styles.saveBtn}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => saveBlock(block)}
+                          >
+                            Save
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <div className={styles.rendered}>
@@ -745,7 +801,7 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
                           onClick={canEdit ? () => setEditingId(block.id) : undefined}
                           dangerouslySetInnerHTML={{
                             __html:
-                              renderMarkdown(block.body, block.kind, block.meta) ||
+                              renderKbBlock(block.body, block.kind, block.meta) ||
                               '<p class="' + styles.placeholder + '">Empty block — click to edit</p>',
                           }}
                         />
@@ -758,18 +814,14 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
 
             {canEdit ? (
               <div className={styles.addBar}>
-                <span className={styles.addLabel}>Add block:</span>
-                {KB_BLOCK_KINDS.map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    className={styles.addBtn}
-                    onClick={() => addBlock(k)}
-                    disabled={!connected}
-                  >
-                    + {KIND_LABELS[k]}
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  className={styles.addBtn}
+                  onClick={() => addBlock()}
+                  disabled={!connected}
+                >
+                  + Add block
+                </button>
               </div>
             ) : (
               <div className={styles.addBar}>
