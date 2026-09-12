@@ -52,6 +52,18 @@
   color: var(--accent);
 }
 
+/* Active drag-and-drop drop target: a folder row (or the whole tree, at root). */
+.dropTarget {
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.dropRoot {
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .label {
   overflow: hidden;
   text-overflow: ellipsis;

@@ -287,6 +287,8 @@ export function parseWorkspaceServerMsg(raw: string): WsWorkspaceServerMsg | und
       return typeof obj.pageId === 'number' && typeof obj.blockId === 'number'
         ? { type: 'page.delete', pageId: obj.pageId, blockId: obj.blockId }
         : undefined
+    case 'space.tree':
+      return typeof obj.spaceId === 'number' ? { type: 'space.tree', spaceId: obj.spaceId } : undefined
     default:
       return undefined
   }

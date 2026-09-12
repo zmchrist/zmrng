@@ -116,8 +116,17 @@ const RED_SCAN: RawScanOutput = {
   toolVersions: TOOL_VERSIONS,
 }
 
-/** Let onScanReady's async continuation (post-await) run to completion. */
-const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+/**
+ * Let onScanReady's async continuation (post-await) run to completion. Awaits
+ * several event-loop turns rather than a single tick: real git spawns + stream
+ * parsing can chain across more than one macrotask under CPU contention, so a
+ * one-tick flush was occasionally insufficient (a load-induced flake in the
+ * combined validation gate). Extra ticks are harmless when the work has already
+ * settled.
+ */
+const flush = async (): Promise<void> => {
+  for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
+}
 
 let repoDir: string
 let dbDir: string
