@@ -9,12 +9,13 @@ import type {
   Space,
   WorkspaceMember,
 } from '../types'
-import { KB_BLOCK_KINDS } from '../types'
+import { KB_BLOCK_KINDS, MAX_DISPLAY_NAME_LEN } from '../types'
 import { FileTree } from './FileTree'
 import { api } from '../api'
 import { renderMarkdown } from '../kbMarkdown'
 import { filterKbTree, collectFolders, pageBreadcrumb, parseKbNodePath } from '../kbTree'
 import { isBlockConflict, mergeBlock, removeBlock as removeBlockFromList } from '../kbConflict'
+import { kbHandles } from '../kbHandles'
 import {
   encodeHello,
   encodePing,
@@ -26,12 +27,19 @@ import {
 
 interface Props {
   /**
-   * The teammate's self-asserted display-name handle (server-side settings).
-   * Used both for the workspace `hello` (the page-presence identity) and as the
-   * author of block edits. Falls back to `anon` when unset — the KB surface has
-   * no join gate of its own (unlike Team), it just needs an identity to attach.
+   * The teammate's self-asserted display-name handle (server-side settings —
+   * the SAME `settings.teamHandle` the Team surface persists). Presence/viewing
+   * falls back to `anon` when unset, but EDITING requires a non-empty handle:
+   * no KB block may be authored as `anon` (#150). See `kbHandles`.
    */
   teamHandle: string
+  /**
+   * Persist a new display handle (mirrors how App wires TeamView's
+   * `onHandleChange`). Reused by the inline "set a display name to edit"
+   * affordance so a viewer can enable editing without leaving the KB surface —
+   * one identity across Team + KB, no second store.
+   */
+  onHandleChange: (handle: string) => void
   /**
    * One-shot navigation target from the Team tab's "Send to KB" promotion (T4,
    * #154): the space + page to select/open when the KB tab is entered. Seeded
@@ -64,6 +72,42 @@ const KIND_LABELS: Record<KbBlockKind, string> = {
   list: 'List',
 }
 
+/**
+ * Inline "set a display name" affordance (#150) — NOT a blocking modal. Shown
+ * wherever a KB write is gated because no display handle is set; setting a name
+ * here reuses the SAME `settings.teamHandle` the Team surface persists (via
+ * `onSet` → App's `saveSettings`), so it immediately enables editing across
+ * both surfaces. Mirrors the Team join input's styling/tokens.
+ */
+function HandleGate({ onSet, action }: { onSet: (handle: string) => void; action: string }) {
+  const [draft, setDraft] = useState('')
+  const submit = (e: React.FormEvent): void => {
+    e.preventDefault()
+    const name = draft.trim()
+    if (!name) return
+    onSet(name)
+  }
+  return (
+    <form className={styles.handleGate} onSubmit={submit}>
+      <span className={styles.handleGateLabel}>Set a display name to {action}</span>
+      <div className={styles.handleGateRow}>
+        <input
+          className={styles.handleGateInput}
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="e.g. Ada"
+          maxLength={MAX_DISPLAY_NAME_LEN}
+          aria-label="Display name"
+        />
+        <button type="submit" className={styles.handleGateBtn} disabled={!draft.trim()}>
+          Set name
+        </button>
+      </div>
+    </form>
+  )
+}
+
 /** Two-letter avatar initials for a viewer's presence chip. */
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -80,8 +124,12 @@ function initials(name: string): string {
  * multiplexed workspace socket (GET /ws/workspace, same-origin) for page
  * subscribe/edit/presence — REST covers spaces/tree/page + structural CRUD.
  */
-export function KbView({ teamHandle, openTarget = null, active }: Props) {
-  const handle = teamHandle.trim() || 'anon'
+export function KbView({ teamHandle, onHandleChange, openTarget = null, active }: Props) {
+  // Split identity (#150): `presenceHandle` (may be `anon`) drives the workspace
+  // hello + page presence; `editHandle` (EMPTY when no handle is set) authors
+  // block edits. `canEdit` gates every write affordance — read-only viewing
+  // works with no handle, but nothing is ever authored as `anon`.
+  const { presenceHandle, editHandle, canEdit } = kbHandles(teamHandle)
 
   const [spaces, setSpaces] = useState<Space[]>([])
   const [spaceId, setSpaceId] = useState<number | null>(null)
@@ -174,7 +222,7 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
       wsRef.current = ws
       ws.onopen = () => {
         setConnected(true)
-        ws?.send(encodeHello(handle))
+        ws?.send(encodeHello(presenceHandle))
         // Re-subscribe to the open page after a reconnect.
         const pid = openPageIdRef.current
         if (pid !== null) ws?.send(encodePageSubscribe(pid))
@@ -188,7 +236,10 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
         if (msg.type === 'page.update') {
           if (msg.pageId !== openPageIdRef.current) return
           const block = msg.block
-          const conflicted = isBlockConflict(block, dirtyIdsRef.current, handle)
+          // Edit-author identity feeds the conflict predicate: a dirty block only
+          // exists when the local user is editing, which requires `editHandle`
+          // to be non-empty — so this correctly distinguishes two real handles.
+          const conflicted = isBlockConflict(block, dirtyIdsRef.current, editHandle)
           // Block-LWW: the server already accepted the last write, so merge the
           // incoming block regardless. On a conflict, drop our stale draft +
           // surface the restore toast rather than silently clobbering the editor.
@@ -245,7 +296,7 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
       wsRef.current = null
       setConnected(false)
     }
-  }, [handle, active])
+  }, [presenceHandle, editHandle, active])
 
   // ---- load spaces once; default to the first space ----
   useEffect(() => {
@@ -342,12 +393,13 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
 
   /** Save one block via the live `page.edit` fan-out, then close its editor. */
   const saveBlock = (block: KbBlock): void => {
+    if (!canEdit) return
     const body = drafts[block.id]
     if (body === undefined) {
       setEditingId(null)
       return
     }
-    sendFrame(encodePageEdit(openPageId!, block.id, block.kind, body, block.meta, handle))
+    sendFrame(encodePageEdit(openPageId!, block.id, block.kind, body, block.meta, editHandle))
     // Optimistically apply locally; the server echo re-merges with a fresh ts.
     setDetail((prev) =>
       prev
@@ -364,8 +416,9 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
 
   /** Change a block's kind (persists immediately via the live fan-out). */
   const changeKind = (block: KbBlock, kind: KbBlockKind): void => {
+    if (!canEdit) return
     const body = drafts[block.id] ?? block.body
-    sendFrame(encodePageEdit(openPageId!, block.id, kind, body, block.meta, handle))
+    sendFrame(encodePageEdit(openPageId!, block.id, kind, body, block.meta, editHandle))
     setDetail((prev) =>
       prev
         ? { ...prev, blocks: prev.blocks.map((b) => (b.id === block.id ? { ...b, kind } : b)) }
@@ -375,8 +428,8 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
 
   /** Append a fresh block of the given kind to the open page (live create). */
   const addBlock = (kind: KbBlockKind): void => {
-    if (openPageId === null) return
-    sendFrame(encodePageEdit(openPageId, null, kind, '', null, handle))
+    if (!canEdit || openPageId === null) return
+    sendFrame(encodePageEdit(openPageId, null, kind, '', null, editHandle))
   }
 
   /** Delete a block over REST, then drop it from the open page locally. */
@@ -393,12 +446,13 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
 
   /** Restore a revision onto the conflicted block, then close the toast. */
   const restore = (revisionId: number): void => {
+    if (!canEdit) return
     api
-      .restoreRevision(revisionId, handle)
+      .restoreRevision(revisionId, editHandle)
       .then((block) => {
         setDetail((prev) => (prev ? { ...prev, blocks: mergeBlock(prev.blocks, block) } : prev))
         // Re-broadcast so other viewers converge on the restored version.
-        sendFrame(encodePageEdit(block.pageId, block.id, block.kind, block.body, block.meta, handle))
+        sendFrame(encodePageEdit(block.pageId, block.id, block.kind, block.body, block.meta, editHandle))
         setConflict(null)
       })
       .catch(() => setError('Failed to restore revision'))
@@ -409,6 +463,7 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
 
   const createFolder = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
+    if (!canEdit) return
     const name = newFolder.trim()
     if (!name || spaceId === null || busy) return
     setBusy(true)
@@ -429,12 +484,12 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
   const createPage = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     const title = newPage.trim()
-    if (!title || spaceId === null || busy) return
+    if (!canEdit || !title || spaceId === null || busy) return
     setBusy(true)
     setError(null)
     try {
       const folderId = newPageFolder ? Number(newPageFolder) : null
-      const page = await api.createPage(spaceId, title, handle, folderId)
+      const page = await api.createPage(spaceId, title, editHandle, folderId)
       setNewPage('')
       setNewPageFolder('')
       refreshTree()
@@ -525,59 +580,67 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
           )}
         </div>
 
-        <form className={styles.createForm} onSubmit={createPage}>
-          <input
-            className={styles.search}
-            type="text"
-            value={newPage}
-            onChange={(e) => setNewPage(e.target.value)}
-            placeholder="New page title…"
-            aria-label="New page title"
-          />
-          <select
-            className={styles.select}
-            value={newPageFolder}
-            onChange={(e) => setNewPageFolder(e.target.value)}
-            aria-label="Page folder"
-          >
-            <option value="">Space root</option>
-            {folderOptions.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.path}
-              </option>
-            ))}
-          </select>
-          <button type="submit" className={styles.createBtn} disabled={!newPage.trim() || busy}>
-            + Page
-          </button>
-        </form>
+        {canEdit ? (
+          <>
+            <form className={styles.createForm} onSubmit={createPage}>
+              <input
+                className={styles.search}
+                type="text"
+                value={newPage}
+                onChange={(e) => setNewPage(e.target.value)}
+                placeholder="New page title…"
+                aria-label="New page title"
+              />
+              <select
+                className={styles.select}
+                value={newPageFolder}
+                onChange={(e) => setNewPageFolder(e.target.value)}
+                aria-label="Page folder"
+              >
+                <option value="">Space root</option>
+                {folderOptions.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.path}
+                  </option>
+                ))}
+              </select>
+              <button type="submit" className={styles.createBtn} disabled={!newPage.trim() || busy}>
+                + Page
+              </button>
+            </form>
 
-        <form className={styles.createForm} onSubmit={createFolder}>
-          <input
-            className={styles.search}
-            type="text"
-            value={newFolder}
-            onChange={(e) => setNewFolder(e.target.value)}
-            placeholder="New folder name…"
-            aria-label="New folder name"
-          />
-          <select
-            className={styles.select}
-            value={newFolderParent}
-            onChange={(e) => setNewFolderParent(e.target.value)}
-            aria-label="Parent folder"
-          >
-            <option value="">Space root</option>
-            {folderOptions.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.path}
-              </option>
-            ))}
-          </select>
-          <button type="submit" className={styles.createBtn} disabled={!newFolder.trim() || busy}>
-            + Folder
-          </button>
-        </form>
+            <form className={styles.createForm} onSubmit={createFolder}>
+              <input
+                className={styles.search}
+                type="text"
+                value={newFolder}
+                onChange={(e) => setNewFolder(e.target.value)}
+                placeholder="New folder name…"
+                aria-label="New folder name"
+              />
+              <select
+                className={styles.select}
+                value={newFolderParent}
+                onChange={(e) => setNewFolderParent(e.target.value)}
+                aria-label="Parent folder"
+              >
+                <option value="">Space root</option>
+                {folderOptions.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.path}
+                  </option>
+                ))}
+              </select>
+              <button type="submit" className={styles.createBtn} disabled={!newFolder.trim() || busy}>
+                + Folder
+              </button>
+            </form>
+          </>
+        ) : (
+          <div className={styles.createForm}>
+            <HandleGate onSet={onHandleChange} action="create pages" />
+          </div>
+        )}
         {error && <p className={styles.error}>{error}</p>}
       </aside>
 
@@ -655,27 +718,31 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
                       </div>
                     ) : (
                       <div className={styles.rendered}>
-                        <button
-                          type="button"
-                          className={styles.editToggle}
-                          onClick={() => setEditingId(block.id)}
-                          aria-label="Edit block"
-                          title="Edit block"
-                        >
-                          ✎
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.removeToggle}
-                          onClick={() => removeBlock(block)}
-                          aria-label="Delete block"
-                          title="Delete block"
-                        >
-                          ×
-                        </button>
+                        {canEdit && (
+                          <>
+                            <button
+                              type="button"
+                              className={styles.editToggle}
+                              onClick={() => setEditingId(block.id)}
+                              aria-label="Edit block"
+                              title="Edit block"
+                            >
+                              ✎
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.removeToggle}
+                              onClick={() => removeBlock(block)}
+                              aria-label="Delete block"
+                              title="Delete block"
+                            >
+                              ×
+                            </button>
+                          </>
+                        )}
                         <div
                           className={styles.markdown}
-                          onClick={() => setEditingId(block.id)}
+                          onClick={canEdit ? () => setEditingId(block.id) : undefined}
                           dangerouslySetInnerHTML={{
                             __html:
                               renderMarkdown(block.body, block.kind, block.meta) ||
@@ -689,20 +756,26 @@ export function KbView({ teamHandle, openTarget = null, active }: Props) {
               })}
             </div>
 
-            <div className={styles.addBar}>
-              <span className={styles.addLabel}>Add block:</span>
-              {KB_BLOCK_KINDS.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  className={styles.addBtn}
-                  onClick={() => addBlock(k)}
-                  disabled={!connected}
-                >
-                  + {KIND_LABELS[k]}
-                </button>
-              ))}
-            </div>
+            {canEdit ? (
+              <div className={styles.addBar}>
+                <span className={styles.addLabel}>Add block:</span>
+                {KB_BLOCK_KINDS.map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    className={styles.addBtn}
+                    onClick={() => addBlock(k)}
+                    disabled={!connected}
+                  >
+                    + {KIND_LABELS[k]}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className={styles.addBar}>
+                <HandleGate onSet={onHandleChange} action="edit this page" />
+              </div>
+            )}
           </>
         ) : (
           <div className={styles.detailEmpty}>
