@@ -656,6 +656,10 @@ class FakePageDb {
     existing.updatedBy = updatedBy
     return { ...existing }
   }
+  deleteBlock(id: number): void {
+    this.blocks = this.blocks.filter((b) => b.id !== id)
+    this.revisions = this.revisions.filter((r) => r.blockId !== id)
+  }
 }
 
 const member = (id: number, displayName: string): WorkspaceMember => ({
@@ -819,5 +823,55 @@ describe('PageManager fan-out (T2, #144 — acceptance-critical)', () => {
     mgr.subscribe({}, 1, member(1, 'Ada'))
     mgr.subscribe({}, 1, member(1, 'Ada')) // same member, second tab
     expect(mgr.viewers(1)).toEqual([{ id: 1, displayName: 'Ada', online: true }])
+  })
+
+  // ---- deleteBlock live fan-out (#151 — acceptance-critical) ----
+  const deletes = (received: Array<{ socket: object; frame: WsWorkspaceServerMsg }>) =>
+    received.filter((r) => r.frame.type === 'page.delete')
+
+  it('deleteBlock removes the block AND fans a page.delete to EVERY subscribed viewer', () => {
+    const { db, mgr, received } = setup()
+    const b = db.createBlock({ pageId: 1, ord: null, kind: 'text', body: 'x', meta: null, updatedBy: 'Ada', now: 't' })
+    const sockA = {}
+    const sockB = {}
+    mgr.subscribe(sockA, 1, member(1, 'Ada'))
+    mgr.subscribe(sockB, 1, member(2, 'Bo'))
+    expect(mgr.deleteBlock(1, b.id)).toBe(true)
+    // The block is gone from the store.
+    expect(db.getBlockPageId(b.id)).toBeUndefined()
+    expect(db.listBlocks(1)).toHaveLength(0)
+    // BOTH subscribers received the tombstone.
+    const del = deletes(received)
+    expect(del).toHaveLength(2)
+    expect(del.map((r) => r.socket)).toEqual([sockA, sockB])
+    for (const r of del) {
+      expect(r.frame).toEqual({ type: 'page.delete', pageId: 1, blockId: b.id })
+    }
+  })
+
+  it('deleteBlock fans a page.delete ONLY to sockets subscribed to that page (cross-page isolation)', () => {
+    const { db, mgr, received } = setup()
+    const b = db.createBlock({ pageId: 1, ord: null, kind: 'text', body: 'x', meta: null, updatedBy: 'Ada', now: 't' })
+    const sockA = {}
+    const sockB = {}
+    mgr.subscribe(sockA, 1, member(1, 'Ada'))
+    mgr.subscribe(sockB, 2, member(2, 'Bo'))
+    mgr.deleteBlock(1, b.id)
+    const del = deletes(received)
+    expect(del).toHaveLength(1)
+    expect(del[0].socket).toBe(sockA)
+  })
+
+  it('deleteBlock with a block that does not belong to the page is a no-op (nothing deleted, nothing fanned)', () => {
+    const { db, mgr, received } = setup()
+    const b = db.createBlock({ pageId: 1, ord: null, kind: 'text', body: 'x', meta: null, updatedBy: 'Ada', now: 't' })
+    mgr.subscribe({}, 2, member(1, 'Ada'))
+    // Claim the block (page 1) is on page 2 — mismatch → no delete, no fan-out.
+    expect(mgr.deleteBlock(2, b.id)).toBe(false)
+    // Unknown block id likewise.
+    expect(mgr.deleteBlock(1, 99999)).toBe(false)
+    expect(deletes(received)).toHaveLength(0)
+    // The block still exists.
+    expect(db.getBlockPageId(b.id)).toBe(1)
   })
 })

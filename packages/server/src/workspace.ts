@@ -352,7 +352,7 @@ export class ChannelManager<S = object> {
 // ---- page manager (KB real-time sync, T2, #144) ----------------------------
 
 /** The KB block/page-table surface the manager needs (kept narrow for testability). */
-type PageStore = Pick<Db, 'getPage' | 'getBlockPageId' | 'createBlock' | 'updateBlock' | 'listBlocks'>
+type PageStore = Pick<Db, 'getPage' | 'getBlockPageId' | 'createBlock' | 'updateBlock' | 'deleteBlock' | 'listBlocks'>
 
 /**
  * The KB-page analogue of `ChannelManager`. Owns per-page live block fan-out and
@@ -466,6 +466,28 @@ export class PageManager<S = object> {
       for (const socket of set) this.send(socket, frame)
     }
     return block
+  }
+
+  /**
+   * Delete a block and fan a `page.delete` tombstone out to every socket
+   * subscribed to that page, so the block converges (is removed) on all live
+   * viewers without a reload — the delete analogue of `saveBlock`'s
+   * `page.update` fan-out. Never trusts the wire: the block must actually belong
+   * to `pageId` (mirrors `saveBlock`'s `getBlockPageId` ownership check), so a
+   * frame is only fanned for a real block on a real page. Returns `true` when a
+   * block was deleted + fanned, `false` on a bad page / mismatched block (a
+   * no-op — nothing deleted, nothing delivered).
+   */
+  deleteBlock(pageId: number, blockId: number): boolean {
+    // Validate the block belongs to this page BEFORE deleting it.
+    if (this.db.getBlockPageId(blockId) !== pageId) return false
+    this.db.deleteBlock(blockId)
+    const set = this.subs.get(pageId)
+    if (set) {
+      const frame: WsWorkspaceServerMsg = { type: 'page.delete', pageId, blockId }
+      for (const socket of set) this.send(socket, frame)
+    }
+    return true
   }
 
   /** The current viewer set for a page, deduped by member id (multi-tab safe). */

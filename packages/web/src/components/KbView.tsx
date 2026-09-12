@@ -14,7 +14,7 @@ import { FileTree } from './FileTree'
 import { api } from '../api'
 import { renderMarkdown } from '../kbMarkdown'
 import { filterKbTree, collectFolders, pageBreadcrumb, parseKbNodePath } from '../kbTree'
-import { isBlockConflict, mergeBlock } from '../kbConflict'
+import { isBlockConflict, mergeBlock, removeBlock as removeBlockFromList } from '../kbConflict'
 import { kbHandles } from '../kbHandles'
 import {
   encodeHello,
@@ -48,6 +48,16 @@ interface Props {
    * FRESH object per promotion so the seed fires once each time.
    */
   openTarget?: { spaceId: number; pageId: number } | null
+  /**
+   * Whether the KB tab is the ACTIVE mode. The view is always mounted (App
+   * keeps it in the DOM via `display:none`), so the workspace socket is gated
+   * on this flag: an idle client on another mode opens ZERO sockets, entering
+   * the KB tab opens exactly one, and leaving tears it down (the socket
+   * effect's cleanup closes the ws + clears timers). Prevents the always-
+   * mounted view from holding a permanent /ws/workspace socket + duplicate
+   * page-presence membership (#149).
+   */
+  active: boolean
 }
 
 const PING_MS = 25000
@@ -114,7 +124,7 @@ function initials(name: string): string {
  * multiplexed workspace socket (GET /ws/workspace, same-origin) for page
  * subscribe/edit/presence — REST covers spaces/tree/page + structural CRUD.
  */
-export function KbView({ teamHandle, onHandleChange, openTarget = null }: Props) {
+export function KbView({ teamHandle, onHandleChange, openTarget = null, active }: Props) {
   // Split identity (#150): `presenceHandle` (may be `anon`) drives the workspace
   // hello + page presence; `editHandle` (EMPTY when no handle is set) authors
   // block edits. `canEdit` gates every write affordance — read-only viewing
@@ -190,7 +200,12 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null }: Props)
   }
 
   // ---- socket lifecycle (page presence + live block deltas) ----
+  // Gated on `active` (#149): only the active KB mode holds a workspace socket.
+  // When `active` flips false the effect cleanup below runs (closes the ws,
+  // clears timers, nulls wsRef, setConnected(false)) — so leaving the tab tears
+  // the socket down; returning re-runs the effect and connects fresh.
   useEffect(() => {
+    if (!active) return
     const socketUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/workspace`
     let closed = false
     let ws: WebSocket | null = null
@@ -247,6 +262,21 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null }: Props)
           }
         } else if (msg.type === 'page.presence') {
           if (msg.pageId === openPageIdRef.current) setViewers(msg.viewers)
+        } else if (msg.type === 'page.delete') {
+          // A block was deleted elsewhere — converge by dropping it from the open
+          // page and cleaning up any local draft / open editor for that block.
+          if (msg.pageId !== openPageIdRef.current) return
+          const { blockId } = msg
+          setDetail((prev) =>
+            prev ? { ...prev, blocks: removeBlockFromList(prev.blocks, blockId) } : prev,
+          )
+          setDrafts((prev) => {
+            if (!(blockId in prev)) return prev
+            const next = { ...prev }
+            delete next[blockId]
+            return next
+          })
+          setEditingId((cur) => (cur === blockId ? null : cur))
         }
       }
       ws.onclose = () => {
@@ -266,7 +296,7 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null }: Props)
       wsRef.current = null
       setConnected(false)
     }
-  }, [presenceHandle, editHandle])
+  }, [presenceHandle, editHandle, active])
 
   // ---- load spaces once; default to the first space ----
   useEffect(() => {

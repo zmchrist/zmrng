@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import { config } from '../src/config.js'
-import { ChatManager, chatSystemPrompt, parseChatClientMsg, voiceSystemPrompt } from '../src/chatAgent.js'
+import {
+  ChatManager,
+  chatSystemPrompt,
+  parseChatClientMsg,
+  voiceSystemPrompt,
+  workflowDirective,
+} from '../src/chatAgent.js'
 import type { RunnerCallbacks, RunnerFactory, RunnerLike, SpawnOptions } from '../src/runner.js'
 
 // Drives the REAL ChatManager with an INJECTED FAKE RunnerFactory, so no test
@@ -100,6 +106,40 @@ describe('parseChatClientMsg', () => {
     ).toEqual({ type: 'start', model: 'sonnet', effort: 'medium', style: 'normal' })
   })
 
+  it('parses a well-formed start frame carrying a workflow preset', () => {
+    expect(
+      parseChatClientMsg(
+        JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full', workflow: 'grill' }),
+      ),
+    ).toEqual({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full', workflow: 'grill' })
+  })
+
+  it('defaults workflow to none by omitting it when the field is absent', () => {
+    // A pre-workflow frame (no `workflow`) round-trips byte-identical — the
+    // field is simply absent, and the server treats absence as `'none'`.
+    expect(
+      parseChatClientMsg(
+        JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full' }),
+      ),
+    ).toEqual({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full' })
+  })
+
+  it('omits an explicit workflow=none so a default frame stays byte-identical', () => {
+    expect(
+      parseChatClientMsg(
+        JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'normal', workflow: 'none' }),
+      ),
+    ).toEqual({ type: 'start', model: 'sonnet', effort: 'medium', style: 'normal' })
+  })
+
+  it('drops an ill-typed workflow value without throwing (tolerant parse)', () => {
+    expect(
+      parseChatClientMsg(
+        JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'normal', workflow: 42 }),
+      ),
+    ).toEqual({ type: 'start', model: 'sonnet', effort: 'medium', style: 'normal' })
+  })
+
   it('parses a well-formed input frame', () => {
     expect(parseChatClientMsg(JSON.stringify({ type: 'input', text: 'hi' }))).toEqual({
       type: 'input',
@@ -183,6 +223,32 @@ describe('ChatManager.create (fake runner factory)', () => {
     expect(prompt).not.toContain('/caveman')
   })
 
+  it('threads the workflow preset into the spawned system prompt', () => {
+    const mgr = new ChatManager(factory)
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal', workflow: 'grill' }, noopCallbacks())
+    const prompt = created[0].opts.systemPrompt ?? ''
+    expect(prompt).toContain('WORKING MODE:')
+    expect(prompt).toContain('GRILL mode')
+  })
+
+  it('appends no working-mode block when workflow is omitted (defaults to none)', () => {
+    const mgr = new ChatManager(factory)
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'caveman-full' }, noopCallbacks())
+    expect(created[0].opts.systemPrompt ?? '').not.toContain('WORKING MODE:')
+  })
+
+  it('leaves the voice surface unaffected by a workflow preset', () => {
+    const mgr = new ChatManager(factory)
+    mgr.create(
+      { model: 'sonnet', effort: 'medium', style: 'normal', workflow: 'grill', voice: true },
+      noopCallbacks(),
+    )
+    const prompt = created[0].opts.systemPrompt ?? ''
+    // Voice uses voiceSystemPrompt, which never carries a working-mode block.
+    expect(prompt).toContain('spoken')
+    expect(prompt).not.toContain('WORKING MODE:')
+  })
+
   it('routes send/interrupt/kill to the returned session', () => {
     const mgr = new ChatManager(factory)
     const session = mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
@@ -256,6 +322,66 @@ describe('chatSystemPrompt', () => {
     expect(prompt).not.toMatch(/ZMRNG_/)
     expect(prompt).not.toMatch(/pull request/i)
     expect(prompt).not.toMatch(/\bbranch\b/i)
+  })
+
+  it('appends the grill working-mode block when the grill workflow is selected', () => {
+    const prompt = chatSystemPrompt('normal', '/tmp/projects', 'grill')
+    expect(prompt).toContain('WORKING MODE:')
+    expect(prompt).toContain('GRILL mode')
+    expect(prompt).toContain('shared')
+  })
+
+  it('appends the teach-me working-mode block when the teach-me workflow is selected', () => {
+    const prompt = chatSystemPrompt('normal', '/tmp/projects', 'teach-me')
+    expect(prompt).toContain('WORKING MODE:')
+    expect(prompt).toContain('TEACH-ME mode')
+  })
+
+  it('omits any working-mode block for the none workflow (and the default arg)', () => {
+    expect(chatSystemPrompt('normal', '/tmp/projects', 'none')).not.toContain('WORKING MODE:')
+    // Byte-identity: omitting the workflow arg equals passing 'none'.
+    expect(chatSystemPrompt('caveman-full', '/tmp/projects')).toBe(
+      chatSystemPrompt('caveman-full', '/tmp/projects', 'none'),
+    )
+  })
+
+  it('composes the workflow block WITH the style block (both append)', () => {
+    // caveman + grill together: the caveman register AND the grill mode coexist.
+    const prompt = chatSystemPrompt('caveman-full', '/tmp/projects', 'grill')
+    expect(prompt).toContain('COMMUNICATION STYLE:')
+    expect(prompt).toContain('WORKING MODE:')
+    expect(prompt).toContain('GRILL mode')
+  })
+})
+
+describe('workflowDirective', () => {
+  it('returns an empty string for none (appends nothing)', () => {
+    expect(workflowDirective('none')).toBe('')
+  })
+
+  it('returns an empty string for code-review (reserved for #159)', () => {
+    expect(workflowDirective('code-review')).toBe('')
+  })
+
+  it('emits a grill working-mode block encoding the grill contract', () => {
+    const block = workflowDirective('grill')
+    expect(block).toContain('WORKING MODE:')
+    expect(block).toContain('GRILL mode')
+    // Batch independent / serialize dependent questions.
+    expect(block.toLowerCase()).toContain('batch')
+    // Recommend an answer for every question.
+    expect(block.toLowerCase()).toContain('recommend')
+    // Look facts up, do not ask.
+    expect(block.toLowerCase()).toContain('look')
+    // Do not enact until shared understanding.
+    expect(block.toLowerCase()).toContain('shared')
+  })
+
+  it('emits a teach-me working-mode block encoding a teaching register', () => {
+    const block = workflowDirective('teach-me')
+    expect(block).toContain('WORKING MODE:')
+    expect(block).toContain('TEACH-ME mode')
+    expect(block.toLowerCase()).toContain('explain')
   })
 })
 

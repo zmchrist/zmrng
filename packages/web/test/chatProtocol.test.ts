@@ -35,6 +35,22 @@ describe('client encoders', () => {
     })
   })
 
+  it('encodeStart carries the workflow preset when a non-none one is chosen', () => {
+    expect(JSON.parse(encodeStart('sonnet', 'medium', 'caveman-full', '', false, 'grill'))).toEqual({
+      type: 'start',
+      model: 'sonnet',
+      effort: 'medium',
+      style: 'caveman-full',
+      workflow: 'grill',
+    })
+  })
+
+  it('encodeStart omits workflow when none/absent — byte-identical to the pre-workflow frame', () => {
+    const base = JSON.stringify({ type: 'start', model: 'sonnet', effort: 'medium', style: 'caveman-full' })
+    expect(encodeStart('sonnet', 'medium', 'caveman-full')).toBe(base)
+    expect(encodeStart('sonnet', 'medium', 'caveman-full', '', false, 'none')).toBe(base)
+  })
+
   it('encodeStart carries the voice flag when set (voice surface opts in)', () => {
     expect(JSON.parse(encodeStart('sonnet', 'medium', 'normal', 'repo-a', true))).toEqual({
       type: 'start',

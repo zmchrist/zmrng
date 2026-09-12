@@ -395,6 +395,7 @@ export default function App() {
               onSendToZmrng={onSendToZmrng}
               onOpenKbPage={onOpenKbPage}
               onNewVersion={onNewVersion}
+              active={mode === 'team'}
             />
           </div>
 
@@ -406,6 +407,7 @@ export default function App() {
               teamHandle={settings.teamHandle}
               onHandleChange={(h) => saveSettings({ teamHandle: h })}
               openTarget={kbTarget}
+              active={mode === 'kb'}
             />
           </div>
         </div>
