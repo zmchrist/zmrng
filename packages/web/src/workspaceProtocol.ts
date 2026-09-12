@@ -4,11 +4,10 @@
 // `parseWorkspaceClientMsg` accepts; `parseWorkspaceServerMsg` is a tolerant
 // guard over the server -> client frames (mirrors `chatProtocol.ts`).
 
-import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN, KB_BLOCK_KINDS } from './types'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from './types'
 import type {
   Channel,
-  KbBlock,
-  KbBlockKind,
+  KbPage,
   Message,
   ReactionSummary,
   WorkspaceMember,
@@ -92,27 +91,17 @@ export function encodePageUnsubscribe(pageId: number): string {
 }
 
 /**
- * Encode a `page.edit` frame — a block delta on save. `blockId: null` creates a
- * new block (appended server-side); a non-null `blockId` updates that block. The
- * `body` is clamped to `MAX_MESSAGE_BODY_LEN` but NOT trimmed (block whitespace
- * is meaningful); `author` is trimmed + clamped (the client mirror of the
- * server's guard). A socket edit is always a human author.
+ * Encode a `page.edit` frame — a whole-body autosave. The page is one
+ * continuous field (no per-block delta), so this simply replaces `body`. It is
+ * clamped to `MAX_MESSAGE_BODY_LEN` but NOT trimmed (leading/trailing
+ * whitespace is meaningful markdown); `author` is trimmed + clamped (the
+ * client mirror of the server's guard). A socket edit is always a human author.
  */
-export function encodePageEdit(
-  pageId: number,
-  blockId: number | null,
-  kind: KbBlockKind,
-  body: string,
-  meta: string | null,
-  author: string,
-): string {
+export function encodePageEdit(pageId: number, body: string, author: string): string {
   return JSON.stringify({
     type: 'page.edit',
     pageId,
-    blockId,
-    kind,
     body: body.slice(0, MAX_MESSAGE_BODY_LEN),
-    meta,
     author: author.trim().slice(0, MAX_DISPLAY_NAME_LEN),
   })
 }
@@ -191,36 +180,34 @@ function asMessage(v: unknown): Message | undefined {
   }
 }
 
-/** Narrow one untyped block object to a `KbBlock`, or `undefined` (T2). */
-function asBlock(v: unknown): KbBlock | undefined {
+/** Narrow one untyped page object to a `KbPage`, or `undefined` (T2). */
+function asPage(v: unknown): KbPage | undefined {
   const obj = asRecord(v)
   if (!obj) return undefined
-  const kind = obj.kind
-  if (typeof kind !== 'string' || !(KB_BLOCK_KINDS as readonly string[]).includes(kind))
-    return undefined
-  const meta = obj.meta
-  if (meta !== null && typeof meta !== 'string') return undefined
+  const folderId = obj.folderId
+  if (folderId !== null && typeof folderId !== 'number') return undefined
   if (
     typeof obj.id !== 'number' ||
-    typeof obj.pageId !== 'number' ||
-    typeof obj.ord !== 'number' ||
+    typeof obj.spaceId !== 'number' ||
+    typeof obj.title !== 'string' ||
     typeof obj.body !== 'string' ||
-    typeof obj.updatedAt !== 'string' ||
-    typeof obj.updatedBy !== 'string'
+    typeof obj.author !== 'string' ||
+    typeof obj.updatedBy !== 'string' ||
+    typeof obj.createdAt !== 'string' ||
+    typeof obj.updatedAt !== 'string'
   ) {
     return undefined
   }
   return {
     id: obj.id,
-    pageId: obj.pageId,
-    ord: obj.ord,
-    // `includes` above validates membership but doesn't narrow the `string`;
-    // the cast is safe because we just confirmed `kind` is a KbBlockKind.
-    kind: kind as KbBlockKind,
+    spaceId: obj.spaceId,
+    folderId,
+    title: obj.title,
     body: obj.body,
-    meta,
-    updatedAt: obj.updatedAt,
+    author: obj.author,
     updatedBy: obj.updatedBy,
+    createdAt: obj.createdAt,
+    updatedAt: obj.updatedAt,
   }
 }
 
@@ -271,9 +258,9 @@ export function parseWorkspaceServerMsg(raw: string): WsWorkspaceServerMsg | und
     case 'new-version':
       return typeof obj.sha === 'string' ? { type: 'new-version', sha: obj.sha } : undefined
     case 'page.update': {
-      const block = asBlock(obj.block)
-      return typeof obj.pageId === 'number' && block
-        ? { type: 'page.update', pageId: obj.pageId, block }
+      const page = asPage(obj.page)
+      return typeof obj.pageId === 'number' && page
+        ? { type: 'page.update', pageId: obj.pageId, page }
         : undefined
     }
     case 'page.presence': {
@@ -283,10 +270,6 @@ export function parseWorkspaceServerMsg(raw: string): WsWorkspaceServerMsg | und
         .filter((m): m is WorkspaceMember => m !== undefined)
       return { type: 'page.presence', pageId: obj.pageId, viewers }
     }
-    case 'page.delete':
-      return typeof obj.pageId === 'number' && typeof obj.blockId === 'number'
-        ? { type: 'page.delete', pageId: obj.pageId, blockId: obj.blockId }
-        : undefined
     default:
       return undefined
   }

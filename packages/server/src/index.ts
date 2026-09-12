@@ -23,7 +23,7 @@ import { runPreflight } from './preflight.js'
 import { parseStreamedText } from './chat.js'
 import { readUiState, writeUiState } from './uiState.js'
 import { resolvePageTitle, buildPageBody } from './kbFromMessage.js'
-import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE, KB_BLOCK_KINDS } from './types.js'
+import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE } from './types.js'
 import type {
   WsEvent,
   EffortLevel,
@@ -42,12 +42,9 @@ import type {
   WorkspaceMember,
   Space,
   KbTreeNode,
-  KbPageDetail,
   KbFolder,
   KbPage,
-  KbBlock,
-  KbBlockKind,
-  KbRevision,
+  KbPageRevision,
 } from './types.js'
 
 function errMsg(e: unknown): string {
@@ -449,10 +446,14 @@ app.get('/api/channels/:id/messages', (req): Message[] => {
 })
 
 // ===================================================================
-// Knowledge Base (KB) — spaces / folders / pages / blocks / revisions (T1 #140)
-// Server-side data foundation. REST CRUD only; NO WebSocket frames (T2), NO UI
-// (T3). Every path/body param is validated (never trust the wire); an unknown
-// space/folder/page/block id is a 404. Structured Pino logging only.
+// Knowledge Base (KB) — spaces / folders / pages (T1 #140, single-field editor)
+// Server-side data foundation. A page is ONE continuous plaintext/markdown
+// field — there is no block model. REST covers spaces/folders/pages CRUD +
+// page history; the live body autosave itself flows over the workspace
+// WebSocket's `page.edit`/`page.update` frames (see `PageManager.savePage`),
+// mirroring how channel messages are REST-scrollback + socket-live. Every
+// path/body param is validated (never trust the wire); an unknown
+// space/folder/page/revision id is a 404. Structured Pino logging only.
 // ===================================================================
 
 /** Parse a `:id`-style route param to a positive integer, or null if invalid. */
@@ -479,16 +480,6 @@ function kbNullableId(raw: unknown): number | null | undefined {
   return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
-/** Validate a block kind off the wire. */
-function kbKind(raw: unknown): KbBlockKind | undefined {
-  return KB_BLOCK_KINDS.includes(raw as KbBlockKind) ? (raw as KbBlockKind) : undefined
-}
-
-/** Nullable JSON meta string: a string, or null (omitted → null). */
-function kbMeta(raw: unknown): string | null {
-  return typeof raw === 'string' ? raw : null
-}
-
 // All KB spaces (the three seeded POC spaces + any created later). Always 200.
 app.get('/api/spaces', (): Space[] => db.listSpaces())
 
@@ -502,15 +493,15 @@ app.get('/api/spaces/:id/tree', (req, reply): KbTreeNode[] | undefined => {
   return db.spaceTree(spaceId)
 })
 
-// One page plus its ordered blocks. 404 on unknown page.
-app.get('/api/pages/:id', (req, reply): KbPageDetail | undefined => {
+// One page (its whole body is the page — no separate blocks). 404 on unknown page.
+app.get('/api/pages/:id', (req, reply): KbPage | undefined => {
   const pageId = kbId((req.params as { id: string }).id)
   const page = pageId !== null ? db.getPage(pageId) : undefined
   if (!page) {
     reply.code(404).send({ error: 'page not found' })
     return undefined
   }
-  return { page, blocks: db.listBlocks(page.id) }
+  return page
 })
 
 // Create a folder in a space. 404 unknown space; 400 blank name / bad parentId.
@@ -593,6 +584,8 @@ app.delete('/api/folders/:id', (req, reply) => {
 })
 
 // Create a page in a space. 404 unknown space/folder; 400 blank title/author.
+// A fresh page starts with an empty body — the notepad-style single field is
+// ready to type into immediately, no separate "add content" step.
 app.post('/api/spaces/:id/pages', (req, reply): KbPage | undefined => {
   const spaceId = kbId((req.params as { id: string }).id)
   if (spaceId === null || !db.getSpace(spaceId)) {
@@ -626,8 +619,8 @@ app.post('/api/spaces/:id/pages', (req, reply): KbPage | undefined => {
 
 // Promote a team-channel message into a durable KB page (T4, #154). Looks up the
 // message + its channel server-side and creates a NORMAL page in space :id whose
-// first block carries the message body + a canonical, SERVER-BUILT provenance
-// line (channel name + message id). Provenance is never trusted from the client.
+// body carries the message body + a canonical, SERVER-BUILT provenance line
+// (channel name + message id). Provenance is never trusted from the client.
 // 404 unknown space/message/folder; 400 blank/invalid ids or cross-space folder.
 app.post('/api/spaces/:id/pages/from-message', (req, reply): KbPage | undefined => {
   const spaceId = kbId((req.params as { id: string }).id)
@@ -667,19 +660,17 @@ app.post('/api/spaces/:id/pages/from-message', (req, reply): KbPage | undefined 
     return undefined
   }
   // Title is an editable label (client value wins, else derived server-side).
-  // The page author + block editor are the canonical message author.
+  // The page author is the canonical message author.
   const title = resolvePageTitle(kbName(body?.title), message.body)
   const now = new Date().toISOString()
-  const page = db.createPage(spaceId, folderId, title, message.author, now)
-  db.createBlock({
-    pageId: page.id,
-    ord: null,
-    kind: 'text',
-    body: buildPageBody(message.body, channel.name, message.id),
-    meta: null,
-    updatedBy: message.author,
+  const page = db.createPage(
+    spaceId,
+    folderId,
+    title,
+    message.author,
     now,
-  })
+    buildPageBody(message.body, channel.name, message.id),
+  )
   app.log.info(
     { pageId: page.id, spaceId, messageId, channelId: channel.id },
     'kb page created from message',
@@ -725,7 +716,7 @@ app.patch('/api/pages/:id', (req, reply): KbPage | undefined => {
   return result
 })
 
-// Delete a page (and its blocks + revisions). 404 on unknown page.
+// Delete a page (and its revisions). 404 on unknown page.
 app.delete('/api/pages/:id', (req, reply) => {
   const id = kbId((req.params as { id: string }).id)
   if (id === null || !db.getPage(id)) {
@@ -736,128 +727,19 @@ app.delete('/api/pages/:id', (req, reply) => {
   return reply.code(204).send()
 })
 
-// Append a block to a page. 404 unknown page; 400 bad kind / non-string body.
-app.post('/api/pages/:id/blocks', (req, reply): KbBlock | undefined => {
-  const pageId = kbId((req.params as { id: string }).id)
-  if (pageId === null || !db.getPage(pageId)) {
+// Every revision of a page, oldest first — backs the History panel's undo
+// affordance. 404 on unknown page.
+app.get('/api/pages/:id/revisions', (req, reply): KbPageRevision[] | undefined => {
+  const id = kbId((req.params as { id: string }).id)
+  if (id === null || !db.getPage(id)) {
     reply.code(404).send({ error: 'page not found' })
     return undefined
   }
-  const body = req.body as
-    | { kind?: unknown; body?: unknown; meta?: unknown; updatedBy?: unknown }
-    | undefined
-  const kind = kbKind(body?.kind)
-  const updatedBy = kbName(body?.updatedBy)
-  if (!kind || typeof body?.body !== 'string' || !updatedBy) {
-    reply.code(400).send({ error: 'kind, body and updatedBy are required' })
-    return undefined
-  }
-  const block = db.createBlock({
-    pageId,
-    ord: null,
-    kind,
-    body: body.body,
-    meta: kbMeta(body.meta),
-    updatedBy,
-    now: new Date().toISOString(),
-  })
-  app.log.info({ blockId: block.id, pageId }, 'kb block created')
-  return block
+  return db.listPageRevisions(id)
 })
 
-// Update a block (snapshots the prior state into a revision first). 404 unknown.
-app.patch('/api/blocks/:id', (req, reply): KbBlock | undefined => {
-  const id = kbId((req.params as { id: string }).id)
-  if (id === null || !db.getBlock(id)) {
-    reply.code(404).send({ error: 'block not found' })
-    return undefined
-  }
-  const body = req.body as
-    | { kind?: unknown; body?: unknown; meta?: unknown; updatedBy?: unknown }
-    | undefined
-  const updatedBy = kbName(body?.updatedBy)
-  if (!updatedBy) {
-    reply.code(400).send({ error: 'updatedBy is required' })
-    return undefined
-  }
-  const patch: { kind?: KbBlockKind; body?: string; meta?: string | null } = {}
-  if (body?.kind !== undefined) {
-    const kind = kbKind(body.kind)
-    if (!kind) {
-      reply.code(400).send({ error: 'invalid kind' })
-      return undefined
-    }
-    patch.kind = kind
-  }
-  if (body?.body !== undefined) {
-    if (typeof body.body !== 'string') {
-      reply.code(400).send({ error: 'invalid body' })
-      return undefined
-    }
-    patch.body = body.body
-  }
-  if (body && 'meta' in body) {
-    patch.meta = kbMeta(body.meta)
-  }
-  const block = db.updateBlock(id, patch, updatedBy, new Date().toISOString())
-  app.log.info({ blockId: id }, 'kb block updated')
-  return block
-})
-
-// Delete a block (and its revisions). 404 on unknown block. Fans a live
-// `page.delete` tombstone (#151) so the block converges (is removed) on every
-// subscribed viewer of the page without a reload — the delete analogue of the
-// `page.update` fan-out. The page id is resolved BEFORE deleting so the frame
-// carries the owning page; the PageManager only fans for a real block on a real
-// page. Delete stays a REST call — no new client frame.
-app.delete('/api/blocks/:id', (req, reply) => {
-  const id = kbId((req.params as { id: string }).id)
-  if (id === null || !db.getBlock(id)) {
-    return reply.code(404).send({ error: 'block not found' })
-  }
-  const pageId = db.getBlockPageId(id)
-  if (pageId !== undefined) {
-    // Deletes the block AND fans the page.delete tombstone to subscribers.
-    pages.deleteBlock(pageId, id)
-  } else {
-    // Defensive fallback (a block that passed getBlock always has a page):
-    // keep the 204 contract even if the owning page can't be resolved.
-    db.deleteBlock(id)
-  }
-  app.log.info({ blockId: id }, 'kb block deleted')
-  return reply.code(204).send()
-})
-
-// Reorder a page's blocks. 404 unknown page; 400 non-array / bad ids.
-app.post('/api/pages/:id/blocks/reorder', (req, reply): KbBlock[] | undefined => {
-  const pageId = kbId((req.params as { id: string }).id)
-  if (pageId === null || !db.getPage(pageId)) {
-    reply.code(404).send({ error: 'page not found' })
-    return undefined
-  }
-  const body = req.body as { orderedIds?: unknown } | undefined
-  const raw = body?.orderedIds
-  if (!Array.isArray(raw) || !raw.every((v) => Number.isInteger(v) && (v as number) > 0)) {
-    reply.code(400).send({ error: 'orderedIds must be an array of positive integers' })
-    return undefined
-  }
-  const blocks = db.reorderBlocks(pageId, raw as number[], new Date().toISOString())
-  app.log.info({ pageId }, 'kb blocks reordered')
-  return blocks
-})
-
-// Every revision of a block, oldest first. 404 on unknown block.
-app.get('/api/blocks/:id/revisions', (req, reply): KbRevision[] | undefined => {
-  const id = kbId((req.params as { id: string }).id)
-  if (id === null || !db.getBlock(id)) {
-    reply.code(404).send({ error: 'block not found' })
-    return undefined
-  }
-  return db.listRevisions(id)
-})
-
-// Restore a revision back onto its block (itself recording a revision). 404/400.
-app.post('/api/revisions/:id/restore', (req, reply): KbBlock | undefined => {
+// Restore a revision back onto its page (itself recording a revision). 404/400.
+app.post('/api/page-revisions/:id/restore', (req, reply): KbPage | undefined => {
   const id = kbId((req.params as { id: string }).id)
   if (id === null) {
     reply.code(404).send({ error: 'revision not found' })
@@ -869,14 +751,15 @@ app.post('/api/revisions/:id/restore', (req, reply): KbBlock | undefined => {
     reply.code(400).send({ error: 'author is required' })
     return undefined
   }
-  const block = db.restoreRevision(id, author, new Date().toISOString())
-  if (!block) {
+  const page = db.restorePageRevision(id, author, new Date().toISOString())
+  if (!page) {
     reply.code(404).send({ error: 'revision not found' })
     return undefined
   }
-  app.log.info({ revisionId: id, blockId: block.id }, 'kb revision restored')
-  return block
+  app.log.info({ revisionId: id, pageId: page.id }, 'kb revision restored')
+  return page
 })
+
 
 // Directory listing (not contents) of a task's worktree, for the Workspace file
 // tree. Always 200: a missing task / worktree yields an empty tree, never a 500.
@@ -1393,28 +1276,21 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
           })
         }
       } else if (msg.type === 'page.subscribe') {
-        // Register interest in a page's live block fan-out + viewer presence.
-        // Requires an established roster identity (from `hello`); a page frame
-        // before `hello` is ignored (no member to attribute presence to).
+        // Register interest in a page's live whole-body fan-out + viewer
+        // presence. Requires an established roster identity (from `hello`); a
+        // page frame before `hello` is ignored (no member to attribute
+        // presence to).
         if (member) pages.subscribe(socket, msg.pageId, member)
       } else if (msg.type === 'page.unsubscribe') {
         pages.unsubscribe(socket, msg.pageId)
       } else if (msg.type === 'page.edit') {
-        // Persist a block delta (create when blockId is null, else update) and
-        // fan a `page.update` out live to that page's subscribers. A socket
-        // `page.edit` is ALWAYS a human author — the parser already carries the
-        // self-asserted author; the agent block path is out of T2 scope. A bad
-        // page / mismatched block is a no-op inside saveBlock().
-        const stored = pages.saveBlock(
-          msg.pageId,
-          msg.blockId,
-          msg.kind,
-          msg.body,
-          msg.meta,
-          msg.author,
-        )
+        // Autosave the page's whole body and fan a `page.update` out live to
+        // that page's subscribers. A socket `page.edit` is ALWAYS a human
+        // author — the parser already carries the self-asserted author. An
+        // unknown page is a no-op inside savePage().
+        const stored = pages.savePage(msg.pageId, msg.body, msg.author)
         app.log.info(
-          { pageId: msg.pageId, blockId: stored?.id ?? msg.blockId, saved: stored !== undefined },
+          { pageId: msg.pageId, saved: stored !== undefined },
           'kb page.edit',
         )
       }

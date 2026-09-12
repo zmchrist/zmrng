@@ -24,12 +24,18 @@ import type {
   Space,
   KbFolder,
   KbPage,
-  KbBlock,
-  KbBlockKind,
-  KbRevision,
+  KbPageRevision,
   KbTreeNode,
 } from './types.js'
 import { GENERAL_CHANNEL_NAME, KB_SEED_SPACES } from './types.js'
+
+/**
+ * Minimum gap between throttled `page_revisions` snapshots for one page (30s).
+ * Continuous per-keystroke autosave would otherwise record a revision on every
+ * save; this caps history capture to roughly "once per burst of edits" while
+ * still preserving undo history (see `Db.updatePageBody`).
+ */
+const PAGE_REVISION_THROTTLE_MS = 30_000
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -148,32 +154,21 @@ CREATE TABLE IF NOT EXISTS pages (
   space_id INTEGER NOT NULL,
   folder_id INTEGER,
   title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
   author TEXT NOT NULL,
+  updated_by TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pages_space ON pages(space_id, folder_id);
-CREATE TABLE IF NOT EXISTS blocks (
+CREATE TABLE IF NOT EXISTS page_revisions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   page_id INTEGER NOT NULL,
-  ord INTEGER NOT NULL,
-  kind TEXT NOT NULL,
   body TEXT NOT NULL,
-  meta TEXT,
-  updated_at TEXT NOT NULL,
-  updated_by TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_blocks_page ON blocks(page_id, ord);
-CREATE TABLE IF NOT EXISTS revisions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  block_id INTEGER NOT NULL,
-  body TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  meta TEXT,
   author TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_revisions_block ON revisions(block_id, id);
+CREATE INDEX IF NOT EXISTS idx_page_revisions_page ON page_revisions(page_id, id);
 `
 
 interface TaskRow {
@@ -417,28 +412,17 @@ interface PageRow {
   space_id: number
   folder_id: number | null
   title: string
+  body: string
   author: string
+  updated_by: string
   created_at: string
   updated_at: string
 }
 
-interface BlockRow {
+interface PageRevisionRow {
   id: number
   page_id: number
-  ord: number
-  kind: string
   body: string
-  meta: string | null
-  updated_at: string
-  updated_by: string
-}
-
-interface RevisionRow {
-  id: number
-  block_id: number
-  body: string
-  kind: string
-  meta: string | null
   author: string
   created_at: string
 }
@@ -469,32 +453,19 @@ function rowToPage(r: PageRow): KbPage {
     spaceId: r.space_id,
     folderId: r.folder_id,
     title: r.title,
+    body: r.body,
     author: r.author,
+    updatedBy: r.updated_by,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
 }
 
-function rowToBlock(r: BlockRow): KbBlock {
+function rowToPageRevision(r: PageRevisionRow): KbPageRevision {
   return {
     id: r.id,
     pageId: r.page_id,
-    ord: r.ord,
-    kind: r.kind as KbBlockKind,
     body: r.body,
-    meta: r.meta,
-    updatedAt: r.updated_at,
-    updatedBy: r.updated_by,
-  }
-}
-
-function rowToRevision(r: RevisionRow): KbRevision {
-  return {
-    id: r.id,
-    blockId: r.block_id,
-    body: r.body,
-    kind: r.kind as KbBlockKind,
-    meta: r.meta,
     author: r.author,
     createdAt: r.created_at,
   }
@@ -551,6 +522,7 @@ export class Db {
     this.db.pragma('wal_autocheckpoint = 1000')
     this.db.exec(SCHEMA)
     this.ensureColumns()
+    this.ensurePageColumns()
     this.seedGeneralChannel()
     this.seedKbSpaces()
   }
@@ -637,6 +609,25 @@ export class Db {
     ]
     for (const [name, decl] of add) {
       if (!cols.has(name)) this.db.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${decl}`)
+    }
+  }
+
+  /**
+   * Idempotently add the `pages.body` / `pages.updated_by` columns for a
+   * pre-single-field-KB `zmrng.db` (the block-model era stored a page's
+   * content in a separate `blocks` table). Additive only, same policy as
+   * `ensureColumns()` — a fresh `SCHEMA` already declares both columns, so
+   * this is a no-op there.
+   */
+  private ensurePageColumns(): void {
+    const cols = new Set(
+      (this.db.prepare(`PRAGMA table_info(pages)`).all() as { name: string }[]).map(
+        (c) => c.name,
+      ),
+    )
+    if (!cols.has('body')) this.db.exec(`ALTER TABLE pages ADD COLUMN body TEXT NOT NULL DEFAULT ''`)
+    if (!cols.has('updated_by')) {
+      this.db.exec(`ALTER TABLE pages ADD COLUMN updated_by TEXT NOT NULL DEFAULT ''`)
     }
   }
 
@@ -1162,12 +1153,12 @@ export class Db {
   /**
    * Delete a folder and everything it contains, recursively, in one transaction.
    *
-   * Cascade semantics (matches `deletePage`, which cascades page→blocks→revisions):
+   * Cascade semantics (matches `deletePage`, which cascades page→revisions):
    * the target folder, all of its descendant subfolders (at any depth), every page
-   * in any of those folders, and each page's blocks + revisions are removed. This
+   * in any of those folders, and each page's revisions are removed. This
    * leaves no orphan rows pointing at a deleted parent_id/folder_id and matches the
    * user expectation that deleting a folder removes its contents. The delete order is
-   * revisions → blocks → pages → folders, and the whole thing runs inside a single
+   * revisions → pages → folders, and the whole thing runs inside a single
    * better-sqlite3 transaction so any failure rolls back cleanly.
    */
   deleteFolder(id: number): void {
@@ -1183,7 +1174,7 @@ export class Db {
         frontier = children.map((c) => c.id)
         folderIds.push(...frontier)
       }
-      // For every folder in the set, cascade its pages → blocks → revisions.
+      // For every folder in the set, cascade its pages → revisions.
       for (const fid of folderIds) {
         const pageIds = (
           this.db.prepare('SELECT id FROM pages WHERE folder_id = ?').all(fid) as {
@@ -1191,15 +1182,7 @@ export class Db {
           }[]
         ).map((p) => p.id)
         for (const pid of pageIds) {
-          const blockIds = (
-            this.db.prepare('SELECT id FROM blocks WHERE page_id = ?').all(pid) as {
-              id: number
-            }[]
-          ).map((b) => b.id)
-          for (const bid of blockIds) {
-            this.db.prepare('DELETE FROM revisions WHERE block_id = ?').run(bid)
-          }
-          this.db.prepare('DELETE FROM blocks WHERE page_id = ?').run(pid)
+          this.db.prepare('DELETE FROM page_revisions WHERE page_id = ?').run(pid)
           this.db.prepare('DELETE FROM pages WHERE id = ?').run(pid)
         }
       }
@@ -1227,26 +1210,30 @@ export class Db {
     return row ? rowToPage(row) : undefined
   }
 
-  /** Create a page. `folderId` null = space root. */
+  /** Create a page. `folderId` null = space root. `body` defaults to empty
+   *  (a fresh notepad-style page starts blank, ready to type into). */
   createPage(
     spaceId: number,
     folderId: number | null,
     title: string,
     author: string,
     now: string,
+    body = '',
   ): KbPage {
     const info = this.db
       .prepare(
-        `INSERT INTO pages (space_id, folder_id, title, author, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO pages (space_id, folder_id, title, body, author, updated_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(spaceId, folderId, title, author, now, now)
+      .run(spaceId, folderId, title, body, author, author, now, now)
     return {
       id: Number(info.lastInsertRowid),
       spaceId,
       folderId,
       title,
+      body,
       author,
+      updatedBy: author,
       createdAt: now,
       updatedAt: now,
     }
@@ -1268,187 +1255,85 @@ export class Db {
     return this.getPage(id)
   }
 
-  /** Delete a page and its blocks + revisions (owned children). */
+  /** Delete a page and its revisions (owned children). */
   deletePage(id: number): void {
     const run = this.db.transaction((pageId: number) => {
-      const blockIds = (
-        this.db.prepare('SELECT id FROM blocks WHERE page_id = ?').all(pageId) as {
-          id: number
-        }[]
-      ).map((b) => b.id)
-      for (const bid of blockIds) {
-        this.db.prepare('DELETE FROM revisions WHERE block_id = ?').run(bid)
-      }
-      this.db.prepare('DELETE FROM blocks WHERE page_id = ?').run(pageId)
+      this.db.prepare('DELETE FROM page_revisions WHERE page_id = ?').run(pageId)
       this.db.prepare('DELETE FROM pages WHERE id = ?').run(pageId)
     })
     run(id)
   }
 
-  /** Every block of a page, ordered by `ord` then id (stable). */
-  listBlocks(pageId: number): KbBlock[] {
-    const rows = this.db
-      .prepare('SELECT * FROM blocks WHERE page_id = ? ORDER BY ord ASC, id ASC')
-      .all(pageId) as BlockRow[]
-    return rows.map(rowToBlock)
-  }
-
-  /** One block by id, or `undefined` if it does not exist. */
-  getBlock(id: number): KbBlock | undefined {
-    const row = this.db.prepare('SELECT * FROM blocks WHERE id = ?').get(id) as
-      | BlockRow
-      | undefined
-    return row ? rowToBlock(row) : undefined
-  }
-
-  /** The page a block belongs to, or `undefined` — used to validate the wire. */
-  getBlockPageId(blockId: number): number | undefined {
-    const row = this.db.prepare('SELECT page_id FROM blocks WHERE id = ?').get(blockId) as
-      | { page_id: number }
-      | undefined
-    return row?.page_id
-  }
-
   /**
-   * Create a block. `ord` null appends at the end of the page (max ord + 1).
-   * `meta` is a nullable JSON string (heading level / checklist checked).
+   * Autosave a page's whole body (the single-field editor's write path).
+   * BEFORE overwriting, throttles a prior-body snapshot into `page_revisions`:
+   * a snapshot is captured only when none exists yet, or the last one is older
+   * than `PAGE_REVISION_THROTTLE_MS` — so continuous per-keystroke autosave
+   * does not spam a revision on every save, while undo history still survives.
+   * Returns the updated page, or `undefined` if it does not exist.
    */
-  createBlock(input: {
-    pageId: number
-    ord: number | null
-    kind: KbBlockKind
-    body: string
-    meta: string | null
-    updatedBy: string
-    now: string
-  }): KbBlock {
-    const ord = input.ord ?? this.nextBlockOrd(input.pageId)
-    const info = this.db
-      .prepare(
-        `INSERT INTO blocks (page_id, ord, kind, body, meta, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(input.pageId, ord, input.kind, input.body, input.meta, input.now, input.updatedBy)
-    return {
-      id: Number(info.lastInsertRowid),
-      pageId: input.pageId,
-      ord,
-      kind: input.kind,
-      body: input.body,
-      meta: input.meta,
-      updatedAt: input.now,
-      updatedBy: input.updatedBy,
-    }
-  }
-
-  /** Next append ord for a page (max existing ord + 1, or 0 when empty). */
-  private nextBlockOrd(pageId: number): number {
-    const row = this.db
-      .prepare('SELECT COALESCE(MAX(ord), -1) AS m FROM blocks WHERE page_id = ?')
-      .get(pageId) as { m: number }
-    return row.m + 1
-  }
-
-  /**
-   * Update a block. FIRST snapshots the PRIOR block state into `revisions`
-   * (body/kind/meta + its last editor as `author`), THEN applies the patch —
-   * this ordering is the load-bearing revision-on-update property backing the
-   * restore-from-revision conflict UX. Only the provided fields change; omitted
-   * fields keep their current value (`meta` uses `undefined` to mean "unchanged"
-   * so an explicit `null` can still clear it). Returns the updated block.
-   */
-  updateBlock(
-    id: number,
-    patch: { kind?: KbBlockKind; body?: string; meta?: string | null },
-    updatedBy: string,
-    now: string,
-  ): KbBlock | undefined {
-    const run = this.db.transaction((): KbBlock | undefined => {
-      const existing = this.db.prepare('SELECT * FROM blocks WHERE id = ?').get(id) as
-        | BlockRow
+  updatePageBody(id: number, body: string, author: string, now: string): KbPage | undefined {
+    const run = this.db.transaction((): KbPage | undefined => {
+      const existing = this.db.prepare('SELECT * FROM pages WHERE id = ?').get(id) as
+        | PageRow
         | undefined
       if (!existing) return undefined
-      this.insertRevision(existing, now)
-      const kind = patch.kind ?? (existing.kind as KbBlockKind)
-      const body = patch.body ?? existing.body
-      const meta = patch.meta !== undefined ? patch.meta : existing.meta
+      const last = this.db
+        .prepare('SELECT created_at FROM page_revisions WHERE page_id = ? ORDER BY id DESC LIMIT 1')
+        .get(id) as { created_at: string } | undefined
+      const sinceMs = new Date(last?.created_at ?? existing.updated_at).getTime()
+      const dueForSnapshot = !last || new Date(now).getTime() - sinceMs >= PAGE_REVISION_THROTTLE_MS
+      if (dueForSnapshot) this.insertPageRevision(existing, now)
       this.db
-        .prepare(
-          'UPDATE blocks SET kind = ?, body = ?, meta = ?, updated_at = ?, updated_by = ? WHERE id = ?',
-        )
-        .run(kind, body, meta, now, updatedBy, id)
-      return this.getBlock(id)
+        .prepare('UPDATE pages SET body = ?, updated_at = ?, updated_by = ? WHERE id = ?')
+        .run(body, now, author, id)
+      return this.getPage(id)
     })
     return run()
   }
 
-  /** Delete a block and its revisions. */
-  deleteBlock(id: number): void {
-    const run = this.db.transaction((blockId: number) => {
-      this.db.prepare('DELETE FROM revisions WHERE block_id = ?').run(blockId)
-      this.db.prepare('DELETE FROM blocks WHERE id = ?').run(blockId)
-    })
-    run(id)
-  }
-
-  /**
-   * Reorder a page's blocks to match `orderedIds` (index becomes the new `ord`).
-   * Ids not belonging to the page are ignored. Returns the reordered blocks.
-   */
-  reorderBlocks(pageId: number, orderedIds: number[], now: string): KbBlock[] {
-    const run = this.db.transaction((ids: number[]) => {
-      const stmt = this.db.prepare(
-        'UPDATE blocks SET ord = ?, updated_at = ? WHERE id = ? AND page_id = ?',
-      )
-      ids.forEach((blockId, i) => stmt.run(i, now, blockId, pageId))
-    })
-    run(orderedIds)
-    return this.listBlocks(pageId)
-  }
-
-  /** Every revision of a block, oldest first (id ASC). */
-  listRevisions(blockId: number): KbRevision[] {
+  /** Every revision of a page, oldest first (id ASC). Backs the History panel. */
+  listPageRevisions(pageId: number): KbPageRevision[] {
     const rows = this.db
-      .prepare('SELECT * FROM revisions WHERE block_id = ? ORDER BY id ASC')
-      .all(blockId) as RevisionRow[]
-    return rows.map(rowToRevision)
+      .prepare('SELECT * FROM page_revisions WHERE page_id = ? ORDER BY id ASC')
+      .all(pageId) as PageRevisionRow[]
+    return rows.map(rowToPageRevision)
   }
 
   /**
-   * Restore a revision's body/kind/meta back onto its block. Itself records a
-   * revision of the state it replaces FIRST (so a restore is undoable), then
-   * applies the snapshot. `restoredBy` becomes the block's new `updated_by`.
-   * Returns the restored block, or `undefined` if the revision/block is gone.
+   * Restore a revision's body back onto its page. Itself UNCONDITIONALLY
+   * records a revision of the state it replaces first (an explicit operator
+   * action, not a throttled keystroke autosave, so it always gets its own undo
+   * point). `restoredBy` becomes the page's new `updated_by`. Returns the
+   * restored page, or `undefined` if the revision/page is gone.
    */
-  restoreRevision(revisionId: number, restoredBy: string, now: string): KbBlock | undefined {
-    const run = this.db.transaction((): KbBlock | undefined => {
-      const rev = this.db.prepare('SELECT * FROM revisions WHERE id = ?').get(revisionId) as
-        | RevisionRow
+  restorePageRevision(revisionId: number, restoredBy: string, now: string): KbPage | undefined {
+    const run = this.db.transaction((): KbPage | undefined => {
+      const rev = this.db.prepare('SELECT * FROM page_revisions WHERE id = ?').get(revisionId) as
+        | PageRevisionRow
         | undefined
       if (!rev) return undefined
-      const block = this.db.prepare('SELECT * FROM blocks WHERE id = ?').get(rev.block_id) as
-        | BlockRow
+      const page = this.db.prepare('SELECT * FROM pages WHERE id = ?').get(rev.page_id) as
+        | PageRow
         | undefined
-      if (!block) return undefined
-      this.insertRevision(block, now)
+      if (!page) return undefined
+      this.insertPageRevision(page, now)
       this.db
-        .prepare(
-          'UPDATE blocks SET kind = ?, body = ?, meta = ?, updated_at = ?, updated_by = ? WHERE id = ?',
-        )
-        .run(rev.kind, rev.body, rev.meta, now, restoredBy, block.id)
-      return this.getBlock(block.id)
+        .prepare('UPDATE pages SET body = ?, updated_at = ?, updated_by = ? WHERE id = ?')
+        .run(rev.body, now, restoredBy, page.id)
+      return this.getPage(page.id)
     })
     return run()
   }
 
-  /** Snapshot the given block's CURRENT state into `revisions` (prior-state capture). */
-  private insertRevision(block: BlockRow, now: string): void {
+  /** Snapshot the given page's CURRENT body into `page_revisions` (prior-state capture). */
+  private insertPageRevision(page: PageRow, now: string): void {
     this.db
       .prepare(
-        `INSERT INTO revisions (block_id, body, kind, meta, author, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO page_revisions (page_id, body, author, created_at)
+         VALUES (?, ?, ?, ?)`,
       )
-      .run(block.id, block.body, block.kind, block.meta, block.updated_by, now)
+      .run(page.id, page.body, page.updated_by, now)
   }
 
   /**

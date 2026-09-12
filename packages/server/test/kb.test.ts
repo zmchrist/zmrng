@@ -44,10 +44,10 @@ function columns(p: string, table: string): Set<string> {
 const NOW = '2026-09-10T00:00:00.000Z'
 
 describe('KB schema', () => {
-  it('creates the spaces/folders/pages/blocks/revisions tables on construction', () => {
+  it('creates the spaces/folders/pages/page_revisions tables on construction', () => {
     const db = new Db(dbPath)
     const t = tables(dbPath)
-    for (const name of ['spaces', 'folders', 'pages', 'blocks', 'revisions']) {
+    for (const name of ['spaces', 'folders', 'pages', 'page_revisions']) {
       expect(t.has(name)).toBe(true)
     }
     db.close()
@@ -62,14 +62,14 @@ describe('KB schema', () => {
     db.close()
   })
 
-  it('blocks has ord/kind/body/meta/updated_by columns; revisions has block_id/body/kind/meta/author', () => {
+  it('pages has body/author/updated_by columns; page_revisions has page_id/body/author', () => {
     const db = new Db(dbPath)
-    const b = columns(dbPath, 'blocks')
-    for (const col of ['page_id', 'ord', 'kind', 'body', 'meta', 'updated_at', 'updated_by']) {
-      expect(b.has(col)).toBe(true)
+    const p = columns(dbPath, 'pages')
+    for (const col of ['space_id', 'folder_id', 'title', 'body', 'author', 'updated_by', 'created_at', 'updated_at']) {
+      expect(p.has(col)).toBe(true)
     }
-    const r = columns(dbPath, 'revisions')
-    for (const col of ['block_id', 'body', 'kind', 'meta', 'author', 'created_at']) {
+    const r = columns(dbPath, 'page_revisions')
+    for (const col of ['page_id', 'body', 'author', 'created_at']) {
       expect(r.has(col)).toBe(true)
     }
     db.close()
@@ -151,52 +151,40 @@ describe('KB folders + pages (nesting / placement)', () => {
     db.close()
   })
 
-  it('deleteFolder cascades to nested folders/pages/blocks/revisions but leaves siblings intact', () => {
+  it('deleteFolder cascades to nested folders/pages/revisions but leaves siblings intact', () => {
     const db = new Db(dbPath)
     const space = db.listSpaces()[0]
 
-    // Target subtree: A → B, with a page (+block+revision) in each.
+    // Target subtree: A → B, with a page (+revision) in each.
     const a = db.createFolder(space.id, null, 'A', NOW)
     const b = db.createFolder(space.id, a.id, 'B', NOW)
-    const pageA = db.createPage(space.id, a.id, 'Page A', 'Ada', NOW)
-    const pageB = db.createPage(space.id, b.id, 'Page B', 'Ada', NOW)
-    const blockA = db.createBlock({
-      pageId: pageA.id, ord: null, kind: 'text', body: 'a', meta: null, updatedBy: 'Ada', now: NOW,
-    })
-    const blockB = db.createBlock({
-      pageId: pageB.id, ord: null, kind: 'text', body: 'b', meta: null, updatedBy: 'Ada', now: NOW,
-    })
-    // updateBlock records a revision of the prior state on each block.
-    db.updateBlock(blockA.id, { body: 'a2' }, 'Ada', '2026-09-10T01:00:00.000Z')
-    db.updateBlock(blockB.id, { body: 'b2' }, 'Ada', '2026-09-10T01:00:00.000Z')
-    expect(db.listRevisions(blockA.id)).toHaveLength(1)
-    expect(db.listRevisions(blockB.id)).toHaveLength(1)
+    const pageA = db.createPage(space.id, a.id, 'Page A', 'Ada', NOW, 'a')
+    const pageB = db.createPage(space.id, b.id, 'Page B', 'Ada', NOW, 'b')
+    // updatePageBody records a revision of the prior state on each page.
+    db.updatePageBody(pageA.id, 'a2', 'Ada', '2026-09-10T01:00:00.000Z')
+    db.updatePageBody(pageB.id, 'b2', 'Ada', '2026-09-10T01:00:00.000Z')
+    expect(db.listPageRevisions(pageA.id)).toHaveLength(1)
+    expect(db.listPageRevisions(pageB.id)).toHaveLength(1)
 
     // Sibling subtree in the SAME space, NOT under A — must survive the cascade.
     const other = db.createFolder(space.id, null, 'Other', NOW)
-    const otherPage = db.createPage(space.id, other.id, 'Other page', 'Ada', NOW)
-    const otherBlock = db.createBlock({
-      pageId: otherPage.id, ord: null, kind: 'text', body: 'keep', meta: null, updatedBy: 'Ada', now: NOW,
-    })
-    db.updateBlock(otherBlock.id, { body: 'keep2' }, 'Ada', '2026-09-10T01:00:00.000Z')
+    const otherPage = db.createPage(space.id, other.id, 'Other page', 'Ada', NOW, 'keep')
+    db.updatePageBody(otherPage.id, 'keep2', 'Ada', '2026-09-10T01:00:00.000Z')
 
     db.deleteFolder(a.id)
 
-    // Whole A subtree is gone: folders, pages, blocks, revisions.
+    // Whole A subtree is gone: folders, pages, revisions.
     expect(db.getFolder(a.id)).toBeUndefined()
     expect(db.getFolder(b.id)).toBeUndefined()
     expect(db.getPage(pageA.id)).toBeUndefined()
     expect(db.getPage(pageB.id)).toBeUndefined()
-    expect(db.getBlock(blockA.id)).toBeUndefined()
-    expect(db.getBlock(blockB.id)).toBeUndefined()
-    expect(db.listRevisions(blockA.id)).toHaveLength(0)
-    expect(db.listRevisions(blockB.id)).toHaveLength(0)
+    expect(db.listPageRevisions(pageA.id)).toHaveLength(0)
+    expect(db.listPageRevisions(pageB.id)).toHaveLength(0)
 
     // Sibling subtree is untouched (cascade is scoped, not a space-wide wipe).
     expect(db.getFolder(other.id)?.name).toBe('Other')
-    expect(db.getPage(otherPage.id)?.title).toBe('Other page')
-    expect(db.getBlock(otherBlock.id)?.body).toBe('keep2')
-    expect(db.listRevisions(otherBlock.id)).toHaveLength(1)
+    expect(db.getPage(otherPage.id)?.body).toBe('keep2')
+    expect(db.listPageRevisions(otherPage.id)).toHaveLength(1)
     db.close()
   })
 
@@ -213,115 +201,116 @@ describe('KB folders + pages (nesting / placement)', () => {
   })
 })
 
-describe('KB blocks (ordering + revision-on-update)', () => {
+describe('KB pages (single-field body + throttled revision-on-save)', () => {
   const seedPage = (db: Db): number => {
     const space = db.listSpaces()[0]
     return db.createPage(space.id, null, 'Page', 'Ada', NOW).id
   }
 
-  it('appends blocks in ord order and lists them sorted by ord', () => {
+  it('creates a page with an empty body by default — ready to type into immediately', () => {
     const db = new Db(dbPath)
     const pageId = seedPage(db)
-    const b0 = db.createBlock({
-      pageId,
-      ord: null,
-      kind: 'text',
-      body: 'first',
-      meta: null,
-      updatedBy: 'Ada',
-      now: NOW,
-    })
-    const b1 = db.createBlock({
-      pageId,
-      ord: null,
-      kind: 'heading',
-      body: 'second',
-      meta: '{"level":1}',
-      updatedBy: 'Ada',
-      now: NOW,
-    })
-    expect(b0.ord).toBe(0)
-    expect(b1.ord).toBe(1)
-    expect(db.listBlocks(pageId).map((b) => b.body)).toEqual(['first', 'second'])
-    // meta JSON round-trips as an opaque string.
-    expect(db.listBlocks(pageId)[1].meta).toBe('{"level":1}')
+    expect(db.getPage(pageId)?.body).toBe('')
+    expect(db.getPage(pageId)?.updatedBy).toBe('Ada') // author seeds updatedBy
     db.close()
   })
 
-  it('reorderBlocks rewrites ord to match the given id order', () => {
+  it('createPage accepts an initial body (used by the "Send to KB" promotion)', () => {
     const db = new Db(dbPath)
-    const pageId = seedPage(db)
-    const a = db.createBlock({ pageId, ord: null, kind: 'text', body: 'a', meta: null, updatedBy: 'Ada', now: NOW })
-    const b = db.createBlock({ pageId, ord: null, kind: 'text', body: 'b', meta: null, updatedBy: 'Ada', now: NOW })
-    const c = db.createBlock({ pageId, ord: null, kind: 'text', body: 'c', meta: null, updatedBy: 'Ada', now: NOW })
-    const out = db.reorderBlocks(pageId, [c.id, a.id, b.id], NOW)
-    expect(out.map((x) => x.body)).toEqual(['c', 'a', 'b'])
-    expect(out.map((x) => x.ord)).toEqual([0, 1, 2])
+    const space = db.listSpaces()[0]
+    const page = db.createPage(space.id, null, 'Page', 'Ada', NOW, 'hello world')
+    expect(page.body).toBe('hello world')
     db.close()
   })
 
-  it('updating a block writes a revision of the PRIOR state, then applies the new state', () => {
+  it('updatePageBody replaces the body and updates updated_by/updated_at', () => {
     const db = new Db(dbPath)
     const pageId = seedPage(db)
-    const block = db.createBlock({
-      pageId,
-      ord: null,
-      kind: 'text',
-      body: 'original',
-      meta: null,
-      updatedBy: 'Ada',
-      now: NOW,
-    })
-    expect(db.listRevisions(block.id)).toHaveLength(0)
-
-    const updated = db.updateBlock(block.id, { body: 'edited' }, 'Grace', '2026-09-10T01:00:00.000Z')
+    const updated = db.updatePageBody(pageId, 'edited', 'Grace', '2026-09-10T01:00:00.000Z')
     expect(updated?.body).toBe('edited')
     expect(updated?.updatedBy).toBe('Grace')
-
-    const revs = db.listRevisions(block.id)
-    expect(revs).toHaveLength(1)
-    // The revision captured the PRIOR state (body + its last editor).
-    expect(revs[0].body).toBe('original')
-    expect(revs[0].author).toBe('Ada')
+    expect(updated?.updatedAt).toBe('2026-09-10T01:00:00.000Z')
     db.close()
   })
 
-  it('restoreRevision applies a revision back onto the block and itself records a revision', () => {
+  it('the FIRST save after creation always snapshots a revision of the prior (empty) body', () => {
     const db = new Db(dbPath)
     const pageId = seedPage(db)
-    const block = db.createBlock({
-      pageId,
-      ord: null,
-      kind: 'text',
-      body: 'v1',
-      meta: null,
-      updatedBy: 'Ada',
-      now: NOW,
-    })
-    db.updateBlock(block.id, { body: 'v2' }, 'Ada', '2026-09-10T01:00:00.000Z') // rev of v1
-    const revs = db.listRevisions(block.id)
+    expect(db.listPageRevisions(pageId)).toHaveLength(0)
+    db.updatePageBody(pageId, 'v1', 'Ada', '2026-09-10T00:00:01.000Z')
+    const revs = db.listPageRevisions(pageId)
     expect(revs).toHaveLength(1)
+    expect(revs[0].body).toBe('') // the PRIOR (empty) body
+    expect(revs[0].author).toBe('Ada') // updated_by seeded at creation
+    db.close()
+  })
 
-    const restored = db.restoreRevision(revs[0].id, 'Grace', '2026-09-10T02:00:00.000Z')
-    expect(restored?.body).toBe('v1') // the revision's body applied back
+  it('throttles subsequent snapshots — a save within the throttle window records no new revision', () => {
+    const db = new Db(dbPath)
+    const pageId = seedPage(db)
+    db.updatePageBody(pageId, 'v1', 'Ada', '2026-09-10T00:00:00.000Z')
+    expect(db.listPageRevisions(pageId)).toHaveLength(1)
+    // 5s later — well inside the throttle window — no new snapshot.
+    db.updatePageBody(pageId, 'v2', 'Ada', '2026-09-10T00:00:05.000Z')
+    expect(db.listPageRevisions(pageId)).toHaveLength(1)
+    expect(db.getPage(pageId)?.body).toBe('v2') // the body itself still updates every save
+    db.close()
+  })
+
+  it('snapshots again once the throttle window has elapsed since the last revision', () => {
+    const db = new Db(dbPath)
+    const pageId = seedPage(db)
+    db.updatePageBody(pageId, 'v1', 'Ada', '2026-09-10T00:00:00.000Z')
+    expect(db.listPageRevisions(pageId)).toHaveLength(1)
+    // 31s later — past the 30s throttle window — snapshots the PRIOR body ('v1').
+    db.updatePageBody(pageId, 'v2', 'Ada', '2026-09-10T00:00:31.000Z')
+    const revs = db.listPageRevisions(pageId)
+    expect(revs).toHaveLength(2)
+    expect(revs[1].body).toBe('v1')
+    db.close()
+  })
+
+  it('restorePageRevision applies a revision back onto the page and itself records a revision', () => {
+    const db = new Db(dbPath)
+    const pageId = seedPage(db)
+    db.updatePageBody(pageId, 'v1', 'Ada', '2026-09-10T00:00:00.000Z')
+    db.updatePageBody(pageId, 'v2', 'Ada', '2026-09-10T01:00:00.000Z') // past throttle → new revision of v1
+    const revs = db.listPageRevisions(pageId)
+    expect(revs).toHaveLength(2)
+    const v1Revision = revs.find((r) => r.body === 'v1')!
+
+    const restored = db.restorePageRevision(v1Revision.id, 'Grace', '2026-09-10T02:00:00.000Z')
+    expect(restored?.body).toBe('v1')
     expect(restored?.updatedBy).toBe('Grace')
 
-    // Restore itself recorded a revision (of the v2 state it replaced).
-    const after = db.listRevisions(block.id)
-    expect(after).toHaveLength(2)
-    expect(after[1].body).toBe('v2')
+    // Restore itself ALWAYS records a revision (of the v2 state it replaced),
+    // regardless of the throttle window — an explicit action gets its own undo point.
+    const after = db.listPageRevisions(pageId)
+    expect(after).toHaveLength(3)
+    expect(after[2].body).toBe('v2')
     db.close()
   })
 
-  it('deleteBlock removes the block and its revisions', () => {
+  it('restorePageRevision returns undefined for an unknown revision id', () => {
+    const db = new Db(dbPath)
+    expect(db.restorePageRevision(99999, 'Grace', NOW)).toBeUndefined()
+    db.close()
+  })
+
+  it('updatePageBody returns undefined for an unknown page id', () => {
+    const db = new Db(dbPath)
+    expect(db.updatePageBody(99999, 'x', 'Ada', NOW)).toBeUndefined()
+    db.close()
+  })
+
+  it('deletePage removes the page and its revisions', () => {
     const db = new Db(dbPath)
     const pageId = seedPage(db)
-    const block = db.createBlock({ pageId, ord: null, kind: 'text', body: 'x', meta: null, updatedBy: 'Ada', now: NOW })
-    db.updateBlock(block.id, { body: 'y' }, 'Ada', NOW)
-    expect(db.listRevisions(block.id)).toHaveLength(1)
-    db.deleteBlock(block.id)
-    expect(db.getBlock(block.id)).toBeUndefined()
-    expect(db.listRevisions(block.id)).toHaveLength(0)
+    db.updatePageBody(pageId, 'x', 'Ada', NOW)
+    expect(db.listPageRevisions(pageId)).toHaveLength(1)
+    db.deletePage(pageId)
+    expect(db.getPage(pageId)).toBeUndefined()
+    expect(db.listPageRevisions(pageId)).toHaveLength(0)
     db.close()
   })
 })
@@ -428,8 +417,7 @@ describe('KB additive-migration idempotency', () => {
     const db1 = new Db(dbPath)
     const space = db1.listSpaces()[1] // zmrng
     const folder = db1.createFolder(space.id, null, 'Docs', NOW)
-    const page = db1.createPage(space.id, folder.id, 'Guide', 'Ada', NOW)
-    const block = db1.createBlock({ pageId: page.id, ord: null, kind: 'text', body: 'hello', meta: null, updatedBy: 'Ada', now: NOW })
+    const page = db1.createPage(space.id, folder.id, 'Guide', 'Ada', NOW, 'hello')
     const tablesBefore = tables(dbPath)
     db1.close()
 
@@ -440,7 +428,7 @@ describe('KB additive-migration idempotency', () => {
     expect(db2.getSpace(space.id)?.name).toBe('zmrng')
     expect(db2.getFolder(folder.id)?.name).toBe('Docs')
     expect(db2.getPage(page.id)?.title).toBe('Guide')
-    expect(db2.getBlock(block.id)?.body).toBe('hello')
+    expect(db2.getPage(page.id)?.body).toBe('hello')
     db2.close()
   })
 })
@@ -449,8 +437,8 @@ describe('KB "Send to KB" composition (T4, #154)', () => {
   // Round-trips the exact db composition the POST /api/spaces/:id/pages/from-message
   // route performs (the repo has no HTTP-inject harness, #91): look up the source
   // message + its channel, derive a title, build the SERVER-SIDE provenance body,
-  // then createPage + createBlock. The result must be an ordinary KB page.
-  it('promotes a channel message into a normal page whose first block carries body + server provenance', () => {
+  // then createPage with that body. The result must be an ordinary KB page.
+  it('promotes a channel message into a normal page whose body carries the message + server provenance', () => {
     const db = new Db(dbPath)
     const channel = db.createChannel('zmrng-dev', 'zmrng', NOW)
     const message = db.addMessage(channel.id, 'Ada', 'Investigate the retry bug\nmore detail', 'human', NOW)
@@ -460,33 +448,30 @@ describe('KB "Send to KB" composition (T4, #154)', () => {
     const src = db.getMessage(message.id)!
     const srcChannel = db.getChannel(src.channelId)!
     const title = resolvePageTitle(undefined, src.body)
-    const page = db.createPage(space.id, null, title, src.author, NOW)
-    const block = db.createBlock({
-      pageId: page.id,
-      ord: null,
-      kind: 'text',
-      body: buildPageBody(src.body, srcChannel.name, src.id),
-      meta: null,
-      updatedBy: src.author,
-      now: NOW,
-    })
+    const page = db.createPage(
+      space.id,
+      null,
+      title,
+      src.author,
+      NOW,
+      buildPageBody(src.body, srcChannel.name, src.id),
+    )
 
     // Title derived from the message's first line.
     expect(page.title).toBe('Investigate the retry bug')
     expect(page.spaceId).toBe(space.id)
     expect(page.folderId).toBeNull()
 
-    // First block is at ord 0 and carries the message body + canonical provenance.
-    expect(block.ord).toBe(0)
-    expect(block.body).toBe(
+    // The page body carries the message body + canonical provenance.
+    expect(page.body).toBe(
       'Investigate the retry bug\nmore detail\n\n---\nFrom team channel #zmrng-dev (message #' +
         message.id +
         ')',
     )
 
-    // It is a NORMAL page: it appears in the space's page list and its block reads back.
+    // It is a NORMAL page: it appears in the space's page list and its body reads back.
     expect(db.listPages(space.id).some((p) => p.id === page.id)).toBe(true)
-    expect(db.listBlocks(page.id).map((b) => b.body)).toEqual([block.body])
+    expect(db.getPage(page.id)?.body).toBe(page.body)
     db.close()
   })
 

@@ -270,3 +270,17 @@ non-obvious root cause, or is likely to recur. Template in
 - **Files:** `packages/server/src/scanRunner.ts`, `packages/server/src/phases.ts`
   (`onScanReady`), `packages/server/test/taskManager.test.ts` (`FakeScanRunner`)
 - **Date Found:** 2026-09-10
+
+### `seedHarness()` crashes when `harness/hooks/__pycache__` exists on disk
+- **Error:** `EISDIR: illegal operation on a directory, copyfile` (or similar) thrown from
+  `seedHarness()` while seeding a fresh worktree's hooks.
+- **Cause:** `seedHarness()` iterates every entry in `harness/hooks/` and `copyFileSync`s it
+  into the worktree's `.claude/zmrng-hooks/`, assuming every entry is a flat `.py` file. If a
+  hook script was ever run directly with `python3` (e.g. while debugging a hook by hand),
+  Python leaves a `__pycache__/` directory behind in that same folder — `copyFileSync` on a
+  directory throws instead of copying it.
+- **Solution:** Before copying, `statSync` each entry and skip anything that is not a plain
+  file (`!statSync(src).isFile()`). Covered by a regression test that plants a
+  `__pycache__/*.pyc` file and asserts `seedHarness()` still succeeds and the real hooks land.
+- **Files:** `packages/server/src/worktree.ts` (`seedHarness`), `packages/server/test/seedHarness.test.ts`
+- **Date Found:** 2026-09-12

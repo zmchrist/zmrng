@@ -9,6 +9,7 @@ import {
   cpSync,
   readFileSync,
   writeFileSync,
+  statSync,
 } from 'node:fs'
 import { config } from './config.js'
 import type { WorktreeFileNode, WorktreeFileTree } from './types.js'
@@ -256,7 +257,11 @@ export async function seedHarness(
 
   if (hooksAvailable) {
     for (const name of listEntries(path.join(harnessDir, 'hooks'))) {
-      copyFileSync(path.join(harnessDir, 'hooks', name), path.join(hooksDestDir, name))
+      const src = path.join(harnessDir, 'hooks', name)
+      // Skip stray non-file entries (e.g. a `__pycache__/` dir left behind by
+      // running a hook script directly) — this loop only ever seeds flat .py files.
+      if (!statSync(src).isFile()) continue
+      copyFileSync(src, path.join(hooksDestDir, name))
     }
     seeded.push('.claude/zmrng-hooks/')
   } else {

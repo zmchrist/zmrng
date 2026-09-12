@@ -690,23 +690,20 @@ export type WsWorkspaceClientMsg =
   | { type: 'message'; channelId: number; author: string; body: string }
   | { type: 'react'; channelId: number; messageId: number; emoji: string; handle: string }
   // ---- KB real-time sync (T2, #144) ----
-  // `page.subscribe`/`page.unsubscribe` register interest in a page's live block
+  // `page.subscribe`/`page.unsubscribe` register interest in a page's live body
   // fan-out (and drive its lightweight viewer presence), mirroring the channel
-  // subscribe frames. `page.edit` is a BLOCK DELTA on save: `blockId: null`
-  // creates a new block (server appends — see PageManager.saveBlock), a non-null
-  // `blockId` updates that existing block (→ Db.updateBlock, which snapshots the
-  // prior state into `revisions`). A socket `page.edit` is ALWAYS a human author
-  // (mirrors the channel `message` "always human" posture — the agent block path
-  // is out of T2 scope).
+  // subscribe frames. `page.edit` is a WHOLE-BODY autosave: the page is one
+  // continuous plaintext field (no blocks), so an edit simply replaces the
+  // page's `body` (→ Db.updatePageBody, which throttles a prior-state snapshot
+  // into `page_revisions`). Concurrency is last-write-wins — the server always
+  // accepts the most recent `page.edit`. A socket `page.edit` is ALWAYS a human
+  // author (mirrors the channel `message` "always human" posture).
   | { type: 'page.subscribe'; pageId: number }
   | { type: 'page.unsubscribe'; pageId: number }
   | {
       type: 'page.edit'
       pageId: number
-      blockId: number | null
-      kind: KbBlockKind
       body: string
-      meta: string | null
       author: string
     }
 
@@ -730,20 +727,15 @@ export type WsWorkspaceServerMsg =
   | { type: 'reaction'; channelId: number; messageId: number; reactions: ReactionSummary[] }
   | { type: 'new-version'; sha: string }
   // ---- KB real-time sync (T2, #144) ----
-  // `page.update` fans ONE created/updated block (the delta) out to every socket
-  // subscribed to that page — mirrors the channel `message` frame. `page.presence`
-  // is the lightweight per-page viewer set driven by the subscribe set (who is
-  // currently viewing the page), re-broadcast on every subscribe/unsubscribe. It
-  // reuses `WorkspaceMember` (viewers are live sockets, so `online` is always
-  // true) rather than introducing a slim viewer shape — no extra mirror surface.
-  | { type: 'page.update'; pageId: number; block: KbBlock }
+  // `page.update` fans the updated page (the whole-body delta) out to every
+  // socket subscribed to that page — mirrors the channel `message` frame.
+  // `page.presence` is the lightweight per-page viewer set driven by the
+  // subscribe set (who is currently viewing the page), re-broadcast on every
+  // subscribe/unsubscribe. It reuses `WorkspaceMember` (viewers are live
+  // sockets, so `online` is always true) rather than introducing a slim viewer
+  // shape — no extra mirror surface.
+  | { type: 'page.update'; pageId: number; page: KbPage }
   | { type: 'page.presence'; pageId: number; viewers: WorkspaceMember[] }
-  // `page.delete` (T2 follow-up, #151) is the delete tombstone that mirrors
-  // `page.update`: it fans a deleted block's id out to every socket subscribed
-  // to that page so the block converges (is removed) on all viewers without a
-  // reload. Delete itself stays a REST call (`DELETE /api/blocks/:id`); this is
-  // the SERVER->client convergence frame only — there is no new client frame.
-  | { type: 'page.delete'; pageId: number; blockId: number }
 
 /**
  * Max length of a self-asserted display-name handle, measured after trimming.
@@ -781,13 +773,17 @@ export const MAX_MESSAGE_PAGE = 200
 /** Name of the fixed channel seeded by default in every workspace. */
 export const GENERAL_CHANNEL_NAME = 'general'
 
-// ---- Knowledge Base (KB) — spaces / folders / pages / blocks / revisions ----
+// ---- Knowledge Base (KB) — spaces / folders / pages / revisions ----
 //
 // Server-side data foundation for the real-time team KB (epic T1, #140). New KB
 // tables are siblings of channels/messages/members and reuse the same Team
 // workspace spine (WAL SQLite, additive-only migrations, INSERT-OR-IGNORE seed).
-// Field-naming: camelCase in these TS types, snake_case in the DB columns (see
-// the rowTo* mappers in db.ts). MANUAL MIRROR in `packages/web/src/types.ts`.
+// A page is ONE continuous plaintext field (Obsidian-style live markdown
+// rendering, no per-block model) — editing autosaves the whole body, and
+// `page_revisions` throttles prior-body snapshots so undo history survives
+// without recording every keystroke. Field-naming: camelCase in these TS types,
+// snake_case in the DB columns (see the rowTo* mappers in db.ts). MANUAL MIRROR
+// in `packages/web/src/types.ts`.
 
 /**
  * One KB space: the top-level container that groups a knowledge tree. `repoUrl`
@@ -816,66 +812,35 @@ export interface KbFolder {
 
 /**
  * One KB page. `folderId` places the page inside a folder; null means the page
- * sits at the space root. A page owns an ordered list of blocks.
+ * sits at the space root. `body` is the page's ENTIRE content — one continuous
+ * plaintext/markdown field (no per-block model): the editor is a single field
+ * you click into and type, rendered Obsidian-style (live markdown, interactive
+ * checklists) across the whole body. `author` is the page's original creator;
+ * `updatedBy` is the self-asserted handle of whoever last saved the body
+ * (concurrency is last-write-wins — the server always accepts the latest save).
  */
 export interface KbPage {
   id: number
   spaceId: number
   folderId: number | null
   title: string
+  body: string
   author: string
+  updatedBy: string
   createdAt: string
   updatedAt: string
 }
 
-/** The block kinds a page body is composed of. */
-export type KbBlockKind = 'text' | 'heading' | 'code' | 'checklist' | 'list'
-
-/** Every valid `KbBlockKind`, for wire validation. Mirrored in web types. */
-export const KB_BLOCK_KINDS: readonly KbBlockKind[] = [
-  'text',
-  'heading',
-  'code',
-  'checklist',
-  'list',
-]
-
 /**
- * Max length of a block's `meta` JSON string on a `page.edit` frame (T2). `meta`
- * carries small kind-specific extras (`{"level":1}`, `{"checked":true}`), so a
- * generous-but-bounded cap keeps a client from persisting an unbounded string.
- * A block `body` reuses `MAX_MESSAGE_BODY_LEN`. Mirrored in web types.
+ * A prior-body snapshot of a page, captured (throttled — not on every
+ * keystroke) before an autosave overwrites it, and again before a restore.
+ * Backs the page's undo/history affordance. `author` is the handle whose
+ * writing this snapshot preserves (the editor at the time it was captured).
  */
-export const MAX_BLOCK_META_LEN = 2000
-
-/**
- * One block of a page's body. `body` is markdown; `meta` is a nullable JSON
- * string carrying kind-specific extras — `{"level":1}` for a heading level,
- * `{"checked":true}` for a checklist item. `updatedBy` is the last editor's
- * self-asserted handle. Each update snapshots the PRIOR state into `revisions`.
- */
-export interface KbBlock {
+export interface KbPageRevision {
   id: number
   pageId: number
-  ord: number
-  kind: KbBlockKind
   body: string
-  meta: string | null
-  updatedAt: string
-  updatedBy: string
-}
-
-/**
- * A prior-state snapshot of a block, captured on each block update (and on each
- * restore). Backs the locked-toast + restore-from-revision conflict UX (T2). A
- * revision row captures the block state that a write is about to replace.
- */
-export interface KbRevision {
-  id: number
-  blockId: number
-  body: string
-  kind: KbBlockKind
-  meta: string | null
   author: string
   createdAt: string
 }
@@ -896,12 +861,6 @@ export interface KbTreeNode {
   type: WorktreeNodeType
   kind: 'folder' | 'page'
   children?: KbTreeNode[]
-}
-
-/** `GET /api/pages/:id` response — a page plus its ordered blocks. */
-export interface KbPageDetail {
-  page: KbPage
-  blocks: KbBlock[]
 }
 
 /**

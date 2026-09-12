@@ -107,6 +107,23 @@ describe('seedHarness', () => {
     expect(preCommands.some((c) => c.includes('pr_shape_guard.py'))).toBe(true)
   })
 
+  it('skips a stray __pycache__ subdirectory in hooks/ instead of throwing (Python bytecode cache)', async () => {
+    mkdirSync(path.join(harnessDir, 'hooks', '__pycache__'), { recursive: true })
+    writeFileSync(
+      path.join(harnessDir, 'hooks', '__pycache__', 'security_guard.cpython-311.pyc'),
+      'fake bytecode',
+    )
+
+    await seedHarness(worktreeDir, '/some/target/repo', harnessDir)
+
+    expect(
+      existsSync(path.join(worktreeDir, '.claude', 'zmrng-hooks', 'security_guard.py')),
+    ).toBe(true)
+    expect(
+      existsSync(path.join(worktreeDir, '.claude', 'zmrng-hooks', '__pycache__')),
+    ).toBe(false)
+  })
+
   it('copies core_piv_loop commands unprefixed — slash resolution needs the exact name', async () => {
     await seedHarness(worktreeDir, '/some/target/repo', harnessDir)
 
