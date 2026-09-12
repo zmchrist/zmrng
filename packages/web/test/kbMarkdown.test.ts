@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { renderMarkdown, escapeHtml } from '../src/kbMarkdown'
+import {
+  renderMarkdown,
+  escapeHtml,
+  detectKind,
+  renderKbBlock,
+  toEditableMarkdown,
+} from '../src/kbMarkdown'
 
 describe('escapeHtml', () => {
   it('escapes the HTML-significant characters', () => {
@@ -60,5 +66,86 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('item', 'checklist', '{"checked":true}')).toBe(
       '<ul><li><input type="checkbox" disabled checked /> item</li></ul>',
     )
+  })
+})
+
+describe('detectKind', () => {
+  it('detects a heading and its level from leading hashes', () => {
+    expect(detectKind('## Title')).toEqual({ kind: 'heading', meta: '{"level":2}' })
+    expect(detectKind('###### Deep')).toEqual({ kind: 'heading', meta: '{"level":6}' })
+  })
+
+  it('detects a fenced code block', () => {
+    expect(detectKind('```ts\nconst x = 1\n```')).toEqual({ kind: 'code', meta: null })
+  })
+
+  it('detects a checklist when every non-empty line is a task item', () => {
+    expect(detectKind('- [ ] todo\n- [x] done')).toEqual({ kind: 'checklist', meta: null })
+  })
+
+  it('detects a bullet list', () => {
+    expect(detectKind('- one\n- two')).toEqual({ kind: 'list', meta: null })
+  })
+
+  it('returns null for plain prose (no strong markers)', () => {
+    expect(detectKind('just a sentence')).toBeNull()
+    expect(detectKind('   ')).toBeNull()
+  })
+
+  it('does not treat "#tag" (no space) as a heading', () => {
+    expect(detectKind('#tag not a heading')).toBeNull()
+  })
+})
+
+describe('renderKbBlock', () => {
+  it('renders a body-inferred heading regardless of the stored kind', () => {
+    expect(renderKbBlock('# Title', 'text', null)).toBe('<h1>Title</h1>')
+  })
+
+  it('renders a body-inferred list regardless of the stored kind', () => {
+    expect(renderKbBlock('- one\n- two', 'text', null)).toBe(
+      '<ul><li>one</li><li>two</li></ul>',
+    )
+  })
+
+  it('strips the ``` fences from an inferred code block', () => {
+    expect(renderKbBlock('```ts\nconst x = **1**\n```', 'text', null)).toBe(
+      '<pre><code>const x = **1**</code></pre>',
+    )
+  })
+
+  it('falls back to the stored kind for a legacy heading (no # in body)', () => {
+    expect(renderKbBlock('Title', 'heading', '{"level":1}')).toBe('<h1>Title</h1>')
+  })
+
+  it('renders plain prose as a paragraph', () => {
+    expect(renderKbBlock('hello world', 'text', null)).toBe('<p>hello world</p>')
+  })
+})
+
+describe('toEditableMarkdown', () => {
+  it('up-converts a legacy heading to markdown-native "# " form', () => {
+    expect(toEditableMarkdown('Title', 'heading', '{"level":3}')).toBe('### Title')
+  })
+
+  it('up-converts a legacy list to "- " bullets', () => {
+    expect(toEditableMarkdown('one\ntwo', 'list', null)).toBe('- one\n- two')
+  })
+
+  it('up-converts a legacy checklist to "- [ ] " / "- [x] " items', () => {
+    expect(toEditableMarkdown('- [ ] a\n- [x] b', 'checklist', null)).toBe('- [ ] a\n- [x] b')
+  })
+
+  it('wraps a legacy code block in ``` fences', () => {
+    expect(toEditableMarkdown('const x = 1', 'code', null)).toBe('```\nconst x = 1\n```')
+  })
+
+  it('leaves already-markdown-native bodies unchanged', () => {
+    expect(toEditableMarkdown('# Already', 'heading', '{"level":1}')).toBe('# Already')
+  })
+
+  it('round-trips a legacy heading through toEditableMarkdown → detectKind', () => {
+    const editable = toEditableMarkdown('Title', 'heading', '{"level":2}')
+    expect(detectKind(editable)).toEqual({ kind: 'heading', meta: '{"level":2}' })
   })
 })

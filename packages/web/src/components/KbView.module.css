@@ -169,6 +169,66 @@
   cursor: not-allowed;
 }
 
+/* Obsidian-style create footer: compact page/folder icon buttons pinned to the
+   bottom of the tree pane, expanding into a single inline name input. */
+.treeFooter {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding: 8px 2px 2px;
+  border-top: 1px solid var(--border);
+}
+
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+
+.iconBtn:hover {
+  border-color: var(--accent-line);
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.iconBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.createInline {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+.createInlineInput {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+.createInlineInput:focus {
+  outline: none;
+  border-color: var(--accent-line);
+}
+
 .error {
   margin: 6px 0 0;
   font-size: 12px;
@@ -438,6 +498,12 @@
 
 .editorBar .select {
   width: auto;
+}
+
+.editorHint {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
 }
 
 .saveBtn {

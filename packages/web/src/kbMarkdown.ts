@@ -115,3 +115,83 @@ export function renderMarkdown(body: string, kind: KbBlockKind, meta: string | n
     })
   return paragraphs.join('')
 }
+
+/**
+ * Obsidian-native kind inference: read a block's markdown BODY and decide what
+ * kind it is, so the operator never picks a kind from a dropdown — they just
+ * type `# `, `- `, `- [ ] `, or a ``` ``` ``` fence and the block becomes the
+ * right kind on save. Returns `null` for plain prose (no strong markers) so the
+ * caller can keep a block's stored kind — this is what makes it backward
+ * compatible with legacy blocks whose kind lives in the DB column, not the body.
+ */
+export function detectKind(
+  body: string,
+): { kind: KbBlockKind; meta: string | null } | null {
+  const lines = body.split('\n')
+  const nonEmpty = lines.filter((l) => l.trim().length > 0)
+  if (nonEmpty.length === 0) return null
+
+  // Fenced code — the first line opens a ``` fence (optionally with a language).
+  if (/^\s*```/.test(lines[0])) return { kind: 'code', meta: null }
+
+  // Heading — the first line is `#`..`######` + space; level = hash count.
+  const h = /^(#{1,6})\s+/.exec(lines[0])
+  if (h) return { kind: 'heading', meta: `{"level":${h[1].length}}` }
+
+  // Checklist — every non-empty line is a `- [ ]` / `- [x]` task item.
+  if (nonEmpty.every((l) => /^\s*[-*]\s+\[[ xX]\]/.test(l)))
+    return { kind: 'checklist', meta: null }
+
+  // List — every non-empty line is a `- ` / `* ` bullet (and not a checklist).
+  if (nonEmpty.every((l) => /^\s*[-*]\s+/.test(l))) return { kind: 'list', meta: null }
+
+  return null
+}
+
+/**
+ * Render a KB block the Obsidian way: infer its kind from the body's markdown
+ * first, and only fall back to the stored `kind`/`meta` when the body carries no
+ * strong markers (legacy blocks, or plain prose). This keeps NEW markdown-native
+ * content and OLD kind-in-column content both rendering correctly.
+ */
+export function renderKbBlock(body: string, kind: KbBlockKind, meta: string | null): string {
+  const d = detectKind(body)
+  if (!d) return renderMarkdown(body, kind, meta)
+  if (d.kind === 'code') {
+    // Strip the opening/closing ``` fences; render the inner source verbatim.
+    const inner = body.replace(/^\s*```[^\n]*\n?/, '').replace(/\n?```[ \t]*$/, '')
+    return `<pre><code>${escapeHtml(inner)}</code></pre>`
+  }
+  return renderMarkdown(body, d.kind, d.meta)
+}
+
+/**
+ * Convert a block into the markdown a user would TYPE for it, so the editor
+ * textarea always shows Obsidian-native source. Legacy blocks (kind in the DB
+ * column, no markers in the body) are up-converted to `# `, `- `, `- [ ] `, or a
+ * fenced block so that editing + re-saving preserves their kind instead of
+ * silently demoting them to plain text. Bodies that are already markdown-native
+ * are returned unchanged.
+ */
+export function toEditableMarkdown(body: string, kind: KbBlockKind, meta: string | null): string {
+  if (detectKind(body)) return body
+  const metaObj = parseMeta(meta)
+  if (kind === 'heading') {
+    const level = headingLevel(metaObj)
+    return `${'#'.repeat(level)} ${body.replace(/^#+\s*/, '').trim()}`
+  }
+  if (kind === 'code') return '```\n' + body + '\n```'
+  if (kind === 'checklist') {
+    return body
+      .split('\n')
+      .map((l) => (l.trim() ? `- [${isChecked(l, metaObj) ? 'x' : ' '}] ${stripMarker(l)}` : l))
+      .join('\n')
+  }
+  if (kind === 'list') {
+    return body
+      .split('\n')
+      .map((l) => (l.trim() ? `- ${stripMarker(l)}` : l))
+      .join('\n')
+  }
+  return body
+}
