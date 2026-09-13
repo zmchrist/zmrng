@@ -290,6 +290,14 @@ export const api = {
   getSpaces: () => req<Space[]>('/api/spaces'),
   /** A space's folder/page tree, already FileTree-shaped server-side. */
   getSpaceTree: (spaceId: number) => req<KbTreeNode[]>(`/api/spaces/${spaceId}/tree`),
+  /** Create a KB space (name only — user-created spaces are not repo-scoped). */
+  createSpace: (name: string) =>
+    req<Space>('/api/spaces', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  /** Delete a space and EVERYTHING inside it (folders/pages/revisions), server-side. */
+  deleteSpace: (id: number) => reqNoContent(`/api/spaces/${id}`, { method: 'DELETE' }),
   /** One page — its `body` IS the whole page content (no separate blocks). */
   getPage: (pageId: number) => req<KbPage>(`/api/pages/${pageId}`),
 

@@ -98,6 +98,70 @@
   border-color: var(--accent-line);
 }
 
+.headRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spaceAddBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+
+.spaceAddBtn:hover {
+  border-color: var(--accent-line);
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.spaceAddBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spaceItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.spaceDeleteBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition);
+}
+
+.spaceDeleteBtn:hover {
+  color: var(--status-failed);
+  background: var(--surface-hover);
+}
+
+.spaceDeleteBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .search {
   width: 100%;
   padding: 7px 10px;

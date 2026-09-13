@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import styles from './KbView.module.css'
 import type { KbPage, KbPageRevision, KbTreeNode, Space, WorkspaceMember } from '../types'
-import { MAX_DISPLAY_NAME_LEN } from '../types'
+import { MAX_DISPLAY_NAME_LEN, PROTECTED_SPACE_NAME } from '../types'
 import { FileTree } from './FileTree'
 import { api } from '../api'
 import { renderPageMarkdown, toggleChecklistLine } from '../kbMarkdown'
@@ -350,10 +350,8 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     }
   }, [openPageId])
 
-  /** Switch the selected space, clearing the open page + its state. */
-  const selectSpace = (id: number): void => {
-    if (id === spaceId) return
-    setSpaceId(id)
+  /** Reset the per-space view state (open page, editor, history, search). */
+  const clearSpaceState = (): void => {
     setOpenPageId(null)
     setDetail(null)
     setViewers([])
@@ -361,6 +359,67 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     setBodyDraft(null)
     setHistoryOpen(false)
     setSearch('')
+  }
+
+  /** Switch the selected space, clearing the open page + its state. */
+  const selectSpace = (id: number): void => {
+    if (id === spaceId) return
+    setSpaceId(id)
+    clearSpaceState()
+  }
+
+  /**
+   * Create a new space (name only). Gated by `canEdit` like every other KB
+   * write. Prompts for the name (matching the existing rename affordance),
+   * appends the created space to the switcher, and selects it.
+   */
+  const createSpace = async (): Promise<void> => {
+    if (!canEdit || busy) return
+    const name = window.prompt('New space name')?.trim()
+    if (!name) return
+    setBusy(true)
+    setError(null)
+    try {
+      const space = await api.createSpace(name)
+      setSpaces((prev) => [...prev, space])
+      setSpaceId(space.id)
+      clearSpaceState()
+    } catch {
+      setError('Failed to create space')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /**
+   * Delete a space and everything inside it, after an explicit confirmation that
+   * spells out the permanence. Gated by `canEdit`; the protected `zmrng` space
+   * can never be deleted (guarded here and server-side). After deletion the
+   * switcher falls back to the first remaining space.
+   */
+  const deleteSpace = async (space: Space): Promise<void> => {
+    if (!canEdit || busy || space.name === PROTECTED_SPACE_NAME) return
+    const ok = window.confirm(
+      `Delete the "${space.name}" space?\n\n` +
+        'This permanently deletes the space and EVERYTHING inside it — all folders, ' +
+        'all pages, and their full edit history. This cannot be undone.',
+    )
+    if (!ok) return
+    setBusy(true)
+    setError(null)
+    try {
+      await api.deleteSpace(space.id)
+      const remaining = spaces.filter((s) => s.id !== space.id)
+      setSpaces(remaining)
+      if (space.id === spaceId) {
+        setSpaceId(remaining[0]?.id ?? null)
+        clearSpaceState()
+      }
+    } catch {
+      setError('Failed to delete space')
+    } finally {
+      setBusy(false)
+    }
   }
 
   /** Open a page from the tree (files only; folders just expand in FileTree). */
@@ -595,24 +654,58 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
       <aside className={styles.sidebar}>
         <div className={styles.sectionHead}>
           <span className={styles.sectionTitle}>Spaces</span>
-          <span className={styles.conn}>
-            <span className={`${styles.dot} ${connected ? styles.dotOn : styles.dotOff}`} aria-hidden />
-            {connected ? 'live' : 'offline'}
+          <span className={styles.headRight}>
+            {canEdit && (
+              <button
+                type="button"
+                className={styles.spaceAddBtn}
+                onClick={createSpace}
+                title="New space"
+                aria-label="New space"
+                disabled={busy}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+              </button>
+            )}
+            <span className={styles.conn}>
+              <span className={`${styles.dot} ${connected ? styles.dotOn : styles.dotOff}`} aria-hidden />
+              {connected ? 'live' : 'offline'}
+            </span>
           </span>
         </div>
         <ul className={styles.spaces}>
           {spaces.length === 0 && <li className={styles.empty}>No spaces.</li>}
-          {spaces.map((s) => (
-            <li key={s.id}>
-              <button
-                type="button"
-                className={`${styles.space} ${s.id === spaceId ? styles.spaceActive : ''}`}
-                onClick={() => selectSpace(s.id)}
-              >
-                {s.name}
-              </button>
-            </li>
-          ))}
+          {spaces.map((s) => {
+            const active = s.id === spaceId
+            const deletable = canEdit && active && s.name !== PROTECTED_SPACE_NAME
+            return (
+              <li key={s.id} className={styles.spaceItem}>
+                <button
+                  type="button"
+                  className={`${styles.space} ${active ? styles.spaceActive : ''}`}
+                  onClick={() => selectSpace(s.id)}
+                >
+                  {s.name}
+                </button>
+                {deletable && (
+                  <button
+                    type="button"
+                    className={styles.spaceDeleteBtn}
+                    onClick={() => deleteSpace(s)}
+                    title={`Delete the ${s.name} space`}
+                    aria-label={`Delete the ${s.name} space`}
+                    disabled={busy}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+                      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                )}
+              </li>
+            )
+          })}
         </ul>
 
         <div className={styles.sectionHead}>
