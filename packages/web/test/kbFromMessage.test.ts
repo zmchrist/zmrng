@@ -23,11 +23,11 @@ describe('deriveKbTitle', () => {
 })
 
 describe('resolveDefaultSpace', () => {
-  const spaces = [space(1, 'general'), space(2, 'zmrng'), space(3, 'pheme')]
+  const spaces = [space(1, 'general'), space(2, 'zmrng'), space(3, 'example-app')]
 
   it('matches a space whose name equals the channel name (case-insensitive)', () => {
     expect(resolveDefaultSpace('ZMRNG', spaces)?.id).toBe(2)
-    expect(resolveDefaultSpace('pheme', spaces)?.id).toBe(3)
+    expect(resolveDefaultSpace('example-app', spaces)?.id).toBe(3)
   })
 
   it('falls back to the general space when no name matches', () => {
