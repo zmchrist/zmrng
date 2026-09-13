@@ -121,6 +121,33 @@ export default function App() {
   const [updateSha, setUpdateSha] = useState<string | null>(null)
   const selectedIdRef = useRef<string | null>(null)
 
+  // Coalesce streamed `partial` tokens into at most one `setLive` per animation
+  // frame. A fast worker turn emits many tokens per frame; without this, each
+  // token triggered its own full-app re-render, and over a long autonomous run
+  // that render storm pegged the CPU/GPU (the core "bogs down after ~30 min"
+  // symptom). Tokens buffer here and flush on the next rAF as a single update.
+  const liveBufRef = useRef('')
+  const rafRef = useRef<number | null>(null)
+  const flushLive = useCallback(() => {
+    rafRef.current = null
+    const chunk = liveBufRef.current
+    if (!chunk) return
+    liveBufRef.current = ''
+    setLive((prev) => {
+      const next = prev + chunk
+      return next.length > MAX_LIVE_CHARS ? next.slice(next.length - MAX_LIVE_CHARS) : next
+    })
+  }, [])
+  // Reset the pending live buffer + any queued flush — on task switch/removal a
+  // stale flush must never append the old task's tail onto the new selection.
+  const resetLiveBuffer = useCallback(() => {
+    liveBufRef.current = ''
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+  }, [])
+
   const onWs = useCallback((e: WsEvent) => {
     switch (e.type) {
       case 'snapshot': {
@@ -139,6 +166,7 @@ export default function App() {
           return next.length > MAX_EVENTS ? next.slice(next.length - MAX_EVENTS) : next
         })
         if (e.event.kind === 'claude' && e.event.payload.sub === 'assistant') {
+          resetLiveBuffer()
           setLive('')
         }
         // A security-scan round just landed — refresh the Security panel live.
@@ -148,10 +176,8 @@ export default function App() {
         break
       case 'partial':
         if (e.taskId !== selectedIdRef.current) return
-        setLive((prev) => {
-          const next = prev + e.text
-          return next.length > MAX_LIVE_CHARS ? next.slice(next.length - MAX_LIVE_CHARS) : next
-        })
+        liveBufRef.current += e.text
+        if (rafRef.current === null) rafRef.current = requestAnimationFrame(flushLive)
         break
       case 'task-removed':
         setTasks((prev) => {
@@ -162,13 +188,14 @@ export default function App() {
         if (e.taskId === selectedIdRef.current) {
           selectedIdRef.current = null
           setSelectedId(null)
+          resetLiveBuffer()
           setLive('')
           setEvents([])
           setSecurityScans([])
         }
         break
     }
-  }, [])
+  }, [flushLive, resetLiveBuffer])
 
   const { connected } = useWs(onWs)
 
@@ -189,6 +216,7 @@ export default function App() {
   const select = useCallback(async (id: string) => {
     selectedIdRef.current = id
     setSelectedId(id)
+    resetLiveBuffer()
     setLive('')
     setEvents([])
     setSecurityScans([])
@@ -199,7 +227,10 @@ export default function App() {
     }
     // Security scan rows are read-only + independent; a failure just leaves the panel empty.
     api.listSecurityScans(id).then(setSecurityScans).catch(() => undefined)
-  }, [])
+  }, [resetLiveBuffer])
+
+  // Cancel any pending live-flush frame on unmount.
+  useEffect(() => resetLiveBuffer, [resetLiveBuffer])
 
   const onCreate = useCallback(
     async (
@@ -250,6 +281,10 @@ export default function App() {
     [setMode],
   )
   const onPrefillConsumed = useCallback(() => setHandoffPrefill(null), [])
+  // Stable handle-change callback: passing a fresh arrow each render would
+  // defeat the React.memo on TeamView/KbView, re-rendering those hidden
+  // subtrees on every live token.
+  const onTeamHandleChange = useCallback((h: string) => saveSettings({ teamHandle: h }), [saveSettings])
 
   // Team tab "Send to KB": switch to the KB tab and open the promoted page.
   const onOpenKbPage = useCallback(
@@ -389,9 +424,9 @@ export default function App() {
             <TeamView
               workspaceUrl={effectiveWorkspaceUrl}
               teamHandle={settings.teamHandle}
-              onHandleChange={(h) => saveSettings({ teamHandle: h })}
               botHandle={cfg?.botHandle ?? '@agent'}
               repos={repos}
+              onHandleChange={onTeamHandleChange}
               onSendToZmrng={onSendToZmrng}
               onOpenKbPage={onOpenKbPage}
               onNewVersion={onNewVersion}
@@ -405,7 +440,7 @@ export default function App() {
           >
             <KbView
               teamHandle={settings.teamHandle}
-              onHandleChange={(h) => saveSettings({ teamHandle: h })}
+              onHandleChange={onTeamHandleChange}
               openTarget={kbTarget}
               active={mode === 'kb'}
             />

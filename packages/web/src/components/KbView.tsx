@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import styles from './KbView.module.css'
 import type {
   KbBlock,
@@ -119,7 +119,7 @@ function initials(name: string): string {
  * code) rather than picked from a dropdown, and ⌘B/⌘I/⌘K/⌘↵ shortcuts drive
  * emphasis/links/save inside the textarea.
  */
-export function KbView({ teamHandle, onHandleChange, openTarget = null, active }: Props) {
+function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active }: Props) {
   // Split identity (#150): `presenceHandle` (may be `anon`) drives the workspace
   // hello + page presence; `editHandle` (EMPTY when no handle is set) authors
   // block edits. `canEdit` gates every write affordance — read-only viewing
@@ -917,3 +917,5 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
     </div>
   )
 }
+
+export const KbView = memo(KbViewComponent)

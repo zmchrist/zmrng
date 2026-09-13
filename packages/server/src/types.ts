@@ -936,7 +936,7 @@ export interface KbPageFromMessageInput {
 export const KB_SEED_SPACES: ReadonlyArray<{ name: string; repoUrl: string | null }> = [
   { name: 'general', repoUrl: null },
   { name: 'zmrng', repoUrl: 'https://github.com/zmchrist/zmrng' },
-  { name: 'pheme', repoUrl: 'https://github.com/zmchrist/pheme' },
+  { name: 'example-app', repoUrl: 'https://github.com/example/example-app' },
 ]
 
 /**
