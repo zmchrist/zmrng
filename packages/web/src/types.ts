@@ -698,6 +698,12 @@ export type WsWorkspaceServerMsg =
   // reload. Delete itself stays a REST call (`DELETE /api/blocks/:id`); this is
   // the SERVER->client convergence frame only — there is no new client frame.
   | { type: 'page.delete'; pageId: number; blockId: number }
+  // `space.tree` (folder/page drag-and-drop re-parenting) — mirror of server
+  // types. The tree-structure convergence frame: after a folder/page move
+  // (`PATCH /api/folders/:id` or `PATCH /api/pages/:id`) the server fans this to
+  // every workspace socket so a client viewing that space refetches its tree
+  // without a reload. Carries only `spaceId`; moves stay REST calls.
+  | { type: 'space.tree'; spaceId: number }
 
 /**
  * Max length of a self-asserted display-name handle, measured after trimming.
