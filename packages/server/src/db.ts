@@ -1079,6 +1079,50 @@ export class Db {
     return row ? rowToSpace(row) : undefined
   }
 
+  /**
+   * Create a KB space with the given name. User-created spaces are not
+   * repo-scoped, so `repo_url` is always null (only the seeded repo spaces
+   * carry a URL). Mirrors `createFolder`/`createPage`. The `spaces.name` column
+   * is UNIQUE, so a duplicate name throws a better-sqlite3 constraint error —
+   * the route guards against that before calling and returns a 409.
+   */
+  createSpace(name: string, now: string): Space {
+    const info = this.db
+      .prepare('INSERT INTO spaces (name, repo_url, created_at, updated_at) VALUES (?, ?, ?, ?)')
+      .run(name, null, now, now)
+    return { id: Number(info.lastInsertRowid), name, repoUrl: null, createdAt: now, updatedAt: now }
+  }
+
+  /**
+   * Delete a space and everything it contains — all of its folders, all of its
+   * pages, and every one of those pages' revisions — in one transaction.
+   *
+   * Cascade semantics (matches `deleteFolder`, which cascades folder→pages→
+   * revisions): a space owns its folders/pages directly via `space_id`, so the
+   * delete is a scoped `WHERE space_id = ?` sweep in the order revisions →
+   * pages → folders → the space row itself, leaving no orphan rows pointing at a
+   * deleted space. The whole thing runs inside a single better-sqlite3
+   * transaction so any failure rolls back cleanly. Caller is responsible for the
+   * protected-space guard (see `PROTECTED_SPACE_NAME`) — this method deletes
+   * whatever id it is given.
+   */
+  deleteSpace(id: number): void {
+    const run = this.db.transaction((spaceId: number) => {
+      const pageIds = (
+        this.db.prepare('SELECT id FROM pages WHERE space_id = ?').all(spaceId) as {
+          id: number
+        }[]
+      ).map((p) => p.id)
+      for (const pid of pageIds) {
+        this.db.prepare('DELETE FROM page_revisions WHERE page_id = ?').run(pid)
+      }
+      this.db.prepare('DELETE FROM pages WHERE space_id = ?').run(spaceId)
+      this.db.prepare('DELETE FROM folders WHERE space_id = ?').run(spaceId)
+      this.db.prepare('DELETE FROM spaces WHERE id = ?').run(spaceId)
+    })
+    run(id)
+  }
+
   /** Every folder in a space, in insertion order. */
   listFolders(spaceId: number): KbFolder[] {
     const rows = this.db
