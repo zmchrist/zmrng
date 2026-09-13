@@ -47,6 +47,34 @@ source of truth for the branch rule; `planning-workflow.md` points here. zmrng
 **workers** carry the same rule in their prompts (`phases.ts`), which run outside
 these hooks.*
 
+## Worktree isolation (hard rule, before any work)
+
+**Before editing, confirm you are the only agent in this working tree.** Branches
+do NOT isolate agents — directories (worktrees) do. Two Claude sessions `cd`'d
+into the same checkout share one HEAD, one index, one set of files: one session
+switching branch / stashing / rewriting silently corrupts the other's
+uncommitted work. Opening a second terminal and `cd`-ing in does not fork
+anything.
+
+- One session per working tree. A second concurrent agent gets its OWN worktree
+  off `origin/main`, and is launched from there:
+  `git worktree add ../<repo>-<task> -b <type>/zc/<desc> origin/main`.
+- Worktree isolation gives branch isolation for free — git refuses to check out
+  one branch in two worktrees.
+- If the working tree changes on its own mid-task (a modified-file set you did
+  not touch), a concurrent session is live: **STOP and surface it**, never run
+  git ops on top of another session's edits.
+
+*Enforced for Claude Code sessions by the repo's own
+`.claude/hooks/worktree_guard.py` PreToolUse hook — the first session to edit
+claims the worktree (a per-worktree lock keyed by session id); a second live
+session editing the same tree is denied and told to make its own. Stale locks
+self-expire after `HERMES_WORKTREE_LOCK_TTL` (default 3600s), so a
+crashed/closed session never bricks the tree. Override for a deliberate one-off:
+`HERMES_ALLOW_SHARED_WORKTREE=1`. Operator-harness only — zmrng **workers** are
+not seeded this hook because each already runs in a dedicated orchestrator-owned
+worktree (and a restart reuses that same dir with a fresh session id).*
+
 ## Worktree hygiene (hard rule, for workers)
 
 - The worktree is owned by the orchestrator. Never run `git worktree
