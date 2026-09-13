@@ -1,19 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import styles from './KbView.module.css'
-import type {
-  KbBlock,
-  KbPageDetail,
-  KbRevision,
-  KbTreeNode,
-  Space,
-  WorkspaceMember,
-} from '../types'
+import type { KbPage, KbPageRevision, KbTreeNode, Space, WorkspaceMember } from '../types'
 import { MAX_DISPLAY_NAME_LEN } from '../types'
 import { FileTree } from './FileTree'
 import { api } from '../api'
-import { detectKind, renderKbBlock, toEditableMarkdown } from '../kbMarkdown'
+import { renderPageMarkdown, toggleChecklistLine } from '../kbMarkdown'
 import { filterKbTree, pageBreadcrumb, parseKbNodePath } from '../kbTree'
-import { isBlockConflict, mergeBlock, removeBlock as removeBlockFromList } from '../kbConflict'
 import { kbHandles } from '../kbHandles'
 import {
   encodeHello,
@@ -29,7 +21,7 @@ interface Props {
    * The teammate's self-asserted display-name handle (server-side settings —
    * the SAME `settings.teamHandle` the Team surface persists). Presence/viewing
    * falls back to `anon` when unset, but EDITING requires a non-empty handle:
-   * no KB block may be authored as `anon` (#150). See `kbHandles`.
+   * no KB page may ever be saved as authored by 'anon' (#150). See `kbHandles`.
    */
   teamHandle: string
   /**
@@ -61,6 +53,9 @@ interface Props {
 
 const PING_MS = 25000
 const RECONNECT_MS = 2000
+/** Debounce window for continuous autosave — long enough that a burst of
+ *  keystrokes coalesces into one `page.edit`, short enough to feel instant. */
+const AUTOSAVE_DEBOUNCE_MS = 600
 
 /**
  * Inline "set a display name" affordance (#150) — NOT a blocking modal. Shown
@@ -109,21 +104,19 @@ function initials(name: string): string {
 /**
  * The KB mode surface (Variant A: list + detail). A curated team-space switcher
  * + the selected space's folder/page tree + a title search sit in the left
- * sidebar; the detail pane renders the open page's blocks as markdown, editable
- * per block, with live presence and block-LWW conflict UX. It owns ONE
+ * sidebar; the detail pane renders the open page as ONE continuous, Obsidian-
+ * style markdown field — click it and start typing right away, like a notepad.
+ * There is no per-block model: a page's `body` IS the whole page, autosaved
+ * continuously as the operator types (last-write-wins), with a throttled
+ * revision history reachable from the "History" page action. It owns ONE
  * multiplexed workspace socket (GET /ws/workspace, same-origin) for page
  * subscribe/edit/presence — REST covers spaces/tree/page + structural CRUD.
- *
- * The editor is Obsidian-native: block kinds are INFERRED from the markdown a
- * user types (`# ` → heading, `- ` → list, `- [ ] ` → checklist, a ``` fence →
- * code) rather than picked from a dropdown, and ⌘B/⌘I/⌘K/⌘↵ shortcuts drive
- * emphasis/links/save inside the textarea.
  */
 function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active }: Props) {
   // Split identity (#150): `presenceHandle` (may be `anon`) drives the workspace
   // hello + page presence; `editHandle` (EMPTY when no handle is set) authors
-  // block edits. `canEdit` gates every write affordance — read-only viewing
-  // works with no handle, but nothing is ever authored as `anon`.
+  // page saves. `canEdit` gates every write affordance — read-only viewing
+  // works with no handle, but nothing is ever saved as `anon`.
   const { presenceHandle, editHandle, canEdit } = kbHandles(teamHandle)
 
   const [spaces, setSpaces] = useState<Space[]>([])
@@ -134,16 +127,18 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   const [treeNonce, setTreeNonce] = useState(0)
   const [search, setSearch] = useState('')
   const [openPageId, setOpenPageId] = useState<number | null>(null)
-  const [detail, setDetail] = useState<KbPageDetail | null>(null)
+  const [detail, setDetail] = useState<KbPage | null>(null)
   const [viewers, setViewers] = useState<WorkspaceMember[]>([])
   const [connected, setConnected] = useState(false)
 
-  // blockId → unsaved draft body. A block is "dirty" while it has a draft that
-  // differs from its saved body; the dirty set drives block-LWW conflict detection.
-  const [drafts, setDrafts] = useState<Record<number, string>>({})
-  const [editingId, setEditingId] = useState<number | null>(null)
-  // The conflict toast: an incoming update replaced a block we were editing.
-  const [conflict, setConflict] = useState<{ block: KbBlock; revisions: KbRevision[] } | null>(null)
+  // The single-field editor: `editing` toggles between the rendered (click-to-
+  // edit) view and the raw textarea; `bodyDraft` is the textarea's live value
+  // while editing (null when not editing).
+  const [editing, setEditing] = useState(false)
+  const [bodyDraft, setBodyDraft] = useState<string | null>(null)
+  // The page-history panel (throttled revision snapshots — #6 "keep, throttled").
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [revisions, setRevisions] = useState<KbPageRevision[]>([])
   // Create affordance (page + folder) — compact icon buttons at the tree footer
   // that expand into a single inline name input (Obsidian-style). Both create at
   // the space root; reorganize into folders later.
@@ -169,39 +164,32 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     openPageIdRef.current = openPageId
   }, [openPageId])
 
+  // Readable inside the stable socket closure: an incoming page.update is
+  // dropped while the local user is actively editing, so another viewer's save
+  // never clobbers a live typing session (last-write-wins only matters at
+  // SAVE time, not while just rendering).
+  const editingRef = useRef(false)
+
   // The selected space, readable inside the stable socket closure so an incoming
   // `space.tree` frame can tell whether it targets the space we're viewing.
   const spaceIdRef = useRef<number | null>(null)
   useEffect(() => {
     spaceIdRef.current = spaceId
   }, [spaceId])
-
-  // When the operator clicks "+ Add block" the new block's id is only known once
-  // the server echoes it back — this flag makes the incoming page.update open
-  // that fresh block for editing immediately (Obsidian-style add-and-type).
-  const autoEditNextRef = useRef(false)
-
-  // The saved blocks of the open page (for conflict + draft diffing) readable
-  // inside the stable socket closure.
-  const blocksRef = useRef<KbBlock[]>([])
   useEffect(() => {
-    blocksRef.current = detail?.blocks ?? []
-  }, [detail])
-
-  // The set of locally-dirty block ids, readable inside the socket closure.
-  const dirtyIdsRef = useRef<Set<number>>(new Set())
-  const dirtyIds = useMemo(() => {
-    const saved = new Map((detail?.blocks ?? []).map((b) => [b.id, b.body]))
-    const set = new Set<number>()
-    for (const [id, body] of Object.entries(drafts)) {
-      const bid = Number(id)
-      if (saved.get(bid) !== body) set.add(bid)
-    }
-    return set
-  }, [drafts, detail])
+    editingRef.current = editing
+  }, [editing])
+  const canEditRef = useRef(canEdit)
   useEffect(() => {
-    dirtyIdsRef.current = dirtyIds
-  }, [dirtyIds])
+    canEditRef.current = canEdit
+  }, [canEdit])
+
+  // Continuous autosave: the debounce timer + the page/body it will flush.
+  // Refs (not state) so the textarea's onChange can schedule/cancel a save
+  // without re-running effects.
+  const pendingRef = useRef<{ pageId: number; body: string } | null>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   /** Send a pre-encoded frame if the socket is live (dropped otherwise). */
   const sendFrame = (data: string): void => {
@@ -209,7 +197,29 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     if (ws?.readyState === WebSocket.OPEN) ws.send(data)
   }
 
-  // ---- socket lifecycle (page presence + live block deltas) ----
+  /** Send any pending debounced save immediately and apply it optimistically. */
+  const flushPending = (): void => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current)
+      debounceRef.current = null
+    }
+    const pending = pendingRef.current
+    if (!pending) return
+    pendingRef.current = null
+    sendFrame(encodePageEdit(pending.pageId, pending.body, editHandle))
+    setDetail((prev) =>
+      prev && prev.id === pending.pageId ? { ...prev, body: pending.body, updatedBy: editHandle } : prev,
+    )
+  }
+
+  /** Debounce a whole-body autosave (continuous autosave, no explicit save step). */
+  const scheduleSave = (pageId: number, body: string): void => {
+    pendingRef.current = { pageId, body }
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(flushPending, AUTOSAVE_DEBOUNCE_MS)
+  }
+
+  // ---- socket lifecycle (page presence + live body deltas) ----
   // Gated on `active` (#149): only the active KB mode holds a workspace socket.
   // When `active` flips false the effect cleanup below runs (closes the ws,
   // clears timers, nulls wsRef, setConnected(false)) — so leaving the tab tears
@@ -245,54 +255,12 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
         if (!msg) return
         if (msg.type === 'page.update') {
           if (msg.pageId !== openPageIdRef.current) return
-          const block = msg.block
-          // A freshly-added block (unknown id) echoed back after "+ Add block":
-          // open it for editing straight away so the user just starts typing.
-          if (autoEditNextRef.current && !blocksRef.current.some((b) => b.id === block.id)) {
-            autoEditNextRef.current = false
-            setEditingId(block.id)
-          }
-          // Edit-author identity feeds the conflict predicate: a dirty block only
-          // exists when the local user is editing, which requires `editHandle`
-          // to be non-empty — so this correctly distinguishes two real handles.
-          const conflicted = isBlockConflict(block, dirtyIdsRef.current, editHandle)
-          // Block-LWW: the server already accepted the last write, so merge the
-          // incoming block regardless. On a conflict, drop our stale draft +
-          // surface the restore toast rather than silently clobbering the editor.
-          setDetail((prev) => (prev ? { ...prev, blocks: mergeBlock(prev.blocks, block) } : prev))
-          if (conflicted) {
-            setDrafts((prev) => {
-              const next = { ...prev }
-              delete next[block.id]
-              return next
-            })
-            setEditingId((cur) => (cur === block.id ? null : cur))
-            api
-              .getRevisions(block.id)
-              .then((revisions) => {
-                if (!closed) setConflict({ block, revisions })
-              })
-              .catch(() => {
-                if (!closed) setConflict({ block, revisions: [] })
-              })
-          }
+          // Don't clobber a live typing session on THIS tab — our own saves
+          // are already applied optimistically by `flushPending`.
+          if (editingRef.current) return
+          setDetail(msg.page)
         } else if (msg.type === 'page.presence') {
           if (msg.pageId === openPageIdRef.current) setViewers(msg.viewers)
-        } else if (msg.type === 'page.delete') {
-          // A block was deleted elsewhere — converge by dropping it from the open
-          // page and cleaning up any local draft / open editor for that block.
-          if (msg.pageId !== openPageIdRef.current) return
-          const { blockId } = msg
-          setDetail((prev) =>
-            prev ? { ...prev, blocks: removeBlockFromList(prev.blocks, blockId) } : prev,
-          )
-          setDrafts((prev) => {
-            if (!(blockId in prev)) return prev
-            const next = { ...prev }
-            delete next[blockId]
-            return next
-          })
-          setEditingId((cur) => (cur === blockId ? null : cur))
         } else if (msg.type === 'space.tree') {
           // A folder/page was re-parented (drag-and-drop) elsewhere — refetch the
           // tree if the change targets the space we're currently viewing.
@@ -353,14 +321,24 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     }
   }, [spaceId, treeNonce])
 
-  // ---- open a page: REST detail + subscribe to its live fan-out ----
+  // ---- open a page: REST fetch + subscribe to its live fan-out ----
+  // A blank page (freshly created, or emptied out) opens straight into the
+  // editor with the cursor ready — no button to press first, like a notepad.
   useEffect(() => {
     if (openPageId === null) return
     let cancelled = false
     api
       .getPage(openPageId)
       .then((page) => {
-        if (!cancelled) setDetail(page)
+        if (cancelled) return
+        setDetail(page)
+        if (canEditRef.current && page.body === '') {
+          setBodyDraft('')
+          setEditing(true)
+        } else {
+          setBodyDraft(null)
+          setEditing(false)
+        }
       })
       .catch(() => {
         if (!cancelled) setDetail(null)
@@ -379,9 +357,9 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     setOpenPageId(null)
     setDetail(null)
     setViewers([])
-    setDrafts({})
-    setEditingId(null)
-    setConflict(null)
+    setEditing(false)
+    setBodyDraft(null)
+    setHistoryOpen(false)
     setSearch('')
   }
 
@@ -393,9 +371,9 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     setOpenPageId(ref.id)
     setDetail(null)
     setViewers([])
-    setDrafts({})
-    setEditingId(null)
-    setConflict(null)
+    setEditing(false)
+    setBodyDraft(null)
+    setHistoryOpen(false)
   }
 
   const refreshTree = (): void => {
@@ -404,6 +382,15 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
       .getSpaceTree(spaceId)
       .then(setTree)
       .catch(() => undefined)
+  }
+
+  // ---- single-field body editing ----
+
+  /** Enter edit mode: seed the draft from the last-known-saved body. */
+  const enterEdit = (): void => {
+    if (!detail || !canEdit) return
+    setBodyDraft(detail.body)
+    setEditing(true)
   }
 
   /**
@@ -433,34 +420,33 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
       .catch(() => setError('Failed to move item'))
   }
 
-  // ---- block editing ----
-  const setDraft = (blockId: number, body: string): void => {
-    setDrafts((prev) => ({ ...prev, [blockId]: body }))
+  /** Live textarea change: update the draft and debounce an autosave. */
+  const onBodyChange = (value: string): void => {
+    setBodyDraft(value)
+    if (openPageId !== null) scheduleSave(openPageId, value)
   }
 
-  /** Abandon a block's unsaved draft and close its editor (Esc). */
-  const cancelEdit = (block: KbBlock): void => {
-    setDrafts((prev) => {
-      const next = { ...prev }
-      delete next[block.id]
-      return next
-    })
-    setEditingId(null)
+  /** Leave edit mode, discarding any NOT-YET-SENT (still-debouncing) keystrokes. */
+  const cancelEdit = (): void => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current)
+      debounceRef.current = null
+    }
+    pendingRef.current = null
+    setBodyDraft(null)
+    setEditing(false)
   }
 
   /**
    * Wrap the textarea's current selection with markdown markers (⌘B/⌘I/⌘K),
    * updating the draft and restoring the caret/selection after React re-renders.
    */
-  const wrapSelection = (
-    el: HTMLTextAreaElement,
-    block: KbBlock,
-    before: string,
-    after: string,
-  ): void => {
+  const wrapSelection = (before: string, after: string): void => {
+    const el = textareaRef.current
+    if (!el || openPageId === null) return
     const { selectionStart: s, selectionEnd: e, value } = el
     const next = value.slice(0, s) + before + value.slice(s, e) + after + value.slice(e)
-    setDraft(block.id, next)
+    onBodyChange(next)
     requestAnimationFrame(() => {
       el.selectionStart = s + before.length
       el.selectionEnd = e + before.length
@@ -468,93 +454,72 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     })
   }
 
-  /** Obsidian-style editor shortcuts: ⌘B/⌘I emphasis, ⌘K link, ⌘↵ save, Esc cancel. */
-  const onEditorKeyDown = (
-    e: React.KeyboardEvent<HTMLTextAreaElement>,
-    block: KbBlock,
-  ): void => {
+  /** Obsidian-style editor shortcuts: ⌘B/⌘I emphasis, ⌘K link, ⌘↵/blur save, Esc cancel. */
+  const onEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     const mod = e.metaKey || e.ctrlKey
     if (mod && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
       e.preventDefault()
-      wrapSelection(e.currentTarget, block, '**', '**')
+      wrapSelection('**', '**')
     } else if (mod && !e.shiftKey && (e.key === 'i' || e.key === 'I')) {
       e.preventDefault()
-      wrapSelection(e.currentTarget, block, '*', '*')
+      wrapSelection('*', '*')
     } else if (mod && (e.key === 'k' || e.key === 'K')) {
       e.preventDefault()
-      wrapSelection(e.currentTarget, block, '[', '](url)')
+      wrapSelection('[', '](url)')
     } else if (mod && e.key === 'Enter') {
       e.preventDefault()
-      saveBlock(block)
+      flushPending()
+      setEditing(false)
     } else if (e.key === 'Escape') {
       e.preventDefault()
-      cancelEdit(block)
+      cancelEdit()
     }
   }
 
   /**
-   * Save one block via the live `page.edit` fan-out, then close its editor. The
-   * block's KIND is INFERRED from the markdown body (Obsidian-style: `# ` → a
-   * heading, `- ` → a list, `- [ ] ` → a checklist, a ``` fence → code) so the
-   * operator never picks a kind from a dropdown. Plain prose stays `text`.
+   * Click inside the rendered (non-editing) body: a click on an interactive
+   * checklist checkbox toggles just that line (and autosaves immediately,
+   * skipping the debounce — a deliberate action, not a keystroke); a click
+   * anywhere else enters edit mode.
    */
-  const saveBlock = (block: KbBlock): void => {
-    if (!canEdit) return
-    const body = drafts[block.id]
-    if (body === undefined) {
-      setEditingId(null)
+  const onBodyClick = (e: React.MouseEvent<HTMLDivElement>): void => {
+    const target = e.target as HTMLElement
+    if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!canEdit || !detail || openPageId === null || target.dataset.line === undefined) return
+      const nextBody = toggleChecklistLine(detail.body, Number(target.dataset.line))
+      setDetail((prev) => (prev ? { ...prev, body: nextBody, updatedBy: editHandle } : prev))
+      sendFrame(encodePageEdit(openPageId, nextBody, editHandle))
       return
     }
-    const inferred = detectKind(body)
-    const kind = inferred?.kind ?? 'text'
-    const meta = inferred?.meta ?? null
-    sendFrame(encodePageEdit(openPageId!, block.id, kind, body, meta, editHandle))
-    // Optimistically apply locally; the server echo re-merges with a fresh ts.
-    setDetail((prev) =>
-      prev
-        ? {
-            ...prev,
-            blocks: prev.blocks.map((b) => (b.id === block.id ? { ...b, body, kind, meta } : b)),
-          }
-        : prev,
-    )
-    setDrafts((prev) => {
-      const next = { ...prev }
-      delete next[block.id]
-      return next
-    })
-    setEditingId(null)
+    enterEdit()
   }
 
-  /** Append a fresh (empty text) block and open it for editing (live create). */
-  const addBlock = (): void => {
-    if (!canEdit || openPageId === null) return
-    autoEditNextRef.current = true
-    sendFrame(encodePageEdit(openPageId, null, 'text', '', null, editHandle))
-  }
-
-  /** Delete a block over REST, then drop it from the open page locally. */
-  const removeBlock = (block: KbBlock): void => {
+  // ---- history panel (throttled revisions) ----
+  const openHistory = (): void => {
+    if (!detail) return
     api
-      .deleteBlock(block.id)
-      .then(() => {
-        setDetail((prev) =>
-          prev ? { ...prev, blocks: prev.blocks.filter((b) => b.id !== block.id) } : prev,
-        )
+      .getPageRevisions(detail.id)
+      .then((revs) => {
+        setRevisions(revs)
+        setHistoryOpen(true)
       })
-      .catch(() => setError('Failed to delete block'))
+      .catch(() => setError('Failed to load history'))
   }
 
-  /** Restore a revision onto the conflicted block, then close the toast. */
+  /** Restore a revision onto the open page, then close the panel. */
   const restore = (revisionId: number): void => {
-    if (!canEdit) return
+    if (!canEdit || openPageId === null) return
     api
-      .restoreRevision(revisionId, editHandle)
-      .then((block) => {
-        setDetail((prev) => (prev ? { ...prev, blocks: mergeBlock(prev.blocks, block) } : prev))
+      .restorePageRevision(revisionId, editHandle)
+      .then((page) => {
+        setDetail(page)
+        setBodyDraft(null)
+        setEditing(false)
         // Re-broadcast so other viewers converge on the restored version.
-        sendFrame(encodePageEdit(block.pageId, block.id, block.kind, block.body, block.meta, editHandle))
-        setConflict(null)
+        sendFrame(encodePageEdit(openPageId, page.body, editHandle))
+        setHistoryOpen(false)
       })
       .catch(() => setError('Failed to restore revision'))
   }
@@ -592,12 +557,12 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
 
   const renamePage = (): void => {
     if (!detail) return
-    const next = window.prompt('Rename page', detail.page.title)?.trim()
-    if (!next || next === detail.page.title) return
+    const next = window.prompt('Rename page', detail.title)?.trim()
+    if (!next || next === detail.title) return
     api
-      .updatePage(detail.page.id, { title: next })
+      .updatePage(detail.id, { title: next })
       .then((page) => {
-        setDetail((prev) => (prev ? { ...prev, page } : prev))
+        setDetail(page)
         refreshTree()
       })
       .catch(() => setError('Failed to rename page'))
@@ -605,8 +570,8 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
 
   const deletePage = (): void => {
     if (!detail) return
-    if (!window.confirm(`Delete page "${detail.page.title}"?`)) return
-    const id = detail.page.id
+    if (!window.confirm(`Delete page "${detail.title}"?`)) return
+    const id = detail.id
     api
       .deletePage(id)
       .then(() => {
@@ -763,7 +728,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                 ))}
               </div>
               <div className={styles.titleRow}>
-                <h1 className={styles.pageTitle}>{detail.page.title}</h1>
+                <h1 className={styles.pageTitle}>{detail.title}</h1>
                 <div className={styles.presence} aria-label={`${viewers.length} viewing`}>
                   {viewers.map((v) => (
                     <span key={v.id} className={styles.avatar} title={v.displayName}>
@@ -774,6 +739,9 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                 </div>
               </div>
               <div className={styles.pageActions}>
+                <button type="button" className={styles.pageAction} onClick={openHistory}>
+                  History
+                </button>
                 <button type="button" className={styles.pageAction} onClick={renamePage}>
                   Rename
                 </button>
@@ -783,93 +751,43 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
               </div>
             </header>
 
-            <div className={styles.blocks}>
-              {detail.blocks.length === 0 && (
-                <p className={styles.empty}>This page has no blocks yet — add one below.</p>
-              )}
-              {detail.blocks.map((block) => {
-                const editing = editingId === block.id
-                const draft = drafts[block.id]
-                const dirty = dirtyIds.has(block.id)
-                return (
-                  <div key={block.id} className={`${styles.block} ${dirty ? styles.blockDirty : ''}`}>
-                    {editing ? (
-                      <div className={styles.editor}>
-                        <textarea
-                          className={styles.textarea}
-                          value={draft ?? toEditableMarkdown(block.body, block.kind, block.meta)}
-                          onChange={(e) => setDraft(block.id, e.target.value)}
-                          onKeyDown={(e) => onEditorKeyDown(e, block)}
-                          onBlur={() => saveBlock(block)}
-                          aria-label="Block markdown"
-                          autoFocus
-                        />
-                        <div className={styles.editorBar}>
-                          <span className={styles.editorHint}>
-                            # heading · - list · ⌘B bold · ⌘I italic · ⌘↵ save · esc cancel
-                          </span>
-                          <button
-                            type="button"
-                            className={styles.saveBtn}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => saveBlock(block)}
-                          >
-                            Save
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className={styles.rendered}>
-                        {canEdit && (
-                          <>
-                            <button
-                              type="button"
-                              className={styles.editToggle}
-                              onClick={() => setEditingId(block.id)}
-                              aria-label="Edit block"
-                              title="Edit block"
-                            >
-                              ✎
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.removeToggle}
-                              onClick={() => removeBlock(block)}
-                              aria-label="Delete block"
-                              title="Delete block"
-                            >
-                              ×
-                            </button>
-                          </>
-                        )}
-                        <div
-                          className={styles.markdown}
-                          onClick={canEdit ? () => setEditingId(block.id) : undefined}
-                          dangerouslySetInnerHTML={{
-                            __html:
-                              renderKbBlock(block.body, block.kind, block.meta) ||
-                              '<p class="' + styles.placeholder + '">Empty block — click to edit</p>',
-                          }}
-                        />
-                      </div>
-                    )}
+            <div className={styles.bodyWrap}>
+              {editing ? (
+                <div className={styles.bodyEditor}>
+                  <textarea
+                    ref={textareaRef}
+                    className={styles.bodyTextarea}
+                    value={bodyDraft ?? ''}
+                    onChange={(e) => onBodyChange(e.target.value)}
+                    onKeyDown={onEditorKeyDown}
+                    onBlur={() => {
+                      flushPending()
+                      setEditing(false)
+                    }}
+                    placeholder="Start typing…"
+                    aria-label="Page body"
+                    autoFocus
+                  />
+                  <div className={styles.editorHint}>
+                    # heading · - list · - [ ] checklist · ``` code · ⌘B bold · ⌘I italic · ⌘K link · esc done
                   </div>
-                )
-              })}
+                </div>
+              ) : !canEdit && detail.body.trim() === '' ? (
+                <p className={styles.empty}>This page is empty.</p>
+              ) : (
+                <div
+                  className={styles.bodyRendered}
+                  onClick={canEdit ? onBodyClick : undefined}
+                  dangerouslySetInnerHTML={{
+                    __html:
+                      renderPageMarkdown(detail.body) ||
+                      `<p class="${styles.placeholder}">Click to start typing…</p>`,
+                  }}
+                />
+              )}
             </div>
 
-            {canEdit ? (
-              <div className={styles.addBar}>
-                <button
-                  type="button"
-                  className={styles.addBtn}
-                  onClick={() => addBlock()}
-                  disabled={!connected}
-                >
-                  + Add block
-                </button>
-              </div>
-            ) : (
+            {!canEdit && (
               <div className={styles.addBar}>
                 <HandleGate onSet={onHandleChange} action="edit this page" />
               </div>
@@ -884,17 +802,14 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
           </div>
         )}
 
-        {conflict && (
-          <div className={styles.toast} role="alert">
-            <div className={styles.toastBody}>
-              <strong>Someone else edited this block</strong> — your version was replaced (last
-              write wins). Restore one of your earlier versions:
+        {historyOpen && (
+          <div className={styles.historyPanel} role="dialog" aria-label="Page history">
+            <div className={styles.historyHead}>
+              <strong>History</strong> — restore an earlier saved version:
             </div>
             <ul className={styles.revisions}>
-              {conflict.revisions.length === 0 && (
-                <li className={styles.empty}>No earlier revisions available.</li>
-              )}
-              {conflict.revisions
+              {revisions.length === 0 && <li className={styles.empty}>No earlier revisions available.</li>}
+              {revisions
                 .slice()
                 .reverse()
                 .map((r) => (
@@ -908,8 +823,8 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                   </li>
                 ))}
             </ul>
-            <button type="button" className={styles.toastClose} onClick={() => setConflict(null)}>
-              Dismiss
+            <button type="button" className={styles.historyClose} onClick={() => setHistoryOpen(false)}>
+              Close
             </button>
           </div>
         )}

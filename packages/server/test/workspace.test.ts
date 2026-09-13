@@ -6,16 +6,10 @@ import {
   ChannelManager,
   PageManager,
 } from '../src/workspace.js'
-import {
-  MAX_DISPLAY_NAME_LEN,
-  MAX_MESSAGE_BODY_LEN,
-  MAX_EMOJI_LEN,
-  MAX_BLOCK_META_LEN,
-} from '../src/types.js'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from '../src/types.js'
 import type {
   Channel,
-  KbBlock,
-  KbBlockKind,
+  KbPage,
   Member,
   Message,
   ReactionSummary,
@@ -205,84 +199,38 @@ describe('parseWorkspaceClientMsg — KB page frames (T2, #144)', () => {
     ).toBeUndefined()
   })
 
-  it('parses a page.edit that CREATES a block (blockId null) and preserves body whitespace', () => {
+  it('parses a page.edit whole-body autosave, preserving body whitespace and trimming the author', () => {
     expect(
       parseWorkspaceClientMsg(
-        JSON.stringify({
-          type: 'page.edit',
-          pageId: 3,
-          blockId: null,
-          kind: 'code',
-          body: '  indented\n',
-          meta: '{"lang":"ts"}',
-          author: '  Ada  ',
-        }),
+        JSON.stringify({ type: 'page.edit', pageId: 3, body: '  indented\n', author: '  Ada  ' }),
       ),
     ).toEqual({
       type: 'page.edit',
       pageId: 3,
-      blockId: null,
-      kind: 'code',
-      body: '  indented\n', // NOT trimmed — block whitespace is meaningful
-      meta: '{"lang":"ts"}',
+      body: '  indented\n', // NOT trimmed — leading/trailing whitespace is meaningful
       author: 'Ada', // author IS trimmed
-    })
-  })
-
-  it('parses a page.edit that UPDATES a block (positive-int blockId) with null meta', () => {
-    expect(
-      parseWorkspaceClientMsg(
-        JSON.stringify({
-          type: 'page.edit',
-          pageId: 3,
-          blockId: 12,
-          kind: 'text',
-          body: 'hello',
-          meta: null,
-          author: 'Bo',
-        }),
-      ),
-    ).toEqual({
-      type: 'page.edit',
-      pageId: 3,
-      blockId: 12,
-      kind: 'text',
-      body: 'hello',
-      meta: null,
-      author: 'Bo',
     })
   })
 
   it('allows an empty body but rejects an over-cap body', () => {
     const empty = parseWorkspaceClientMsg(
-      JSON.stringify({ type: 'page.edit', pageId: 1, blockId: null, kind: 'text', body: '', meta: null, author: 'Ada' }),
+      JSON.stringify({ type: 'page.edit', pageId: 1, body: '', author: 'Ada' }),
     )
     expect(empty?.type).toBe('page.edit')
     const overCap = 'a'.repeat(MAX_MESSAGE_BODY_LEN + 1)
     expect(
       parseWorkspaceClientMsg(
-        JSON.stringify({ type: 'page.edit', pageId: 1, blockId: null, kind: 'text', body: overCap, meta: null, author: 'Ada' }),
+        JSON.stringify({ type: 'page.edit', pageId: 1, body: overCap, author: 'Ada' }),
       ),
     ).toBeUndefined()
   })
 
-  it('rejects a kind not in KB_BLOCK_KINDS (enum enforced at the wire)', () => {
-    expect(
-      parseWorkspaceClientMsg(
-        JSON.stringify({ type: 'page.edit', pageId: 1, blockId: null, kind: 'bogus', body: 'x', meta: null, author: 'Ada' }),
-      ),
-    ).toBeUndefined()
-  })
-
-  it('rejects an over-cap meta, a non-int/non-null blockId, a bad pageId, and a blank author', () => {
-    const overCapMeta = 'm'.repeat(MAX_BLOCK_META_LEN + 1)
+  it('rejects a non-string body, a bad pageId, and a blank/missing author', () => {
     const bad = [
-      { type: 'page.edit', pageId: 1, blockId: null, kind: 'text', body: 'x', meta: overCapMeta, author: 'Ada' },
-      { type: 'page.edit', pageId: 1, blockId: 1.5, kind: 'text', body: 'x', meta: null, author: 'Ada' },
-      { type: 'page.edit', pageId: 1, blockId: '1', kind: 'text', body: 'x', meta: null, author: 'Ada' },
-      { type: 'page.edit', pageId: 0, blockId: null, kind: 'text', body: 'x', meta: null, author: 'Ada' },
-      { type: 'page.edit', pageId: 1, blockId: null, kind: 'text', body: 'x', meta: null, author: '   ' },
-      { type: 'page.edit', pageId: 1, blockId: null, kind: 'text', body: 'x', meta: 5, author: 'Ada' },
+      { type: 'page.edit', pageId: 1, body: 5, author: 'Ada' },
+      { type: 'page.edit', pageId: 0, body: 'x', author: 'Ada' },
+      { type: 'page.edit', pageId: 1, body: 'x', author: '   ' },
+      { type: 'page.edit', pageId: 1, body: 'x' },
     ]
     for (const f of bad) expect(parseWorkspaceClientMsg(JSON.stringify(f))).toBeUndefined()
   })
@@ -589,76 +537,42 @@ describe('WorkspaceManager', () => {
 })
 
 /**
- * In-memory stand-in for the KB page/block surface PageManager needs. Mirrors
- * T1 Db semantics closely enough for the fan-out/presence tests: createBlock
- * appends (ord = next), updateBlock FIRST snapshots the prior state into
- * `revisions` THEN patches (the load-bearing revision-on-update property), and
- * getBlockPageId returns the owning page (or undefined for an unknown block).
+ * In-memory stand-in for the KB page-body surface PageManager needs. Mirrors
+ * T1 Db semantics closely enough for the fan-out/presence tests:
+ * updatePageBody FIRST snapshots the prior state into `revisions` THEN
+ * replaces the body (the load-bearing revision-on-save property).
  */
 class FakePageDb {
-  private pages = new Set<number>([1, 2]) // pages 1 and 2 exist
-  private blocks: KbBlock[] = []
-  /** Prior-state revision snapshots, in write order (asserts the T1 property). */
-  revisions: Array<{ blockId: number; body: string; kind: KbBlockKind; meta: string | null }> = []
-  private nextId = 1
+  private pages = new Map<number, KbPage>(
+    [1, 2].map((id) => [
+      id,
+      {
+        id,
+        spaceId: 1,
+        folderId: null,
+        title: `Page ${id}`,
+        body: '',
+        author: 'Ada',
+        updatedBy: 'Ada',
+        createdAt: 't0',
+        updatedAt: 't0',
+      },
+    ]),
+  )
+  /** Prior-body revision snapshots, in write order (asserts the T1 property). */
+  revisions: Array<{ pageId: number; body: string }> = []
 
-  getPage(id: number): { id: number } | undefined {
-    return this.pages.has(id) ? ({ id } as { id: number }) : undefined
+  getPage(id: number): KbPage | undefined {
+    return this.pages.get(id)
   }
-  getBlockPageId(blockId: number): number | undefined {
-    return this.blocks.find((b) => b.id === blockId)?.pageId
-  }
-  listBlocks(pageId: number): KbBlock[] {
-    return this.blocks.filter((b) => b.pageId === pageId).sort((a, b) => a.ord - b.ord)
-  }
-  createBlock(input: {
-    pageId: number
-    ord: number | null
-    kind: KbBlockKind
-    body: string
-    meta: string | null
-    updatedBy: string
-    now: string
-  }): KbBlock {
-    const ord = input.ord ?? this.listBlocks(input.pageId).length
-    const block: KbBlock = {
-      id: this.nextId++,
-      pageId: input.pageId,
-      ord,
-      kind: input.kind,
-      body: input.body,
-      meta: input.meta,
-      updatedAt: input.now,
-      updatedBy: input.updatedBy,
-    }
-    this.blocks.push(block)
-    return block
-  }
-  updateBlock(
-    id: number,
-    patch: { kind?: KbBlockKind; body?: string; meta?: string | null },
-    updatedBy: string,
-    now: string,
-  ): KbBlock | undefined {
-    const existing = this.blocks.find((b) => b.id === id)
+  updatePageBody(id: number, body: string, updatedBy: string, now: string): KbPage | undefined {
+    const existing = this.pages.get(id)
     if (!existing) return undefined
-    // FIRST snapshot the PRIOR state (the revision-on-update property).
-    this.revisions.push({
-      blockId: id,
-      body: existing.body,
-      kind: existing.kind,
-      meta: existing.meta,
-    })
-    existing.kind = patch.kind ?? existing.kind
-    existing.body = patch.body ?? existing.body
-    existing.meta = patch.meta !== undefined ? patch.meta : existing.meta
-    existing.updatedAt = now
-    existing.updatedBy = updatedBy
-    return { ...existing }
-  }
-  deleteBlock(id: number): void {
-    this.blocks = this.blocks.filter((b) => b.id !== id)
-    this.revisions = this.revisions.filter((r) => r.blockId !== id)
+    // FIRST snapshot the PRIOR state (the revision-on-save property).
+    this.revisions.push({ pageId: id, body: existing.body })
+    const next: KbPage = { ...existing, body, updatedBy, updatedAt: now }
+    this.pages.set(id, next)
+    return next
   }
 }
 
@@ -678,51 +592,43 @@ describe('PageManager fan-out (T2, #144 — acceptance-critical)', () => {
   const updates = (received: Array<{ socket: object; frame: WsWorkspaceServerMsg }>) =>
     received.filter((r) => r.frame.type === 'page.update')
 
-  it('saveBlock CREATES a block (blockId null → append), returns it, fans a page.update', () => {
+  it('savePage persists the whole body, returns the updated page, and fans a page.update', () => {
     const { mgr, received } = setup()
     const sockA = {}
     mgr.subscribe(sockA, 1, member(1, 'Ada'))
-    const block = mgr.saveBlock(1, null, 'text', 'hello', null, 'Ada', 't')
-    expect(block).toBeDefined()
-    expect(block?.pageId).toBe(1)
-    expect(block?.ord).toBe(0) // first block appends at ord 0
+    const page = mgr.savePage(1, 'hello', 'Ada', 't')
+    expect(page).toBeDefined()
+    expect(page?.id).toBe(1)
+    expect(page?.body).toBe('hello')
     const upd = updates(received)
     expect(upd).toHaveLength(1)
     expect(upd[0].socket).toBe(sockA)
-    expect(upd[0].frame).toEqual({ type: 'page.update', pageId: 1, block })
+    expect(upd[0].frame).toEqual({ type: 'page.update', pageId: 1, page })
   })
 
-  it('saveBlock on an unknown page is a no-op returning undefined (nothing fanned)', () => {
+  it('savePage on an unknown page is a no-op returning undefined (nothing fanned)', () => {
     const { mgr, received } = setup()
     mgr.subscribe({}, 999, member(1, 'Ada'))
-    expect(mgr.saveBlock(999, null, 'text', 'ghost', null, 'Ada', 't')).toBeUndefined()
+    expect(mgr.savePage(999, 'ghost', 'Ada', 't')).toBeUndefined()
     expect(updates(received)).toHaveLength(0)
   })
 
-  it('saveBlock UPDATE with a block that does not belong to the page is a no-op', () => {
+  it('savePage fans a page.update AND writes a prior-state revision (T1 property)', () => {
     const { db, mgr, received } = setup()
-    const b = db.createBlock({ pageId: 1, ord: null, kind: 'text', body: 'x', meta: null, updatedBy: 'Ada', now: 't' })
-    mgr.subscribe({}, 2, member(1, 'Ada'))
-    // Claim the block (page 1) is on page 2 — mismatch → no persist, no fan-out.
-    expect(mgr.saveBlock(2, b.id, 'text', 'y', null, 'Ada', 't')).toBeUndefined()
-    expect(updates(received)).toHaveLength(0)
-    // Unknown block id likewise (page exists but block does not).
-    expect(mgr.saveBlock(1, 99999, 'text', 'y', null, 'Ada', 't')).toBeUndefined()
-  })
-
-  it('saveBlock UPDATE fans a page.update AND writes a prior-state revision (T1 property)', () => {
-    const { db, mgr, received } = setup()
-    const b = db.createBlock({ pageId: 1, ord: null, kind: 'text', body: 'v1', meta: null, updatedBy: 'Ada', now: 't' })
+    db.updatePageBody(1, 'v1', 'Ada', 't0')
     const sockA = {}
     mgr.subscribe(sockA, 1, member(1, 'Ada'))
-    const updated = mgr.saveBlock(1, b.id, 'text', 'v2', null, 'Bo', 't2')
+    const updated = mgr.savePage(1, 'v2', 'Bo', 't2')
     expect(updated?.body).toBe('v2')
-    // The update fanned a page.update.
+    expect(updated?.updatedBy).toBe('Bo')
+    // The save fanned a page.update.
     const upd = updates(received)
     expect(upd).toHaveLength(1)
-    expect(upd[0].frame).toEqual({ type: 'page.update', pageId: 1, block: updated })
+    expect(upd[0].frame).toEqual({ type: 'page.update', pageId: 1, page: updated })
     // A revision captured the PRIOR state ('v1') before the patch applied.
-    expect(db.revisions).toEqual([{ blockId: b.id, body: 'v1', kind: 'text', meta: null }])
+    expect(db.revisions).toEqual(
+      expect.arrayContaining([{ pageId: 1, body: 'v1' }]),
+    )
   })
 
   it('fans a page.update ONLY to sockets subscribed to that page (cross-page isolation)', () => {
@@ -731,7 +637,7 @@ describe('PageManager fan-out (T2, #144 — acceptance-critical)', () => {
     const sockB = {}
     mgr.subscribe(sockA, 1, member(1, 'Ada'))
     mgr.subscribe(sockB, 2, member(2, 'Bo'))
-    mgr.saveBlock(1, null, 'text', 'in one', null, 'Ada', 't')
+    mgr.savePage(1, 'in one', 'Ada', 't')
     const upd = updates(received)
     expect(upd).toHaveLength(1)
     expect(upd[0].socket).toBe(sockA)
@@ -743,7 +649,7 @@ describe('PageManager fan-out (T2, #144 — acceptance-critical)', () => {
     const sockA = {}
     mgr.subscribe(sockA, 1, member(1, 'Ada'))
     mgr.unsubscribe(sockA, 1)
-    mgr.saveBlock(1, null, 'text', 'gone', null, 'Ada', 't')
+    mgr.savePage(1, 'gone', 'Ada', 't')
     expect(updates(received)).toHaveLength(0)
   })
 
@@ -753,8 +659,8 @@ describe('PageManager fan-out (T2, #144 — acceptance-critical)', () => {
     mgr.subscribe(sockA, 1, member(1, 'Ada'))
     mgr.subscribe(sockA, 2, member(1, 'Ada'))
     mgr.unsubscribeAll(sockA)
-    mgr.saveBlock(1, null, 'text', 'x', null, 'Ada', 't')
-    mgr.saveBlock(2, null, 'text', 'y', null, 'Ada', 't')
+    mgr.savePage(1, 'x', 'Ada', 't')
+    mgr.savePage(2, 'y', 'Ada', 't')
     expect(updates(received)).toHaveLength(0)
   })
 
@@ -763,7 +669,7 @@ describe('PageManager fan-out (T2, #144 — acceptance-critical)', () => {
     const sockA = {}
     mgr.subscribe(sockA, 1, member(1, 'Ada'))
     mgr.subscribe(sockA, 1, member(1, 'Ada'))
-    mgr.saveBlock(1, null, 'text', 'once', null, 'Ada', 't')
+    mgr.savePage(1, 'once', 'Ada', 't')
     expect(updates(received)).toHaveLength(1)
   })
 
@@ -823,55 +729,5 @@ describe('PageManager fan-out (T2, #144 — acceptance-critical)', () => {
     mgr.subscribe({}, 1, member(1, 'Ada'))
     mgr.subscribe({}, 1, member(1, 'Ada')) // same member, second tab
     expect(mgr.viewers(1)).toEqual([{ id: 1, displayName: 'Ada', online: true }])
-  })
-
-  // ---- deleteBlock live fan-out (#151 — acceptance-critical) ----
-  const deletes = (received: Array<{ socket: object; frame: WsWorkspaceServerMsg }>) =>
-    received.filter((r) => r.frame.type === 'page.delete')
-
-  it('deleteBlock removes the block AND fans a page.delete to EVERY subscribed viewer', () => {
-    const { db, mgr, received } = setup()
-    const b = db.createBlock({ pageId: 1, ord: null, kind: 'text', body: 'x', meta: null, updatedBy: 'Ada', now: 't' })
-    const sockA = {}
-    const sockB = {}
-    mgr.subscribe(sockA, 1, member(1, 'Ada'))
-    mgr.subscribe(sockB, 1, member(2, 'Bo'))
-    expect(mgr.deleteBlock(1, b.id)).toBe(true)
-    // The block is gone from the store.
-    expect(db.getBlockPageId(b.id)).toBeUndefined()
-    expect(db.listBlocks(1)).toHaveLength(0)
-    // BOTH subscribers received the tombstone.
-    const del = deletes(received)
-    expect(del).toHaveLength(2)
-    expect(del.map((r) => r.socket)).toEqual([sockA, sockB])
-    for (const r of del) {
-      expect(r.frame).toEqual({ type: 'page.delete', pageId: 1, blockId: b.id })
-    }
-  })
-
-  it('deleteBlock fans a page.delete ONLY to sockets subscribed to that page (cross-page isolation)', () => {
-    const { db, mgr, received } = setup()
-    const b = db.createBlock({ pageId: 1, ord: null, kind: 'text', body: 'x', meta: null, updatedBy: 'Ada', now: 't' })
-    const sockA = {}
-    const sockB = {}
-    mgr.subscribe(sockA, 1, member(1, 'Ada'))
-    mgr.subscribe(sockB, 2, member(2, 'Bo'))
-    mgr.deleteBlock(1, b.id)
-    const del = deletes(received)
-    expect(del).toHaveLength(1)
-    expect(del[0].socket).toBe(sockA)
-  })
-
-  it('deleteBlock with a block that does not belong to the page is a no-op (nothing deleted, nothing fanned)', () => {
-    const { db, mgr, received } = setup()
-    const b = db.createBlock({ pageId: 1, ord: null, kind: 'text', body: 'x', meta: null, updatedBy: 'Ada', now: 't' })
-    mgr.subscribe({}, 2, member(1, 'Ada'))
-    // Claim the block (page 1) is on page 2 — mismatch → no delete, no fan-out.
-    expect(mgr.deleteBlock(2, b.id)).toBe(false)
-    // Unknown block id likewise.
-    expect(mgr.deleteBlock(1, 99999)).toBe(false)
-    expect(deletes(received)).toHaveLength(0)
-    // The block still exists.
-    expect(db.getBlockPageId(b.id)).toBe(1)
   })
 })
