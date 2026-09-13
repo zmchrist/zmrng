@@ -4,6 +4,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import { Db } from '../src/db.js'
+import { PROTECTED_SPACE_NAME } from '../src/types.js'
 import { resolvePageTitle, buildPageBody } from '../src/kbFromMessage.js'
 
 let dir: string
@@ -109,6 +110,82 @@ describe('KB seed (spaces)', () => {
     const reread = db2.getPage(page.id)
     expect(reread?.title).toBe('Keep me')
     db2.close()
+  })
+})
+
+describe('KB spaces (create / delete)', () => {
+  it('createSpace inserts a name-only space (null repo_url) and lists it after the seeds', () => {
+    const db = new Db(dbPath)
+    const space = db.createSpace('Team Notes', NOW)
+    expect(space.name).toBe('Team Notes')
+    expect(space.repoUrl).toBeNull()
+    expect(space.createdAt).toBe(NOW)
+    // Appears in the list after the three seeded spaces.
+    expect(db.listSpaces().map((s) => s.name)).toEqual([
+      'general',
+      'zmrng',
+      'example-app',
+      'Team Notes',
+    ])
+    // Round-trips back through getSpace.
+    expect(db.getSpace(space.id)?.name).toBe('Team Notes')
+    db.close()
+  })
+
+  it('deleteSpace cascade-removes the space and ALL its folders/pages/revisions', () => {
+    const db = new Db(dbPath)
+    const space = db.createSpace('Doomed', NOW)
+    const folder = db.createFolder(space.id, null, 'Docs', NOW)
+    const rootPage = db.createPage(space.id, null, 'Root', 'Ada', NOW, 'r')
+    const nested = db.createPage(space.id, folder.id, 'Nested', 'Ada', NOW, 'n')
+    // Record a revision on each page so we can prove revisions are cascaded too.
+    db.updatePageBody(rootPage.id, 'r2', 'Ada', '2026-09-10T01:00:00.000Z')
+    db.updatePageBody(nested.id, 'n2', 'Ada', '2026-09-10T01:00:00.000Z')
+    expect(db.listPageRevisions(rootPage.id)).toHaveLength(1)
+
+    db.deleteSpace(space.id)
+
+    expect(db.getSpace(space.id)).toBeUndefined()
+    expect(db.getFolder(folder.id)).toBeUndefined()
+    expect(db.getPage(rootPage.id)).toBeUndefined()
+    expect(db.getPage(nested.id)).toBeUndefined()
+    expect(db.listPageRevisions(rootPage.id)).toHaveLength(0)
+    expect(db.listPageRevisions(nested.id)).toHaveLength(0)
+    db.close()
+  })
+
+  it('deleteSpace is scoped — a sibling space and its contents survive', () => {
+    const db = new Db(dbPath)
+    const doomed = db.createSpace('Doomed', NOW)
+    const keep = db.createSpace('Keep', NOW)
+    db.createPage(doomed.id, null, 'Gone', 'Ada', NOW)
+    const keptPage = db.createPage(keep.id, null, 'Kept', 'Ada', NOW, 'keep')
+
+    db.deleteSpace(doomed.id)
+
+    expect(db.getSpace(doomed.id)).toBeUndefined()
+    expect(db.getSpace(keep.id)?.name).toBe('Keep')
+    expect(db.getPage(keptPage.id)?.body).toBe('keep')
+    db.close()
+  })
+
+  it('the zmrng space is the detectable protected space (name === PROTECTED_SPACE_NAME)', () => {
+    // The DELETE /api/spaces/:id route guard keys off the space name: it rejects
+    // the deletion when `getSpace(id).name === PROTECTED_SPACE_NAME` with a 403.
+    // This exercises that same signal at the Db layer (the repo has no HTTP-inject
+    // harness, #91), matching the cross-space-integrity test convention above.
+    const db = new Db(dbPath)
+    const zmrng = db.listSpaces().find((s) => s.name === PROTECTED_SPACE_NAME)!
+    expect(zmrng).toBeDefined()
+    expect(zmrng.name).toBe(PROTECTED_SPACE_NAME)
+    // A user-created space is NOT protected, so its name differs from the guard value.
+    const other = db.createSpace('Team Notes', NOW)
+    expect(other.name).not.toBe(PROTECTED_SPACE_NAME)
+    // deleteSpace itself is unguarded (the route owns the guard): given a
+    // non-protected id it removes the row.
+    db.deleteSpace(other.id)
+    expect(db.getSpace(other.id)).toBeUndefined()
+    db.close()
   })
 })
 

@@ -898,6 +898,15 @@ export const KB_SEED_SPACES: ReadonlyArray<{ name: string; repoUrl: string | nul
 ]
 
 /**
+ * The one KB space that can NEVER be deleted, regardless of how many other
+ * spaces exist. This is a hardcoded protection on the seeded `zmrng` space
+ * specifically (not a "last space remaining" rule): `DELETE /api/spaces/:id`
+ * rejects it with a 403 and the KB switcher hides its delete affordance.
+ * Mirrored in `packages/web/src/types.ts`.
+ */
+export const PROTECTED_SPACE_NAME = 'zmrng'
+
+/**
  * Durable, server-side per-user preferences persisted in `zmrng.db` (the
  * `settings` kv table), read/written over `GET`/`PUT /api/settings`. These were
  * previously browser `localStorage` only, which proved unreliable across
