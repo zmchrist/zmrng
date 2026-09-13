@@ -23,7 +23,7 @@ function message(over: Partial<Message> = {}): Message {
 }
 const repos: RepoTarget[] = [
   { id: 'zmrng', label: 'zmrng', path: '/p/zmrng', defaultBranch: 'main' },
-  { id: 'pheme', label: 'pheme', path: '/p/pheme', defaultBranch: 'main' },
+  { id: 'example-app', label: 'example-app', path: '/p/example-app', defaultBranch: 'main' },
 ]
 
 describe('handoffTitle', () => {
@@ -70,7 +70,7 @@ describe('buildHandoffPrefill', () => {
 
 describe('resolveSuggestedRepoId', () => {
   it('keeps a suggestion that exists in the local registry', () => {
-    expect(resolveSuggestedRepoId('pheme', repos)).toBe('pheme')
+    expect(resolveSuggestedRepoId('example-app', repos)).toBe('example-app')
   })
   it('drops a suggestion the local machine does not have (never auto-bind)', () => {
     expect(resolveSuggestedRepoId('unknown-repo', repos)).toBe('')

@@ -539,7 +539,7 @@ export class Db {
   }
 
   /**
-   * Idempotently seed the three fixed POC KB spaces (general, zmrng, pheme).
+   * Idempotently seed the three fixed POC KB spaces (general, zmrng, example-app).
    * Mirrors `seedGeneralChannel`: `INSERT OR IGNORE` on the UNIQUE `name` column
    * makes reopening a populated `zmrng.db` a no-op — each space is created
    * exactly once and never duplicated, and existing rows (including any pages a

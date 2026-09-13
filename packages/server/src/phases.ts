@@ -1317,7 +1317,7 @@ export class TaskManager {
     // worktree so the worker gets it too. Never fails the task — a seeding
     // problem is logged to the operator and the worker proceeds regardless.
     try {
-      const notes = await seedHarness(wt.worktreePath, repo.path, path.join(config.repoRoot, 'harness'))
+      const notes = await seedHarness(wt.worktreePath, repo.path, config.harnessDir)
       for (const note of notes) {
         this.emitEvent(taskId, 'status', { sub: 'status', note: `harness seed — ${note}` })
       }

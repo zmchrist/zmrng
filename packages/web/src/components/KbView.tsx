@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import styles from './KbView.module.css'
 import type { KbPage, KbPageRevision, KbTreeNode, Space, WorkspaceMember } from '../types'
 import { MAX_DISPLAY_NAME_LEN } from '../types'
@@ -112,7 +112,7 @@ function initials(name: string): string {
  * multiplexed workspace socket (GET /ws/workspace, same-origin) for page
  * subscribe/edit/presence — REST covers spaces/tree/page + structural CRUD.
  */
-export function KbView({ teamHandle, onHandleChange, openTarget = null, active }: Props) {
+function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active }: Props) {
   // Split identity (#150): `presenceHandle` (may be `anon`) drives the workspace
   // hello + page presence; `editHandle` (EMPTY when no handle is set) authors
   // page saves. `canEdit` gates every write affordance — read-only viewing
@@ -786,3 +786,5 @@ export function KbView({ teamHandle, onHandleChange, openTarget = null, active }
     </div>
   )
 }
+
+export const KbView = memo(KbViewComponent)

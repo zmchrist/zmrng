@@ -77,17 +77,17 @@ describe('KB schema', () => {
 })
 
 describe('KB seed (spaces)', () => {
-  it('seeds exactly {general, zmrng, pheme}, with general carrying a null repo_url', () => {
+  it('seeds exactly {general, zmrng, example-app}, with general carrying a null repo_url', () => {
     const db = new Db(dbPath)
     const spaces = db.listSpaces()
-    expect(spaces.map((s) => s.name)).toEqual(['general', 'zmrng', 'pheme'])
+    expect(spaces.map((s) => s.name)).toEqual(['general', 'zmrng', 'example-app'])
     const general = spaces.find((s) => s.name === 'general')!
     expect(general.repoUrl).toBeNull()
     expect(spaces.find((s) => s.name === 'zmrng')!.repoUrl).toBe(
       'https://github.com/zmchrist/zmrng',
     )
-    expect(spaces.find((s) => s.name === 'pheme')!.repoUrl).toBe(
-      'https://github.com/zmchrist/pheme',
+    expect(spaces.find((s) => s.name === 'example-app')!.repoUrl).toBe(
+      'https://github.com/example/example-app',
     )
     db.close()
   })
@@ -104,7 +104,7 @@ describe('KB seed (spaces)', () => {
     const after = db2.listSpaces()
     expect(after).toHaveLength(3)
     expect(after.map((s) => s.id)).toEqual(before.map((s) => s.id))
-    expect(after.map((s) => s.name)).toEqual(['general', 'zmrng', 'pheme'])
+    expect(after.map((s) => s.name)).toEqual(['general', 'zmrng', 'example-app'])
     // Pre-existing page survives the reopen untouched.
     const reread = db2.getPage(page.id)
     expect(reread?.title).toBe('Keep me')
