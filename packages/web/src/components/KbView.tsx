@@ -129,6 +129,9 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   const [spaces, setSpaces] = useState<Space[]>([])
   const [spaceId, setSpaceId] = useState<number | null>(null)
   const [tree, setTree] = useState<KbTreeNode[]>([])
+  // Bumped to force a tree refetch when a `space.tree` frame lands (another
+  // client re-parented a folder/page in this space via drag-and-drop).
+  const [treeNonce, setTreeNonce] = useState(0)
   const [search, setSearch] = useState('')
   const [openPageId, setOpenPageId] = useState<number | null>(null)
   const [detail, setDetail] = useState<KbPageDetail | null>(null)
@@ -165,6 +168,13 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   useEffect(() => {
     openPageIdRef.current = openPageId
   }, [openPageId])
+
+  // The selected space, readable inside the stable socket closure so an incoming
+  // `space.tree` frame can tell whether it targets the space we're viewing.
+  const spaceIdRef = useRef<number | null>(null)
+  useEffect(() => {
+    spaceIdRef.current = spaceId
+  }, [spaceId])
 
   // When the operator clicks "+ Add block" the new block's id is only known once
   // the server echoes it back — this flag makes the incoming page.update open
@@ -283,6 +293,10 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
             return next
           })
           setEditingId((cur) => (cur === blockId ? null : cur))
+        } else if (msg.type === 'space.tree') {
+          // A folder/page was re-parented (drag-and-drop) elsewhere — refetch the
+          // tree if the change targets the space we're currently viewing.
+          if (msg.spaceId === spaceIdRef.current) setTreeNonce((n) => n + 1)
         }
       }
       ws.onclose = () => {
@@ -337,7 +351,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     return () => {
       cancelled = true
     }
-  }, [spaceId])
+  }, [spaceId, treeNonce])
 
   // ---- open a page: REST detail + subscribe to its live fan-out ----
   useEffect(() => {
@@ -390,6 +404,33 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
       .getSpaceTree(spaceId)
       .then(setTree)
       .catch(() => undefined)
+  }
+
+  /**
+   * Re-parent a folder or page via drag-and-drop. `sourcePath` is the dragged
+   * node's tree path; `targetFolderPath` is the destination folder path (`null` =
+   * space root). Reuses the existing move endpoints (`PATCH /api/folders/:id`
+   * `parentId` / `PATCH /api/pages/:id` `folderId`); the server rejects a cycle
+   * and fans a `space.tree` frame so other viewers converge. We refetch locally.
+   */
+  const moveNode = (sourcePath: string, targetFolderPath: string | null): void => {
+    if (!canEdit) return
+    const source = parseKbNodePath(sourcePath)
+    if (!source) return
+    // A non-root target must be a folder; ignore a drop onto anything else.
+    let targetFolderId: number | null = null
+    if (targetFolderPath !== null) {
+      const target = parseKbNodePath(targetFolderPath)
+      if (!target || target.kind !== 'folder') return
+      targetFolderId = target.id
+    }
+    const move =
+      source.kind === 'folder'
+        ? api.updateFolder(source.id, { parentId: targetFolderId })
+        : api.updatePage(source.id, { folderId: targetFolderId })
+    move
+      .then(() => refreshTree())
+      .catch(() => setError('Failed to move item'))
   }
 
   // ---- block editing ----
@@ -624,7 +665,12 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
           {filteredTree.length === 0 ? (
             <p className={styles.empty}>{search ? 'No matches.' : 'No pages yet.'}</p>
           ) : (
-            <FileTree entries={filteredTree} onOpen={onOpenNode} selectedPath={openPageId !== null ? `page/${openPageId}` : null} />
+            <FileTree
+              entries={filteredTree}
+              onOpen={onOpenNode}
+              selectedPath={openPageId !== null ? `page/${openPageId}` : null}
+              onMove={canEdit ? moveNode : undefined}
+            />
           )}
         </div>
 

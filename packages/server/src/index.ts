@@ -576,6 +576,15 @@ app.patch('/api/folders/:id', (req, reply): KbFolder | undefined => {
       return undefined
     }
     result = db.moveFolder(id, parentId)
+    // Fan a tree-structure convergence frame only when the re-parent actually
+    // took effect (moveFolder returns the folder unchanged on a rejected cycle),
+    // so every client viewing this space refetches its tree without a reload.
+    if (result && result.parentId === parentId) {
+      hub.broadcastRoom(
+        'workspace',
+        JSON.stringify({ type: 'space.tree', spaceId: result.spaceId } satisfies WsWorkspaceServerMsg),
+      )
+    }
   }
   app.log.info({ folderId: id }, 'kb folder updated')
   return result
@@ -720,6 +729,14 @@ app.patch('/api/pages/:id', (req, reply): KbPage | undefined => {
       return undefined
     }
     result = db.movePage(id, folderId, now)
+    // Fan a tree-structure convergence frame so every client viewing this space
+    // refetches its tree without a reload (mirrors the folder-move fan-out).
+    if (result && result.folderId === folderId) {
+      hub.broadcastRoom(
+        'workspace',
+        JSON.stringify({ type: 'space.tree', spaceId: result.spaceId } satisfies WsWorkspaceServerMsg),
+      )
+    }
   }
   app.log.info({ pageId: id }, 'kb page updated')
   return result
