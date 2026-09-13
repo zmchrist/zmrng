@@ -20,6 +20,12 @@
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/branch_guard.py\"",
             "timeout": 8,
             "statusMessage": "Branch guard..."
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree_guard.py\"",
+            "timeout": 8,
+            "statusMessage": "Worktree guard..."
           }
         ]
       },

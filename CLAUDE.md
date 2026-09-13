@@ -78,13 +78,14 @@ where something lives, rather than grepping the tree.
 ## Self-contained harness (runs from this repo)
 The enforcing harness lives **inside this repo** so a fresh clone has it with no
 external setup — run Claude Code from the zmrng root and `.claude/settings.json`
-wires five hooks automatically (they are `chmod +x`; stock macOS `python3` 3.9 is
+wires six hooks automatically (they are `chmod +x`; stock macOS `python3` 3.9 is
 fine — every hook carries `from __future__ import annotations`):
 
 | Hook | When | What |
 |------|------|------|
 | `security_guard.py` | Before any file/bash op | Blocks `.env` access, recursive deletes, force-push to main, `git reset --hard` |
 | `branch_guard.py` | Before Edit/Write/MultiEdit | Blocks edits when the repo is on `main`/`master` — branch first. Override: `HERMES_ALLOW_PROTECTED_EDIT=1` |
+| `worktree_guard.py` | Before Edit/Write/MultiEdit | Blocks a **second** concurrent session from editing a worktree already claimed by another live session — each agent works in its own worktree (branches don't isolate agents, directories do). Stale locks self-expire (`HERMES_WORKTREE_LOCK_TTL`, default 3600s). Override: `HERMES_ALLOW_SHARED_WORKTREE=1`. Operator-harness only — NOT seeded into workers (each already gets a dedicated worktree). |
 | `pr_shape_guard.py` | Before Bash | Rejects `gh pr create` with `--fill` or without `--body-file`. Override: `HERMES_ALLOW_PR_FILL=1` |
 | `post_tool_use_lint.py` | After editing code | Advisory linter (tsc for TS) — never blocks |
 | `stop_validate.py` | When the turn tries to end | Runs `.claude/validate.sh` (→ `verify.sh --fast`); blocks the stop if it fails |
