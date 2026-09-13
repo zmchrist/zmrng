@@ -6,7 +6,7 @@ import type { RepoTarget } from '../src/types'
 
 const repos: RepoTarget[] = [
   { id: 'zmrng', label: 'zmrng', path: '/p/zmrng', defaultBranch: 'main' },
-  { id: 'pheme', label: 'pheme', path: '/p/pheme', defaultBranch: 'main' },
+  { id: 'example-app', label: 'example-app', path: '/p/example-app', defaultBranch: 'main' },
 ]
 
 const noop = async () => {}
