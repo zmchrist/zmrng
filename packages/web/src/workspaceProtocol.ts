@@ -270,6 +270,8 @@ export function parseWorkspaceServerMsg(raw: string): WsWorkspaceServerMsg | und
         .filter((m): m is WorkspaceMember => m !== undefined)
       return { type: 'page.presence', pageId: obj.pageId, viewers }
     }
+    case 'space.tree':
+      return typeof obj.spaceId === 'number' ? { type: 'space.tree', spaceId: obj.spaceId } : undefined
     default:
       return undefined
   }
