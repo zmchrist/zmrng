@@ -20,13 +20,10 @@ import type {
   SecurityScan,
   Space,
   KbTreeNode,
-  KbPageDetail,
   KbFolder,
   KbPage,
   KbPageFromMessageInput,
-  KbBlock,
-  KbBlockKind,
-  KbRevision,
+  KbPageRevision,
 } from './types'
 
 /** Pull a text delta out of one parsed SSE `data:` payload (OpenAI-compatible + plain shapes). */
@@ -293,8 +290,8 @@ export const api = {
   getSpaces: () => req<Space[]>('/api/spaces'),
   /** A space's folder/page tree, already FileTree-shaped server-side. */
   getSpaceTree: (spaceId: number) => req<KbTreeNode[]>(`/api/spaces/${spaceId}/tree`),
-  /** One page plus its ordered blocks. */
-  getPage: (pageId: number) => req<KbPageDetail>(`/api/pages/${pageId}`),
+  /** One page — its `body` IS the whole page content (no separate blocks). */
+  getPage: (pageId: number) => req<KbPage>(`/api/pages/${pageId}`),
 
   /** Create a folder in a space (null parentId = space root). */
   createFolder: (spaceId: number, name: string, parentId: number | null = null) =>
@@ -339,37 +336,15 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
-  /** Delete a page (and its blocks + revisions, server-side). */
+  /** Delete a page (and its revisions, server-side). */
   deletePage: (id: number) =>
     reqNoContent(`/api/pages/${id}`, { method: 'DELETE' }),
 
-  /** Append a block to a page. */
-  createBlock: (
-    pageId: number,
-    block: { kind: KbBlockKind; body: string; meta?: string | null; updatedBy: string },
-  ) =>
-    req<KbBlock>(`/api/pages/${pageId}/blocks`, {
-      method: 'POST',
-      body: JSON.stringify({ meta: null, ...block }),
-    }),
-  /** Update a block (server snapshots the prior state into a revision first). */
-  updateBlock: (
-    id: number,
-    patch: { kind?: KbBlockKind; body?: string; meta?: string | null; updatedBy: string },
-  ) =>
-    req<KbBlock>(`/api/blocks/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
-    }),
-  /** Delete a block (and its revisions, server-side). */
-  deleteBlock: (id: number) =>
-    reqNoContent(`/api/blocks/${id}`, { method: 'DELETE' }),
-
-  /** Every revision of a block, oldest first — backs the restore-from-revision UX. */
-  getRevisions: (blockId: number) => req<KbRevision[]>(`/api/blocks/${blockId}/revisions`),
-  /** Restore a revision back onto its block (itself recording a revision). */
-  restoreRevision: (revisionId: number, author: string) =>
-    req<KbBlock>(`/api/revisions/${revisionId}/restore`, {
+  /** Every revision of a page, oldest first — backs the History panel. */
+  getPageRevisions: (pageId: number) => req<KbPageRevision[]>(`/api/pages/${pageId}/revisions`),
+  /** Restore a revision back onto its page (itself recording a revision). */
+  restorePageRevision: (revisionId: number, author: string) =>
+    req<KbPage>(`/api/page-revisions/${revisionId}/restore`, {
       method: 'POST',
       body: JSON.stringify({ author }),
     }),
