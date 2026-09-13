@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import styles from './TeamView.module.css'
 import type { Channel, Message, RepoTarget, WorkspaceMember, Space } from '../types'
 import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from '../types'
@@ -88,7 +88,7 @@ function channelLabel(name: string): string {
  * channel-thread reducers, and config resolution it composes are each
  * unit-tested in isolation.
  */
-export function TeamView({
+function TeamViewComponent({
   workspaceUrl,
   teamHandle,
   onHandleChange,
@@ -960,3 +960,5 @@ export function TeamView({
     </div>
   )
 }
+
+export const TeamView = memo(TeamViewComponent)

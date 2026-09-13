@@ -249,6 +249,32 @@ non-obvious root cause, or is likely to recur. Template in
 - **Files:** `packages/web/src/components/VoiceView.tsx`
 - **Date Found:** 2026-08-27
 
+### Whole machine bogs down / freezes after ~30 min of an active worker run
+- **Error:** No crash — during a long autonomous worker run (dev server AND the packaged
+  desktop app alike) the whole Mac progressively bogs down and eventually stalls. Idle is
+  fine; it degrades only while a worker (or chat/voice) is actively streaming.
+- **Cause:** A per-token React render storm on two axes. (1) FREQUENCY — every stream-json
+  `partial` token calls `setLive` in `App.onWs`, and since `live` is App-level state each
+  token forced a full-app re-render; a fast turn emits many tokens/sec. (2) COST — that
+  re-render cascaded through every always-mounted subtree (`WorkspaceView`, plus hidden
+  `Board`/`TeamView`/`KbView` behind `display:none`), and `WorkerLog` rebuilt its entire
+  `events.map(renderEvent)` list (capped at MAX_EVENTS=2000) on every one of those renders.
+  So a long run reconciled ~2000 elements × dozens of times/sec for many minutes, pinning
+  the CPU + GPU (worse in the desktop WKWebView with the frosted-glass `backdrop-filter`
+  compositing), which heats the laptop, thermally throttles, and reads as a freeze.
+- **Solution:** Attack both axes. (a) Coalesce partial tokens into at most one `setLive`
+  per animation frame — buffer tokens in a ref and flush on `requestAnimationFrame`
+  (`App.tsx`: `liveBufRef`/`rafRef`/`flushLive`/`resetLiveBuffer`; reset on task
+  select/removal/finalize + unmount so a stale flush never appends to the wrong task).
+  (b) Memoize the cost: `useMemo(() => events.map(renderEvent), [events])` in `WorkerLog`
+  so the 2000-element list is skipped on live-token renders (events ref is stable per
+  token), and wrap the always-mounted hidden panels `Board`/`TeamView`/`KbView` in
+  `React.memo` with stable callback props (`onTeamHandleChange` via `useCallback`) so a
+  per-frame App re-render no longer cascades into subtrees that don't consume `live`.
+- **Files:** `packages/web/src/App.tsx`, `packages/web/src/components/WorkerLog.tsx`,
+  `packages/web/src/components/Board.tsx`, `.../TeamView.tsx`, `.../KbView.tsx`
+- **Date Found:** 2026-09-12
+
 ### Security-scan gate: `semgrep`/`osv-scanner` absent on dev → the default runner is untested
 - **Error:** No runtime error in tests — but `defaultScanRunnerFactory` in `scanRunner.ts`
   (execFile semgrep + osv-scanner) is exercised by **zero** automated tests. Every
