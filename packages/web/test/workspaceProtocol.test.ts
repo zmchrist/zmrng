@@ -395,4 +395,18 @@ describe('parseWorkspaceServerMsg — KB page frames (T2, #144)', () => {
       parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', pageId: 3, blockId: 'x' })),
     ).toBeUndefined()
   })
+
+  it('decodes a space.tree convergence frame carrying a numeric spaceId', () => {
+    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'space.tree', spaceId: 5 }))).toEqual({
+      type: 'space.tree',
+      spaceId: 5,
+    })
+  })
+
+  it('rejects a space.tree with a missing/ill-typed spaceId', () => {
+    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'space.tree' }))).toBeUndefined()
+    expect(
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'space.tree', spaceId: '5' })),
+    ).toBeUndefined()
+  })
 })

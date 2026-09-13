@@ -221,3 +221,24 @@ decisive integration test in `seedHarness.test.ts` that seeds from the REAL repo
 `harness/` dir and asserts all five scripts land in `.claude/zmrng-hooks/`, all five
 registrations appear in `settings.local.json`, and each seeded hook exits 0 under
 `python3` with `{}` on stdin (guards against a future PEP-604 regression).
+
+## KB folder/page drag-and-drop re-parenting (2026-09-12)
+The Knowledge Base file tree gained native HTML5 drag-and-drop (no new dependency)
+so a folder or page can be dragged onto another folder — or onto the tree root — to
+re-parent it within the same space. `FileTree.tsx` gained an optional `onMove(sourcePath,
+targetFolderPath)` prop (`null` target = space root): when set, every row is `draggable`,
+folders + the root become drop targets, and a cycle guard (collected via
+`collectSubtreePaths` on dragStart, checked at event time) blocks dropping a folder onto
+itself or one of its own descendants. The worktree Files tree (`WorkspaceView`) omits the
+prop and stays read-only. `KbView.moveNode` parses the tree paths and reuses the existing
+move endpoints (`PATCH /api/folders/:id` `parentId` / `PATCH /api/pages/:id` `folderId`) —
+pure re-parenting, no sibling reorder, no new `ord` column. On a successful move the two
+PATCH handlers fan a new `{type:'space.tree', spaceId}` frame to the whole `workspace`
+room (mirrors the `page.delete` convergence-frame pattern); `KbView` refetches its tree
+when the frame targets the space it is viewing (via a `spaceIdRef` + `treeNonce` bump), so
+other connected clients converge without a reload. New mirrored `WsWorkspaceServerMsg`
+variant `space.tree` (source of truth `packages/server/src/types.ts`, mirror in
+`packages/web/src/types.ts`), parsed tolerantly by `parseWorkspaceServerMsg`. Tests:
+`FileTree.dnd.test.tsx` (folder/page drop, root drop, cycle guard, self-drop no-op,
+read-only when `onMove` omitted) + a `space.tree` case in `workspaceProtocol.test.ts`; the
+db-level move + cycle rejection stays covered by `kb.test.ts`.
