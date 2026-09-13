@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import styles from './WorkerLog.module.css'
 import type { TaskEvent } from '../types'
 import { actorColor } from '../status'
@@ -107,6 +107,13 @@ export function WorkerLog({ events, live, thinking }: Props) {
 
   const showThinking = !!thinking && !live
 
+  // The event list only changes when a NEW event lands — NOT on every streamed
+  // `live` token. Memoizing the map keeps a fast worker turn (dozens of partial
+  // tokens/sec, each re-rendering this component) from rebuilding up to 2000
+  // event elements per token, which pegged the CPU/GPU over a long autonomous
+  // run. Only the live bubble below re-renders per token now.
+  const renderedEvents = useMemo(() => events.map(renderEvent), [events])
+
   useEffect(() => {
     notifyContentChanged()
   }, [events, live, showThinking, notifyContentChanged])
@@ -117,7 +124,7 @@ export function WorkerLog({ events, live, thinking }: Props) {
         {events.length === 0 && !live && (
           <div className={styles.placeholder}>No activity yet.</div>
         )}
-        {events.map(renderEvent)}
+        {renderedEvents}
         {live && (
           <div className={styles.row}>
             <div className={`${styles.bubble} ${styles.assistant} ${styles.streaming}`}>

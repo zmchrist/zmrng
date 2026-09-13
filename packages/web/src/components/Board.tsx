@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import styles from './Board.module.css'
 import type { RepoTarget, Task, TaskStatus } from '../types'
 import { STATUS_LABEL, statusColor } from '../status'
@@ -23,7 +24,7 @@ interface Props {
   onArchive: (id: string) => void
 }
 
-export function Board({ tasks, repos, onSelectTask, onArchive }: Props) {
+function BoardComponent({ tasks, repos, onSelectTask, onArchive }: Props) {
   const showRepo = repos.length > 1
   const byStatus = new Map<TaskStatus, Task[]>()
   for (const status of COLUMNS) byStatus.set(status, [])
@@ -89,3 +90,5 @@ export function Board({ tasks, repos, onSelectTask, onArchive }: Props) {
     </div>
   )
 }
+
+export const Board = memo(BoardComponent)
