@@ -23,7 +23,7 @@ import { runPreflight } from './preflight.js'
 import { parseStreamedText } from './chat.js'
 import { readUiState, writeUiState } from './uiState.js'
 import { resolvePageTitle, buildPageBody } from './kbFromMessage.js'
-import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE } from './types.js'
+import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE, PROTECTED_SPACE_NAME } from './types.js'
 import type {
   WsEvent,
   EffortLevel,
@@ -482,6 +482,41 @@ function kbNullableId(raw: unknown): number | null | undefined {
 
 // All KB spaces (the three seeded POC spaces + any created later). Always 200.
 app.get('/api/spaces', (): Space[] => db.listSpaces())
+
+// Create a KB space (name only — user-created spaces are not repo-scoped).
+// 400 blank name; 409 duplicate name (the `spaces.name` column is UNIQUE, so we
+// reject the duplicate here rather than let the INSERT throw a 500).
+app.post('/api/spaces', (req, reply): Space | undefined => {
+  const body = req.body as { name?: unknown } | undefined
+  const name = kbName(body?.name)
+  if (!name) {
+    reply.code(400).send({ error: 'name is required' })
+    return undefined
+  }
+  if (db.listSpaces().some((s) => s.name === name)) {
+    reply.code(409).send({ error: 'a space with that name already exists' })
+    return undefined
+  }
+  const space = db.createSpace(name, new Date().toISOString())
+  app.log.info({ spaceId: space.id }, 'kb space created')
+  return space
+})
+
+// Delete a space and EVERYTHING inside it (folders, pages, page revisions).
+// 404 unknown space; 403 the protected `zmrng` space, which can never be deleted.
+app.delete('/api/spaces/:id', (req, reply) => {
+  const id = kbId((req.params as { id: string }).id)
+  const space = id !== null ? db.getSpace(id) : undefined
+  if (!space) {
+    return reply.code(404).send({ error: 'space not found' })
+  }
+  if (space.name === PROTECTED_SPACE_NAME) {
+    return reply.code(403).send({ error: `the ${PROTECTED_SPACE_NAME} space cannot be deleted` })
+  }
+  db.deleteSpace(space.id)
+  app.log.info({ spaceId: space.id }, 'kb space deleted')
+  return reply.code(204).send()
+})
 
 // A space's KB tree (folders + pages), FileTree-shaped. 404 on unknown space.
 app.get('/api/spaces/:id/tree', (req, reply): KbTreeNode[] | undefined => {

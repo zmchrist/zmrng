@@ -775,6 +775,15 @@ export interface Space {
 }
 
 /**
+ * The one KB space that can NEVER be deleted, regardless of how many other
+ * spaces exist — a hardcoded protection on the seeded `zmrng` space (not a
+ * "last space remaining" rule). The KB switcher hides its delete affordance and
+ * the server rejects `DELETE /api/spaces/:id` for it with a 403. Mirror of
+ * `packages/server/src/types.ts`.
+ */
+export const PROTECTED_SPACE_NAME = 'zmrng'
+
+/**
  * One folder in a space's tree. `parentId` self-references `folders` for
  * nesting; null means the folder sits at the space root.
  */
