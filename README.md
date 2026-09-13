@@ -1,11 +1,14 @@
 # zmrng — an autonomous coding agent
 
+[![CI](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml/badge.svg)](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml)
+
 **Drop in a task → it plans, implements, validates, and opens its own pull
 request. Fully autonomous, in isolated git worktrees, no babysitting.** One
 GUI replaces watching five terminals.
 
 > ▶️ **2-minute demo:** [Loom link — TODO] — watch a task go from prompt to
 > merged-ready PR without a human touching the code.
+> _(Recording script: [`docs/demo-script.md`](docs/demo-script.md).)_
 
 <!-- ![demo](docs/demo.gif) — TODO: record before making this repo public -->
 
@@ -47,6 +50,29 @@ itself, so it is drivable out of the box with no config file present.
 
 `TypeScript` · `Fastify` · `WebSocket` · `SQLite` · `React` + `Vite` ·
 `Tauri` (Rust shell) · headless `claude` workers via `stream-json`
+
+## Prerequisites
+
+zmrng orchestrates other CLIs — booting it is not the same as driving a task
+end-to-end. To take a task all the way to an opened PR you need, on the machine
+that runs the server:
+
+1. **Node 20.11–22** (`.nvmrc` pins 22). Newer majors break the `better-sqlite3`
+   native binding — see the native-addon note under _Run (full)_.
+2. **The `claude` CLI, logged in with a Claude Max/Pro subscription.** Workers
+   authenticate via that OAuth login — the server deliberately strips
+   `ANTHROPIC_API_KEY` from every worker, so a metered API key alone will **not**
+   work. Verify with `claude` (interactive login) before starting a task.
+3. **The `gh` CLI, authenticated** (`gh auth login`). The autonomous run's final
+   step opens the PR with `gh pr create`; without a logged-in `gh` everything
+   looks healthy until that last step fails.
+4. **A target repo you can push to.** Each task runs in a git worktree of a repo
+   from the registry (`config/repos.json`), and the worker does `git push -u
+   origin <branch>` — so `git` needs push rights (SSH key or credential helper)
+   on **that** repo. The shipped `zmrng` self-entry is only pushable by this
+   repo's owner; point `ZMRNG_DEFAULT_REPO` / `config/repos.json` at a repo of
+   your own. `GET /api/preflight` reports whether `git`/`gh`/`claude` are on the
+   server's `PATH` (advisory, not a hard gate).
 
 ## Run
 

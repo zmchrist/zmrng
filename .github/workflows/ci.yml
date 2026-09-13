@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (e.g. force-push to a PR branch).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck · lint · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Pinned within the repo's engines range (>=20.11.0 <23).
+          node-version: '22'
+          cache: npm
+
+      # Installs all workspaces. The server bundles native addons
+      # (better-sqlite3, node-pty) which compile here via node-gyp; the
+      # ubuntu-latest image already ships the build toolchain + python.
+      - name: Install
+        run: npm ci
+
+      # Fails if a former project/client name reappears as a whole word in any
+      # tracked file (public-readiness gate — see scripts/scrub-gate.sh).
+      - name: Scrub gate
+        run: bash scripts/scrub-gate.sh
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # Root build fans out to the server (tsc) and web (vite) workspaces only;
+      # the desktop workspace has no `build` script, so `--if-present` skips the
+      # heavy Tauri/Rust bundle here by design.
+      - name: Build
+        run: npm run build

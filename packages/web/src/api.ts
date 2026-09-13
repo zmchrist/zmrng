@@ -289,7 +289,7 @@ export const api = {
   // KB data is server-local (NOT task-scoped and NOT VPS-scoped), so these
   // routes take no origin prefix, unlike the Team channel calls above.
 
-  /** Every KB space (the seeded general/zmrng/pheme + any created later). */
+  /** Every KB space (the seeded general/zmrng/example-app + any created later). */
   getSpaces: () => req<Space[]>('/api/spaces'),
   /** A space's folder/page tree, already FileTree-shaped server-side. */
   getSpaceTree: (spaceId: number) => req<KbTreeNode[]>(`/api/spaces/${spaceId}/tree`),
