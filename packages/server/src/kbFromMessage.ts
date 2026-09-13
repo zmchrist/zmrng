@@ -41,18 +41,18 @@ export function resolvePageTitle(clientTitle: string | undefined, messageBody: s
 }
 
 /**
- * Compact, deterministic provenance back-reference stamped into the promoted
- * page's first block. Built SERVER-SIDE from the canonical channel name +
- * message id (never trusted from the client). There is no cross-machine
- * permalink in the POC, so this is a stable textual reference after a rule.
+ * Compact, deterministic provenance back-reference stamped onto the promoted
+ * page's body. Built SERVER-SIDE from the canonical channel name + message id
+ * (never trusted from the client). There is no cross-machine permalink in the
+ * POC, so this is a stable textual reference after a rule.
  */
 export function messageProvenance(channelName: string, messageId: number): string {
   return `\n\n---\nFrom team channel #${channelName} (message #${messageId})`
 }
 
 /**
- * Compose the first block's body for a promoted page: the original message text
- * followed by the server-built provenance line.
+ * Compose the body for a promoted page: the original message text followed by
+ * the server-built provenance line.
  */
 export function buildPageBody(
   messageBody: string,

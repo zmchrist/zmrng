@@ -369,47 +369,26 @@
   color: var(--text);
 }
 
-/* ---- blocks ---- */
+/* ---- single-field body (notepad-style editor + Obsidian-style render) ---- */
 
-.blocks {
+.bodyWrap {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
-.block {
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  transition: border-color var(--transition), background var(--transition);
-}
-
-.blockDirty {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
-.rendered {
-  position: relative;
-}
-
-.markdown {
-  padding: 8px 40px 8px 10px;
+.bodyRendered {
+  flex: 1;
+  padding: 16px 20px;
   font-size: 14px;
   line-height: 1.6;
   color: var(--text);
   cursor: text;
-  border-radius: var(--radius-sm);
 }
 
-.markdown:hover {
-  background: var(--surface-hover);
-}
-
-.markdown :global(pre) {
+.bodyRendered :global(pre) {
   background: var(--well-strong);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -419,25 +398,29 @@
   font-size: 13px;
 }
 
-.markdown :global(code) {
+.bodyRendered :global(code) {
   font-family: var(--font-mono);
   font-size: 13px;
 }
 
-.markdown :global(h1),
-.markdown :global(h2),
-.markdown :global(h3),
-.markdown :global(h4),
-.markdown :global(h5),
-.markdown :global(h6) {
+.bodyRendered :global(h1),
+.bodyRendered :global(h2),
+.bodyRendered :global(h3),
+.bodyRendered :global(h4),
+.bodyRendered :global(h5),
+.bodyRendered :global(h6) {
   margin: 4px 0;
   color: var(--text);
   letter-spacing: var(--tracking-tight);
 }
 
-.markdown :global(ul) {
+.bodyRendered :global(ul) {
   margin: 4px 0;
   padding-left: 20px;
+}
+
+.bodyRendered :global(input[type='checkbox']) {
+  cursor: pointer;
 }
 
 .placeholder {
@@ -445,59 +428,12 @@
   font-style: italic;
 }
 
-.editToggle,
-.removeToggle {
-  position: absolute;
-  top: 6px;
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-strong);
-  color: var(--text-dim);
-  font-size: 13px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--transition), border-color var(--transition), color var(--transition);
-}
-
-.editToggle {
-  right: 36px;
-}
-
-.removeToggle {
-  right: 6px;
-}
-
-.rendered:hover .editToggle,
-.rendered:hover .removeToggle {
-  opacity: 1;
-}
-
-.editToggle:hover,
-.removeToggle:hover {
-  border-color: var(--accent-line);
-  color: var(--text);
-}
-
-.editor {
+.bodyEditor {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px;
-}
-
-.editorBar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.editorBar .select {
-  width: auto;
+  padding: 16px 20px;
 }
 
 .editorHint {
@@ -506,23 +442,10 @@
   font-family: var(--font-mono);
 }
 
-.saveBtn {
-  margin-left: auto;
-  padding: 5px 14px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: var(--accent-grad);
-  color: var(--accent-ink);
-  font-family: var(--font);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.textarea {
+.bodyTextarea {
+  flex: 1;
   width: 100%;
-  min-height: 90px;
-  resize: vertical;
+  resize: none;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -533,7 +456,7 @@
   line-height: 1.5;
 }
 
-.textarea:focus {
+.bodyTextarea:focus {
   outline: none;
   border-color: var(--accent-line);
 }
@@ -549,36 +472,9 @@
   background: var(--surface-strong);
 }
 
-.addLabel {
-  font-size: 12px;
-  color: var(--text-dim);
-}
+/* ---- page history panel ---- */
 
-.addBtn {
-  padding: 4px 10px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--text-dim);
-  font-family: var(--font);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color var(--transition), color var(--transition);
-}
-
-.addBtn:hover {
-  border-color: var(--accent-line);
-  color: var(--text);
-}
-
-.addBtn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ---- conflict toast (block-LWW) ---- */
-
-.toast {
+.historyPanel {
   position: absolute;
   right: 16px;
   bottom: 16px;
@@ -596,7 +492,7 @@
   box-shadow: var(--shadow);
 }
 
-.toastBody {
+.historyHead {
   font-size: 13px;
   line-height: 1.5;
   color: var(--text);
@@ -646,7 +542,7 @@
   text-overflow: ellipsis;
 }
 
-.toastClose {
+.historyClose {
   align-self: flex-end;
   padding: 4px 12px;
   border: 1px solid var(--border);
@@ -659,7 +555,7 @@
   transition: border-color var(--transition), color var(--transition);
 }
 
-.toastClose:hover {
+.historyClose:hover {
   border-color: var(--accent-line);
   color: var(--text);
 }

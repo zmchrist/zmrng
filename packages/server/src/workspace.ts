@@ -1,14 +1,7 @@
-import {
-  MAX_DISPLAY_NAME_LEN,
-  MAX_MESSAGE_BODY_LEN,
-  MAX_EMOJI_LEN,
-  MAX_BLOCK_META_LEN,
-  KB_BLOCK_KINDS,
-} from './types.js'
+import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from './types.js'
 import type { Db } from './db.js'
 import type {
-  KbBlock,
-  KbBlockKind,
+  KbPage,
   Member,
   Message,
   MessageKind,
@@ -26,16 +19,6 @@ function isChannelId(v: unknown): v is number {
 /** A finite positive integer that could index a KB page row. */
 function isPageId(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v > 0
-}
-
-/** A finite positive integer that could index a KB block row. */
-function isBlockId(v: unknown): v is number {
-  return typeof v === 'number' && Number.isInteger(v) && v > 0
-}
-
-/** Narrow an untyped value to a `KbBlockKind`, enforcing the enum at the wire. */
-function isBlockKind(v: unknown): v is KbBlockKind {
-  return typeof v === 'string' && (KB_BLOCK_KINDS as readonly string[]).includes(v)
 }
 
 // ---- tolerant client-frame parsing -----------------------------------------
@@ -113,30 +96,19 @@ export function parseWorkspaceClientMsg(raw: string): WsWorkspaceClientMsg | und
   }
   if (obj.type === 'page.edit') {
     if (!isPageId(obj.pageId)) return undefined
-    // `blockId` is null (create a new block) or a positive int (update it).
-    if (obj.blockId !== null && !isBlockId(obj.blockId)) return undefined
-    // Enforce the KbBlockKind enum at the wire boundary — a TS union alone does
-    // not protect an untrusted frame.
-    if (!isBlockKind(obj.kind)) return undefined
-    // A block `body` may be empty (a freshly-created block can start blank), but
-    // is capped. It is NOT trimmed: leading/trailing whitespace is meaningful in
-    // markdown/code blocks, so we preserve it verbatim and only bound its length.
+    // The page `body` may be empty (a fresh page starts blank), but is capped.
+    // It is NOT trimmed: leading/trailing whitespace is meaningful markdown, so
+    // we preserve it verbatim and only bound its length.
     if (typeof obj.body !== 'string' || obj.body.length > MAX_MESSAGE_BODY_LEN) return undefined
-    // `meta` is a nullable JSON string; when present it is bounded.
-    if (obj.meta !== null && (typeof obj.meta !== 'string' || obj.meta.length > MAX_BLOCK_META_LEN))
-      return undefined
     if (typeof obj.author !== 'string') return undefined
     const author = obj.author.trim()
     if (author.length === 0 || author.length > MAX_DISPLAY_NAME_LEN) return undefined
-    // A socket `page.edit` is ALWAYS a human author — mirror the channel
-    // `message` "always human" posture. The agent block-author path is not in T2.
+    // A socket `page.edit` is ALWAYS a human author — mirrors the channel
+    // `message` "always human" posture.
     return {
       type: 'page.edit',
       pageId: obj.pageId,
-      blockId: obj.blockId,
-      kind: obj.kind,
       body: obj.body,
-      meta: obj.meta,
       author,
     }
   }
@@ -351,16 +323,16 @@ export class ChannelManager<S = object> {
 
 // ---- page manager (KB real-time sync, T2, #144) ----------------------------
 
-/** The KB block/page-table surface the manager needs (kept narrow for testability). */
-type PageStore = Pick<Db, 'getPage' | 'getBlockPageId' | 'createBlock' | 'updateBlock' | 'deleteBlock' | 'listBlocks'>
+/** The KB page-table surface the manager needs (kept narrow for testability). */
+type PageStore = Pick<Db, 'getPage' | 'updatePageBody'>
 
 /**
- * The KB-page analogue of `ChannelManager`. Owns per-page live block fan-out and
- * lightweight page presence. Keeps the ticket's named `Map<page_id, Set<socket>>`
+ * The KB-page analogue of `ChannelManager`. Owns per-page live whole-body fan-out
+ * and lightweight page presence. Keeps the ticket's named `Map<page_id, Set<socket>>`
  * subscription registry: a socket `subscribe`s to a page as it opens it and
  * `unsubscribe`s (or, on disconnect, `unsubscribeAll`s) as it closes it. A saved
- * block delta is persisted, then fanned out ONLY to the sockets subscribed to
- * that page (a `page.update` frame — no full-page snapshot, no history replay).
+ * body is persisted, then fanned out ONLY to the sockets subscribed to
+ * that page (a `page.update` frame — no history replay).
  *
  * Page presence is driven entirely by the subscribe set: `subscribe` carries the
  * subscriber's `WorkspaceMember` identity (the SEAM chosen over an injected
@@ -430,64 +402,30 @@ export class PageManager<S = object> {
   }
 
   /**
-   * Persist a block delta (create or update) and fan a `page.update` out to every
-   * socket subscribed to that page. `blockId === null` creates a new block
-   * appended to the page end (`ord: null` → Db.createBlock computes the next
-   * ord); a non-null `blockId` updates that existing block via Db.updateBlock
-   * (which snapshots the prior state into `revisions` first — the load-bearing
-   * revision-on-update property). Never trusts the wire: the page must exist,
-   * and for an update the block must belong to `pageId` (mirrors
-   * `ChannelManager.react`'s `getMessageChannelId` check). Returns the stored
-   * block, or `undefined` on a bad page / mismatched block (a no-op — nothing
-   * persisted, nothing delivered).
+   * Autosave a page's whole body and fan the updated page out (as `page.update`)
+   * to every socket subscribed to it. The page is one continuous field — no
+   * per-block delta — so concurrency is last-write-wins: whichever `page.edit`
+   * lands last simply overwrites the body (Db.updatePageBody throttles a
+   * prior-body snapshot into `page_revisions` first, so undo history survives
+   * without recording every keystroke). Never trusts the wire: the page must
+   * exist. Returns the updated page, or `undefined` on an unknown page (a
+   * no-op — nothing persisted, nothing delivered).
    */
-  saveBlock(
+  savePage(
     pageId: number,
-    blockId: number | null,
-    kind: KbBlockKind,
     body: string,
-    meta: string | null,
     author: string,
     now: string = new Date().toISOString(),
-  ): KbBlock | undefined {
+  ): KbPage | undefined {
     if (!this.db.getPage(pageId)) return undefined
-    let block: KbBlock | undefined
-    if (blockId === null) {
-      block = this.db.createBlock({ pageId, ord: null, kind, body, meta, updatedBy: author, now })
-    } else {
-      // Validate the block belongs to this page BEFORE mutating it.
-      if (this.db.getBlockPageId(blockId) !== pageId) return undefined
-      block = this.db.updateBlock(blockId, { kind, body, meta }, author, now)
-    }
-    if (!block) return undefined
+    const page = this.db.updatePageBody(pageId, body, author, now)
+    if (!page) return undefined
     const set = this.subs.get(pageId)
     if (set) {
-      const frame: WsWorkspaceServerMsg = { type: 'page.update', pageId, block }
+      const frame: WsWorkspaceServerMsg = { type: 'page.update', pageId, page }
       for (const socket of set) this.send(socket, frame)
     }
-    return block
-  }
-
-  /**
-   * Delete a block and fan a `page.delete` tombstone out to every socket
-   * subscribed to that page, so the block converges (is removed) on all live
-   * viewers without a reload — the delete analogue of `saveBlock`'s
-   * `page.update` fan-out. Never trusts the wire: the block must actually belong
-   * to `pageId` (mirrors `saveBlock`'s `getBlockPageId` ownership check), so a
-   * frame is only fanned for a real block on a real page. Returns `true` when a
-   * block was deleted + fanned, `false` on a bad page / mismatched block (a
-   * no-op — nothing deleted, nothing delivered).
-   */
-  deleteBlock(pageId: number, blockId: number): boolean {
-    // Validate the block belongs to this page BEFORE deleting it.
-    if (this.db.getBlockPageId(blockId) !== pageId) return false
-    this.db.deleteBlock(blockId)
-    const set = this.subs.get(pageId)
-    if (set) {
-      const frame: WsWorkspaceServerMsg = { type: 'page.delete', pageId, blockId }
-      for (const socket of set) this.send(socket, frame)
-    }
-    return true
+    return page
   }
 
   /** The current viewer set for a page, deduped by member id (multi-tab safe). */

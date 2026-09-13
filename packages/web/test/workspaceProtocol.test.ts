@@ -12,7 +12,7 @@ import {
   parseWorkspaceServerMsg,
 } from '../src/workspaceProtocol'
 import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from '../src/types'
-import type { KbBlock } from '../src/types'
+import type { KbPage } from '../src/types'
 
 describe('client encoders', () => {
   it('encodeHello produces a hello frame carrying the display name', () => {
@@ -284,67 +284,49 @@ describe('KB page encoders (T2, #144)', () => {
     expect(JSON.parse(encodePageUnsubscribe(9))).toEqual({ type: 'page.unsubscribe', pageId: 9 })
   })
 
-  it('encodePageEdit produces a create frame (blockId null) preserving body whitespace', () => {
-    expect(
-      JSON.parse(encodePageEdit(3, null, 'code', '  indented\n', '{"lang":"ts"}', '  Ada  ')),
-    ).toEqual({
+  it('encodePageEdit preserves body whitespace and trims/clamps the author', () => {
+    expect(JSON.parse(encodePageEdit(3, '  indented\n', '  Ada  '))).toEqual({
       type: 'page.edit',
       pageId: 3,
-      blockId: null,
-      kind: 'code',
       body: '  indented\n', // NOT trimmed
-      meta: '{"lang":"ts"}',
       author: 'Ada', // trimmed + clamped
-    })
-  })
-
-  it('encodePageEdit produces an update frame (non-null blockId) with null meta', () => {
-    expect(JSON.parse(encodePageEdit(3, 12, 'text', 'hello', null, 'Bo'))).toEqual({
-      type: 'page.edit',
-      pageId: 3,
-      blockId: 12,
-      kind: 'text',
-      body: 'hello',
-      meta: null,
-      author: 'Bo',
     })
   })
 
   it('encodePageEdit clamps an over-long body to the cap', () => {
     const overCap = 'a'.repeat(MAX_MESSAGE_BODY_LEN + 50)
-    const frame = JSON.parse(encodePageEdit(1, null, 'text', overCap, null, 'Ada')) as {
-      body: string
-    }
+    const frame = JSON.parse(encodePageEdit(1, overCap, 'Ada')) as { body: string }
     expect(frame.body.length).toBe(MAX_MESSAGE_BODY_LEN)
   })
 })
 
 describe('parseWorkspaceServerMsg — KB page frames (T2, #144)', () => {
-  const block: KbBlock = {
-    id: 7,
-    pageId: 3,
-    ord: 0,
-    kind: 'text',
+  const page: KbPage = {
+    id: 3,
+    spaceId: 1,
+    folderId: null,
+    title: 'Page',
     body: 'hi',
-    meta: null,
-    updatedAt: '2026-09-10T00:00:00.000Z',
+    author: 'Ada',
     updatedBy: 'Ada',
+    createdAt: '2026-09-10T00:00:00.000Z',
+    updatedAt: '2026-09-10T00:00:00.000Z',
   }
 
-  it('decodes a page.update frame carrying a well-formed block', () => {
-    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'page.update', pageId: 3, block }))).toEqual(
-      { type: 'page.update', pageId: 3, block },
+  it('decodes a page.update frame carrying a well-formed page', () => {
+    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'page.update', pageId: 3, page }))).toEqual(
+      { type: 'page.update', pageId: 3, page },
     )
   })
 
-  it('rejects a page.update with a missing/ill-typed block or pageId', () => {
+  it('rejects a page.update with a missing/ill-typed page or pageId', () => {
     expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'page.update', pageId: 3 }))).toBeUndefined()
     expect(
-      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.update', pageId: '3', block })),
+      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.update', pageId: '3', page })),
     ).toBeUndefined()
     expect(
       parseWorkspaceServerMsg(
-        JSON.stringify({ type: 'page.update', pageId: 3, block: { ...block, kind: 'bogus' } }),
+        JSON.stringify({ type: 'page.update', pageId: 3, page: { ...page, body: 5 } }),
       ),
     ).toBeUndefined()
   })
@@ -372,27 +354,6 @@ describe('parseWorkspaceServerMsg — KB page frames (T2, #144)', () => {
     ).toBeUndefined()
     expect(
       parseWorkspaceServerMsg(JSON.stringify({ type: 'page.presence', pageId: '3', viewers: [] })),
-    ).toBeUndefined()
-  })
-
-  it('decodes a page.delete tombstone carrying numeric pageId + blockId (#151)', () => {
-    expect(
-      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', pageId: 3, blockId: 7 })),
-    ).toEqual({ type: 'page.delete', pageId: 3, blockId: 7 })
-  })
-
-  it('rejects a page.delete with a missing/ill-typed pageId or blockId (#151)', () => {
-    expect(
-      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', pageId: 3 })),
-    ).toBeUndefined()
-    expect(
-      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', blockId: 7 })),
-    ).toBeUndefined()
-    expect(
-      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', pageId: '3', blockId: 7 })),
-    ).toBeUndefined()
-    expect(
-      parseWorkspaceServerMsg(JSON.stringify({ type: 'page.delete', pageId: 3, blockId: 'x' })),
     ).toBeUndefined()
   })
 
