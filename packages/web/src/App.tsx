@@ -36,7 +36,7 @@ import { isTauriRuntime } from './runtime'
 const RAIL: ReadonlyArray<{ id: WorkspaceMode; glyph: string; label: string }> = [
   { id: 'workspace', glyph: '≣', label: 'Workspace' },
   { id: 'board', glyph: '⑃', label: 'Board' },
-  { id: 'team', glyph: '▤', label: 'Team' },
+  { id: 'team', glyph: '🗨', label: 'Team' },
   { id: 'kb', glyph: '❏', label: 'KB' },
 ]
 
