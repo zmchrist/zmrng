@@ -1,0 +1,50 @@
+/* xterm host + (phone only) the on-screen key bar. Tokens only. */
+.wrap {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.host {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+/* Keys a soft keyboard has no room for: Esc, Tab, a sticky Ctrl, and arrows.
+   Sits directly above the phone keyboard, 44px targets, never wraps wider than
+   the viewport. */
+.keys {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  overflow-x: auto;
+  background: var(--surface-strong);
+  border-top: 1px solid var(--border);
+}
+
+.key {
+  flex: none;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.key:active {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.keyArmed,
+.keyArmed:active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}

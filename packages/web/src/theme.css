@@ -244,3 +244,20 @@ a:focus-visible {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ---- phone ------------------------------------------------------------- *
+ * Two global rules the whole phone layout depends on: a 16px minimum on text
+ * inputs (below that, iOS Safari zooms the page on focus and the layout no
+ * longer fits), and no horizontal overflow at the document level.            */
+@media (max-width: 768px) {
+  html,
+  body {
+    overflow-x: hidden;
+    overscroll-behavior-y: none;
+  }
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
