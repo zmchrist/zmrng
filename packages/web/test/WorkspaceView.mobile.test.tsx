@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { WorkspaceView } from '../src/components/WorkspaceView'
 import type { MobileWorkspaceView } from '../src/mobileNav'
 import type { Task } from '../src/types'
@@ -110,5 +110,73 @@ describe('<WorkspaceView> phone shell', () => {
     await screen.findAllByText('Task One')
     expect(document.querySelector('aside')).toHaveAttribute('aria-hidden', 'true')
     expect(visiblePanels()).toHaveLength(1)
+  })
+})
+
+describe('<WorkspaceView> phone task-panel swipe handle', () => {
+  beforeEach(() => localStorage.clear())
+
+  function handle() {
+    return screen.getByRole('button', { name: /task list/i })
+  }
+  function swipe(from: number, to: number) {
+    const el = handle()
+    fireEvent.touchStart(el, { touches: [{ clientY: from }] })
+    fireEvent.touchEnd(el, { changedTouches: [{ clientY: to }] })
+  }
+
+  it('offers the handle on the Tasks view only', async () => {
+    const { unmount } = renderView('tasks')
+    await screen.findAllByText('Task One')
+    expect(handle()).toHaveAttribute('aria-expanded', 'true')
+    unmount()
+
+    renderView('terminal')
+    expect(screen.queryByRole('button', { name: /task list/i })).not.toBeInTheDocument()
+  })
+
+  it('has no handle on desktop', async () => {
+    renderView()
+    await screen.findAllByText('Task One')
+    expect(screen.queryByRole('button', { name: /task list/i })).not.toBeInTheDocument()
+  })
+
+  it('hides the task list on a swipe up and restores it on a swipe down', async () => {
+    renderView('tasks')
+    await screen.findAllByText('Task One')
+
+    swipe(300, 200)
+    expect(document.querySelector('aside')).toHaveAttribute('aria-hidden', 'true')
+    expect(handle()).toHaveAttribute('aria-expanded', 'false')
+
+    swipe(200, 300)
+    expect(document.querySelector('aside')).not.toHaveAttribute('aria-hidden')
+    expect(handle()).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('toggles on a tap — the keyboard-accessible path — without double-applying', async () => {
+    renderView('tasks')
+    await screen.findAllByText('Task One')
+
+    // A real tap fires touchend AND a synthetic click; only one must count.
+    swipe(300, 300)
+    fireEvent.click(handle())
+    expect(handle()).toHaveAttribute('aria-expanded', 'false')
+
+    // A pure click (keyboard activation) still toggles.
+    fireEvent.click(handle())
+    expect(handle()).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('remembers the collapsed state across a remount', async () => {
+    const { unmount } = renderView('tasks')
+    await screen.findAllByText('Task One')
+    swipe(300, 200)
+    unmount()
+
+    renderView('tasks')
+    await screen.findAllByText('Task One')
+    expect(handle()).toHaveAttribute('aria-expanded', 'false')
+    expect(document.querySelector('aside')).toHaveAttribute('aria-hidden', 'true')
   })
 })

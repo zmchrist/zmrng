@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import styles from './WorkspaceView.module.css'
 import type {
   Attachment,
@@ -26,6 +26,13 @@ import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
 import type { HandoffPrefill } from '../teamHandoff'
 import type { SecurityScan } from '../types'
 import type { MobileWorkspaceView } from '../mobileNav'
+import {
+  beginSwipe,
+  loadTasksCollapsed,
+  resolveSwipe,
+  saveTasksCollapsed,
+  type SwipeGesture,
+} from '../mobileTaskPanel'
 
 /** Worker-pane tabs — the fixed Cosmos IDE tab set (replaces the draggable grid). */
 type PaneTab = 'worker' | 'files' | 'terminal' | 'chat'
@@ -141,6 +148,13 @@ export function WorkspaceView({
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [seenPrefill, setSeenPrefill] = useState<HandoffPrefill | null>(null)
+  // Phone shell only: the task-list panel's collapsed flag, driven by the
+  // swipe handle and remembered across reloads (one global setting).
+  const [mobileTasksCollapsed, setMobileTasksCollapsed] = useState(loadTasksCollapsed)
+  const swipeRef = useRef<SwipeGesture | null>(null)
+  // A touch that already resolved must not be re-applied by the synthetic click
+  // the browser fires afterwards; the click path exists for keyboard users.
+  const touchHandledRef = useRef(false)
 
   const taskId = task?.id ?? null
   const worktree = task?.worktree ?? null
@@ -198,7 +212,13 @@ export function WorkspaceView({
   // instead of the tab strip. 'tasks' stacks the task list above the worker log.
   const isMobile = mobileView !== undefined
   const activeTab: PaneTab = isMobile ? (mobileView === 'tasks' ? 'worker' : mobileView) : tab
-  const showTasks = isMobile ? mobileView === 'tasks' : !tasksCollapsed
+  const showTasksView = isMobile ? mobileView === 'tasks' : !tasksCollapsed
+  const showTasks = showTasksView && !(isMobile && mobileTasksCollapsed)
+
+  const setCollapsed = useCallback((next: boolean) => {
+    setMobileTasksCollapsed(next)
+    saveTasksCollapsed(next)
+  }, [])
 
   return (
     <div className={styles.center} data-mobile={isMobile || undefined}>
@@ -235,6 +255,39 @@ export function WorkspaceView({
           />
         </div>
       </aside>
+
+      {/* Phone shell: swipe up on the handle to collapse the task list, swipe
+          down or tap (also the keyboard path) to bring it back. */}
+      {isMobile && showTasksView && (
+        <button
+          type="button"
+          className={styles.tasksHandle}
+          aria-expanded={!mobileTasksCollapsed}
+          aria-label={mobileTasksCollapsed ? 'Show task list' : 'Hide task list'}
+          title={mobileTasksCollapsed ? 'Show task list' : 'Hide task list'}
+          onTouchStart={(e) => {
+            swipeRef.current = beginSwipe(e.touches[0]?.clientY ?? 0)
+          }}
+          onTouchEnd={(e) => {
+            const gesture = swipeRef.current
+            swipeRef.current = null
+            if (!gesture) return
+            touchHandledRef.current = true
+            setCollapsed(
+              resolveSwipe(gesture, e.changedTouches[0]?.clientY ?? gesture.startY, mobileTasksCollapsed),
+            )
+          }}
+          onClick={() => {
+            if (touchHandledRef.current) {
+              touchHandledRef.current = false
+              return
+            }
+            setCollapsed(!mobileTasksCollapsed)
+          }}
+        >
+          <span className={styles.tasksHandleBar} aria-hidden="true" />
+        </button>
+      )}
 
       <section className={styles.pane}>
         {!isMobile && (
