@@ -242,3 +242,14 @@ variant `space.tree` (source of truth `packages/server/src/types.ts`, mirror in
 `FileTree.dnd.test.tsx` (folder/page drop, root drop, cycle guard, self-drop no-op,
 read-only when `onMove` omitted) + a `space.tree` case in `workspaceProtocol.test.ts`; the
 db-level move + cycle rejection stays covered by `kb.test.ts`.
+
+## Local Voice Chat removed (2026-09-13)
+The frontend-only Local Voice Chat feature (Phase 1, 2026-08-27) was removed entirely to
+keep the app lightweight — the browser ML stack (`@huggingface/transformers` Whisper,
+`kokoro-js` Kokoro-82M, `@ricky0123/vad-web` MicVAD) dominated the bundle. Deleted the
+`voice/` seam, `VoiceView.tsx`/`.module.css`, `voiceSentences.ts`, `voiceTurn.ts`, their
+tests, and the `'voice'` Worker-pane tab in `WorkspaceView`; dropped the three ML deps
+from `packages/web/package.json` and the now-unused `worker.format` block from
+`vite.config.ts`. The underlying `/ws/chat` route and the text Chat pane are untouched; the
+dormant `voice` opt-in flag on the chat `start` frame (`chatProtocol.ts`/`types.ts`/
+`chatAgent.ts`) is retained but no longer set by any UI.
