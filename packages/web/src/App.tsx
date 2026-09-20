@@ -34,7 +34,7 @@ import { isTauriRuntime } from './runtime'
 /** Activity-rail nav — persistent across every mode; ⚙ opens Settings. */
 const RAIL: ReadonlyArray<{ id: WorkspaceMode; glyph: string; label: string }> = [
   { id: 'workspace', glyph: '≣', label: 'Workspace' },
-  { id: 'team', glyph: '▤', label: 'Team' },
+  { id: 'team', glyph: '🗨', label: 'Team' },
   { id: 'kb', glyph: '❏', label: 'KB' },
 ]
 
