@@ -70,16 +70,32 @@ fn login_shell_path() -> String {
     }
 }
 
-/// SIGTERM the sidecar (so Node's handler runs `manager.shutdown()` and kills
-/// its claude children), give it a beat, then hard-kill as a backstop.
+/// SIGTERM the sidecar so Node's handler runs `manager.shutdown()` and reaps its
+/// claude worker trees. Node's teardown needs headroom: a force-exit fallback at
+/// 2s plus a per-worker SIGKILL escalation at 5s (runner.ts). The old 800ms
+/// backstop hard-killed Node mid-teardown, stranding claude grandchildren. Poll
+/// for a clean exit up to ~6s instead — idle quits stay instant (Node exits
+/// early and we break), a busy quit gets the full window, and only a Node that
+/// ignores SIGTERM past 6s is force-killed.
 fn kill_sidecar(app: &tauri::AppHandle) {
     if let Some(child) = app.state::<Sidecar>().0.lock().unwrap().take() {
         let pid = child.pid() as i32;
         unsafe {
             libc::kill(pid, libc::SIGTERM);
         }
-        std::thread::sleep(Duration::from_millis(800));
-        let _ = child.kill();
+        let mut waited = 0u64;
+        loop {
+            std::thread::sleep(Duration::from_millis(100));
+            waited += 100;
+            // `kill(pid, 0)` is a liveness probe: non-zero once the process is gone.
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                return; // clean exit — Node reaped its workers itself
+            }
+            if waited >= 6000 {
+                let _ = child.kill(); // wedged Node — last-resort hard kill
+                return;
+            }
+        }
     }
 }
 

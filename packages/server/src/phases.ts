@@ -1540,4 +1540,13 @@ export class TaskManager {
     for (const runner of this.runners.values()) runner.kill()
     this.runners.clear()
   }
+
+  /**
+   * Synchronous last-resort: group-SIGKILL every live worker tree. Called from
+   * the `process.on('exit')` backstop so a force-exit that beats the async
+   * SIGKILL escalation can't strand `claude` grandchildren orphaned to launchd.
+   */
+  hardKillAll(): void {
+    for (const runner of this.runners.values()) runner.killGroupSync?.()
+  }
 }

@@ -289,3 +289,23 @@ non-obvious root cause, or is likely to recur. Template in
   `__pycache__/*.pyc` file and asserts `seedHarness()` still succeeds and the real hooks land.
 - **Files:** `packages/server/src/worktree.ts` (`seedHarness`), `packages/server/test/seedHarness.test.ts`
 - **Date Found:** 2026-09-12
+
+### Host freezes / stays frozen after closing all zmrng browser tabs
+- **Error:** The whole machine bogs down or freezes; closing every browser tab (including
+  zmrng) does **not** help — it stays frozen. Feels like zmrng is "still running" after quit.
+- **Cause:** A browser tab is only a viewer — the node server and every headless `claude`
+  worker (~325–350 MB RSS each, plus their tool subprocesses) live in a separate process the
+  tab close never touches. Historically, workers were killed by bare PID, so `claude`'s
+  grandchildren (subagent claudes, bash, git, semgrep, osv-scanner, vitest, tsc, vite) could
+  orphan to launchd (PPID 1) and keep burning CPU/RAM. A few leaked trees freeze the host.
+- **Solution:** Fixed by spawning workers `detached: true` and group-signalling the whole
+  tree (`runner.ts` `kill()`/`killGroupSync()`), a `process.on('exit')` backstop
+  (`manager.hardKillAll()`), and a ~6s liveness-poll in the Tauri quit path (`main.rs`)
+  instead of the old blind 800 ms hard-kill. To *diagnose* a suspected leak (or reap
+  survivors from an older build): run `scripts/zmrng-doctor.sh` (report) or
+  `scripts/zmrng-doctor.sh --kill` (reap ORPHANs, never the live app). Note: to stop zmrng
+  you must quit the app / Ctrl-C the server — closing the tab alone leaves it running.
+- **Files:** `packages/server/src/runner.ts`, `packages/server/src/index.ts`,
+  `packages/server/src/phases.ts`, `packages/desktop/src-tauri/src/main.rs`,
+  `scripts/zmrng-doctor.sh`
+- **Date Found:** 2026-09-20
