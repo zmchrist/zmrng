@@ -52,9 +52,6 @@ website. Always finish by re-bundling the app so the `.app` ships the new code.
 - **Engine:** Node `child_process` spawning the headless `claude` binary (stream-json)
 - **Terminal:** `node-pty` PTY sessions over `GET /ws/terminal` + `@xterm/xterm`, surfaced
   as the Workspace grid's Terminal card
-- **Voice (frontend-only, Phase 1):** local in-browser STT/TTS (`@huggingface/transformers`
-  Whisper, `kokoro-js` Kokoro-82M, `@ricky0123/vad-web` MicVAD) driving the SAME existing
-  `/ws/chat` agent socket the text Chat card uses — no new backend
 - **Frontend:** React 19 + Vite, CSS Modules + design tokens (frosted-glass theme)
 - **Language:** TypeScript throughout (ESM, `NodeNext`/`bundler` resolution)
 - **No cloud.** Tests run on **Vitest** (both workspaces) — validate with

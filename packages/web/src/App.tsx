@@ -19,7 +19,6 @@ import type {
 } from './types'
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
-import { Board } from './components/Board'
 import { TeamView } from './components/TeamView'
 import { KbView } from './components/KbView'
 import { UpdateBanner } from './components/UpdateBanner'
@@ -35,7 +34,6 @@ import { isTauriRuntime } from './runtime'
 /** Activity-rail nav — persistent across every mode; ⚙ opens Settings. */
 const RAIL: ReadonlyArray<{ id: WorkspaceMode; glyph: string; label: string }> = [
   { id: 'workspace', glyph: '≣', label: 'Workspace' },
-  { id: 'board', glyph: '⑃', label: 'Board' },
   { id: 'team', glyph: '🗨', label: 'Team' },
   { id: 'kb', glyph: '❏', label: 'KB' },
 ]
@@ -64,9 +62,10 @@ export default function App() {
   // browser localStorage proved unreliable for these in the desktop shell.
   const [settings, setSettings] = useState<WorkspaceSettings>({ workspaceUrl: '', teamHandle: '' })
   const ui = useUiState()
-  // Workspace is the default home; migrate the retired `'tasks'` mode to it.
+  // Workspace is the default home; migrate the retired `'tasks'`/`'board'` modes to it.
   const storedMode = ui.state.global.mode ?? 'workspace'
-  const mode: WorkspaceMode = storedMode === 'tasks' ? 'workspace' : storedMode
+  const mode: WorkspaceMode =
+    storedMode === 'tasks' || storedMode === 'board' ? 'workspace' : storedMode
   const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
   // Optimistically update settings state, persist to the server, then reconcile
   // with the server's echoed full document (blank values normalize identically).
@@ -260,18 +259,6 @@ export default function App() {
     [tasks],
   )
 
-  const onBoardSelectTask = useCallback(
-    (id: string) => {
-      setMode('workspace')
-      void select(id)
-    },
-    [select, setMode],
-  )
-
-  const onBoardArchive = useCallback((id: string) => {
-    void api.archive(id)
-  }, [])
-
   // Team tab handoff: switch to Workspace and seed the local new-task box.
   const onSendToZmrng = useCallback(
     (prefill: HandoffPrefill) => {
@@ -309,11 +296,9 @@ export default function App() {
   const breadcrumb =
     mode === 'workspace'
       ? (selected?.title ?? 'No task selected')
-      : mode === 'board'
-        ? 'Board'
-        : mode === 'kb'
-          ? 'KB'
-          : 'Team'
+      : mode === 'kb'
+        ? 'KB'
+        : 'Team'
   const lanes = cfg?.maxLanes ?? 0
   const running = sorted.filter((t) => t.status === 'executing').length
   const queued = sorted.filter((t) => t.queued).length
@@ -402,18 +387,6 @@ export default function App() {
               onDone={() => (selected ? api.done(selected.id) : Promise.resolve())}
               onCancel={() => (selected ? api.cancel(selected.id) : Promise.resolve())}
               onDelete={() => (selected ? api.deleteTask(selected.id) : Promise.resolve())}
-            />
-          </div>
-
-          <div
-            className={styles.modeContent}
-            style={{ display: mode === 'board' ? 'flex' : 'none' }}
-          >
-            <Board
-              tasks={sorted}
-              repos={repos}
-              onSelectTask={onBoardSelectTask}
-              onArchive={onBoardArchive}
             />
           </div>
 

@@ -95,18 +95,13 @@ that revisits one of these.
   single server-side enforcement point (REST + `/ws/chat`), `validateFile()` in
   `packages/web/src/attachments.ts` is the client-side mirror for fast feedback before a
   file is even uploaded.
-- Local Voice Chat (Phase 1, frontend-only): a hands-free spoken conversation with the
-  SAME standalone `/ws/chat` agent the text Chat pane drives — a pure I/O shell layered
-  on the existing socket, reusing `chatProtocol.ts`/`chatThread.ts` unchanged. ZERO
-  server changes, ZERO `types.ts` change. STT/TTS run locally in the browser
-  (`@huggingface/transformers` Whisper, `kokoro-js` Kokoro-82M, `@ricky0123/vad-web`
-  MicVAD) behind the swappable `voice/backend.ts` seam, each model in its own Web
-  Worker. New pure modules `voiceSentences.ts` (streamed-delta → sentence buffering for
-  TTS) and `voiceTurn.ts` (the `idle|listening|transcribing|thinking|speaking` state
-  machine, freeze + barge-in rules) are unit-tested; `voice/localBackend.ts` and
-  `VoiceView.tsx` are not (ML/worker/mic glue, same policy as Terminal.tsx). **Phase 2
-  (not done, deferred):** vendoring the ML models + ORT WASM into the Tauri `.app`
-  (`web/dist`), a WebGPU-in-WKWebView investigation, and `desktop:build` support — until
-  then Local Voice Chat only works in the browser dev/build target, not the shipped
-  desktop app.
+- Local Voice Chat (removed): the frontend-only Local Voice Chat feature (browser STT/TTS
+  layered on the `/ws/chat` agent) was shipped as Phase 1 and later **removed entirely** —
+  the heavy ML dependencies (`@huggingface/transformers`, `kokoro-js`, `@ricky0123/vad-web`)
+  made the bundle too large for the lightweight footprint we want. All voice code
+  (`VoiceView.tsx`, `voiceSentences.ts`, `voiceTurn.ts`, the `voice/` seam) and the deps are
+  gone; the underlying `/ws/chat` route and text Chat pane are untouched. The dormant
+  `voice` opt-in flag on the chat `start` frame (`chatProtocol.ts` / `types.ts` /
+  `chatAgent.ts`'s `voiceSystemPrompt`) is retained but no longer set by any UI. Do not
+  re-add local ML voice without first re-weighing that bundle cost.
 
