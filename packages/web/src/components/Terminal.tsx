@@ -1,8 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { encodeAttach, encodeInput, encodeResize, parseServerMsg } from '../terminalProtocol'
+import { TERMINAL_KEYS, ctrlSeq } from '../terminalKeys'
+import { useIsMobile } from '../useIsMobile'
+import styles from './Terminal.module.css'
 
 interface Props {
   /** Stable id for this terminal instance (one tab / one xterm per id). */
@@ -39,6 +42,13 @@ function token(name: string, fallback: string): string {
  */
 export function Terminal({ id, sessionId, onSession }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null)
+  // Phone only: an on-screen key bar for the keys a soft keyboard lacks. `Ctrl`
+  // is a sticky modifier — armed here, consumed by the next typed character.
+  const isMobile = useIsMobile()
+  const [ctrlArmed, setCtrlArmed] = useState(false)
+  const ctrlRef = useRef(false)
+  const sendRef = useRef<((data: string) => void) | null>(null)
+  const focusRef = useRef<(() => void) | null>(null)
   // Capture the mount-time session id and keep the latest onSession without
   // re-running the effect (later sessionId changes originate here).
   const initialSessionRef = useRef(sessionId)
@@ -137,8 +147,20 @@ export function Terminal({ id, sessionId, onSession }: Props) {
       }
     }
 
+    const send = (data: string) => {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(encodeInput(data))
+    }
+    sendRef.current = send
+    focusRef.current = () => term.focus()
+
     term.onData((d) => {
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(encodeInput(d))
+      if (ctrlRef.current) {
+        ctrlRef.current = false
+        setCtrlArmed(false)
+        send(ctrlSeq(d))
+        return
+      }
+      send(d)
     })
 
     const observer = new ResizeObserver(() => fitAndResize())
@@ -150,6 +172,8 @@ export function Terminal({ id, sessionId, onSession }: Props) {
       mounted = false
       if (reconnectTimer) clearTimeout(reconnectTimer)
       observer.disconnect()
+      sendRef.current = null
+      focusRef.current = null
       if (ws) {
         ws.onclose = null // intentional close — do not schedule a reconnect
         ws.close()
@@ -158,5 +182,36 @@ export function Terminal({ id, sessionId, onSession }: Props) {
     }
   }, [id])
 
-  return <div ref={hostRef} style={{ width: '100%', height: '100%' }} />
+  const onKey = (seq: string | null) => {
+    if (seq === null) {
+      const next = !ctrlRef.current
+      ctrlRef.current = next
+      setCtrlArmed(next)
+    } else {
+      sendRef.current?.(seq)
+    }
+    focusRef.current?.()
+  }
+
+  return (
+    <div className={styles.wrap}>
+      <div ref={hostRef} className={styles.host} />
+      {isMobile && (
+        <div className={styles.keys} role="toolbar" aria-label="Terminal keys">
+          {TERMINAL_KEYS.map((k) => (
+            <button
+              key={k.id}
+              type="button"
+              className={`${styles.key} ${k.seq === null && ctrlArmed ? styles.keyArmed : ''}`}
+              aria-pressed={k.seq === null ? ctrlArmed : undefined}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onKey(k.seq)}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
