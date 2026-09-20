@@ -1,0 +1,18 @@
+# Commit-identity consolidation mailmap for zmrng.
+# Format:  Proper Name <proper@email>  Commit Name <commit@email>
+# Left = canonical identity to KEEP.  Right = identity found in history to MAP FROM.
+#
+# Safe default (Q1/Q2 left untouched — see commit-identity-consolidation.md):
+
+# 53 commits authored under the unconfigured git default -> you.
+zmchrist <TiosVida@pm.me> Your Name <your.email@example.com>
+
+# Normalize the TioVida alias to the canonical TiosVida so the contribution
+# graph unifies under ONE email (both are aliases of the same mailbox).
+zmchrist <TiosVida@pm.me> zmchrist <TioVida@pm.me>
+
+# Q1 (DECIDED: real other person) — Zebucity/charles@coviin.com is NOT you.
+# Left untouched deliberately; rewriting it would misattribute their work.
+#
+# Q2 (DECIDED: fold in) — Pheme-Bot is your automation bleed -> you.
+zmchrist <TiosVida@pm.me> Pheme-Bot <Pheme-Bot@users.noreply.github.com>
