@@ -400,3 +400,23 @@
     transform: none;
   }
 }
+
+/* ---- phone shell -------------------------------------------------------- *
+ * The frame goes edge-to-edge and fills the dynamic viewport height, so the
+ * layout tracks iOS/Android browser chrome collapsing instead of overflowing.
+ * Desktop rules above are untouched.                                         */
+@media (max-width: 768px) {
+  .app {
+    padding: 0;
+    gap: 0;
+    height: 100dvh;
+  }
+  .frame {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .frameBody {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

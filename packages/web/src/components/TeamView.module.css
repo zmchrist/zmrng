@@ -858,3 +858,17 @@
   background: var(--text-dim);
   opacity: 0.5;
 }
+
+/* ---- phone: the channel rail stacks above the thread, both scrollable ---- */
+@media (max-width: 768px) {
+  .body {
+    flex-direction: column;
+  }
+  .rail {
+    width: 100%;
+    max-height: 34%;
+    flex: none;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
