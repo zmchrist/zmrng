@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync, symlinkSyn
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
-import { listWorktreeFiles, selfUpdate } from '../src/worktree.js'
+import { createWorktree, listWorktreeFiles, selfUpdate } from '../src/worktree.js'
 import type { WorktreeFileNode } from '../src/types.js'
 
 let dir: string
@@ -200,5 +200,57 @@ describe('selfUpdate', () => {
   it('aborts with an error when not on the default branch', async () => {
     git(local, ['checkout', '-q', '-b', 'other-branch'])
     await expect(selfUpdate(local, DEFAULT_BRANCH)).rejects.toThrow(/checked out on other-branch/)
+  })
+})
+
+describe('createWorktree', () => {
+  let repo: string
+
+  beforeEach(() => {
+    repo = initRepo()
+  })
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  const wtDir = (): string => path.join(repo, 'worktrees')
+
+  it('creates a fresh branch + worktree from the default branch', async () => {
+    const wt = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'task-1234abcd', 'Add mobile design')
+    expect(wt.branch).toBe('feat/zmrng/add-mobile-design-task-123')
+    const branches = execFileSync('git', ['-C', repo, 'branch', '--list', wt.branch]).toString()
+    expect(branches).toContain(wt.branch)
+    const list = execFileSync('git', ['-C', repo, 'worktree', 'list', '--porcelain']).toString()
+    expect(list).toContain(realpathSync(wt.worktreePath))
+  })
+
+  it('reuses an already-registered worktree at the same path (restart)', async () => {
+    const first = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'task-1234abcd', 'Add mobile design')
+    // A commit made in the prior session must survive the restart reuse.
+    writeFileSync(path.join(first.worktreePath, 'work.txt'), 'wip\n')
+    git(first.worktreePath, ['add', '-A'])
+    git(first.worktreePath, ['commit', '-q', '-m', 'wip'])
+
+    const second = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'task-1234abcd', 'Add mobile design')
+    expect(second.worktreePath).toBe(first.worktreePath)
+    expect(second.branch).toBe(first.branch)
+    const log = execFileSync('git', ['-C', first.worktreePath, 'log', '--oneline']).toString()
+    expect(log).toContain('wip')
+  })
+
+  it('reattaches a pre-existing branch whose worktree was removed (retry/restart)', async () => {
+    const first = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'task-1234abcd', 'Add mobile design')
+    // Simulate a prior attempt that made a commit on the branch, then lost its
+    // worktree dir (leaving the branch behind — the reported failure mode).
+    writeFileSync(path.join(first.worktreePath, 'work.txt'), 'wip\n')
+    git(first.worktreePath, ['add', '-A'])
+    git(first.worktreePath, ['commit', '-q', '-m', 'wip on branch'])
+    git(repo, ['worktree', 'remove', '--force', first.worktreePath])
+
+    // Must NOT throw "a branch named ... already exists" — reattaches instead.
+    const second = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'task-1234abcd', 'Add mobile design')
+    expect(second.branch).toBe(first.branch)
+    const log = execFileSync('git', ['-C', second.worktreePath, 'log', '--oneline']).toString()
+    expect(log).toContain('wip on branch')
   })
 })
