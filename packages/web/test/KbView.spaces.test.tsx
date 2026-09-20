@@ -8,10 +8,14 @@ const getSpaceTree = vi.fn()
 const createSpace = vi.fn()
 const deleteSpace = vi.fn()
 
+// A component effect from a torn-down test can still fire after `afterEach`'s
+// `vi.restoreAllMocks()` has cleared the fetch mocks' implementations, which
+// would otherwise hand the effect an `undefined` instead of a promise. Falling
+// back to an empty resolved result keeps that race from flaking the suite.
 vi.mock('../src/api', () => ({
   api: {
-    getSpaces: (...a: unknown[]) => getSpaces(...a),
-    getSpaceTree: (...a: unknown[]) => getSpaceTree(...a),
+    getSpaces: (...a: unknown[]) => getSpaces(...a) ?? Promise.resolve([]),
+    getSpaceTree: (...a: unknown[]) => getSpaceTree(...a) ?? Promise.resolve([]),
     createSpace: (...a: unknown[]) => createSpace(...a),
     deleteSpace: (...a: unknown[]) => deleteSpace(...a),
   },
