@@ -62,10 +62,36 @@ async function resolveBase(repo: string, defaultBranch: string): Promise<string>
   return 'HEAD'
 }
 
+/** True if `worktreePath` is already a worktree registered against `repo`. */
+async function worktreeRegistered(repo: string, worktreePath: string): Promise<boolean> {
+  const want = path.resolve(worktreePath)
+  let out: string
+  try {
+    out = await git(repo, ['worktree', 'list', '--porcelain'])
+  } catch {
+    return false
+  }
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      if (path.resolve(line.slice('worktree '.length)) === want) return true
+    }
+  }
+  return false
+}
+
 /**
- * Fetch origin (best effort), then add a fresh worktree checked out on a new
+ * Fetch origin (best effort), then add a worktree checked out on the task's
  * branch cut from the target repo's default branch. The branch + worktree are
  * unique per task id; worktrees live under zmrng's own worktrees dir.
+ *
+ * Idempotent so a restart or retried start never collides on leftover state
+ * from a prior attempt (the branch name is deterministic per task):
+ *   - prune stale worktree registrations whose dirs were removed;
+ *   - if the worktree at this path is already registered, reuse it as-is;
+ *   - if the branch already exists (prior attempt made it, then lost its
+ *     worktree), reattach that existing branch — preserving any commits on it —
+ *     instead of failing on `-b`;
+ *   - otherwise cut a fresh branch from the resolved base.
  */
 export async function createWorktree(
   repoPath: string,
@@ -85,8 +111,28 @@ export async function createWorktree(
   } catch {
     // no remote / offline — fall back to local refs below
   }
-  const base = await resolveBase(repoPath, defaultBranch)
-  await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, base])
+
+  // Drop registrations for worktree dirs that no longer exist, so a stale entry
+  // can't block re-adding at the same path.
+  try {
+    await git(repoPath, ['worktree', 'prune'])
+  } catch {
+    // best effort
+  }
+
+  // A restart/retry may find the worktree already present — reuse it.
+  if (await worktreeRegistered(repoPath, worktreePath)) {
+    return { branch, worktreePath }
+  }
+
+  if (await refExists(repoPath, branch)) {
+    // A prior attempt created the branch but lost its worktree — reattach the
+    // existing branch (keeping any commits) rather than colliding on `-b`.
+    await git(repoPath, ['worktree', 'add', worktreePath, branch])
+  } else {
+    const base = await resolveBase(repoPath, defaultBranch)
+    await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, base])
+  }
   return { branch, worktreePath }
 }
 

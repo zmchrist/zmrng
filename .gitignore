@@ -33,5 +33,8 @@ packages/desktop/src-tauri/icons/*
 __pycache__/
 *.pyc
 
+# tsc incremental build info (stray artifact; dist/ is already ignored)
+buildinfo.json
+
 # Playwright MCP screenshot artifacts
 .playwright-mcp/
