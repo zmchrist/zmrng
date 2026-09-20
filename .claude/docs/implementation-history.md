@@ -277,3 +277,6 @@ The `runner.ts`/`index.ts`/`phases.ts` layers apply to the headless VPS instance
 (`zmrng.service`); `main.rs` is desktop-only. Verified: typecheck, lint, tests, `cargo
 check`, a live group-kill proof (detached parent+grandchild → 0 survivors), and the
 doctor's full detect→reap→verify loop.
+
+## Phone terminal — soft-keyboard key bar, pinch-resize, flick-scroll (2026-09-20)
+Frontend-only (`packages/web`, no server/types.ts change): phone-only `Terminal.tsx` additions — a two-row on-screen key bar (`terminalKeys.ts`, extended with `TerminalMod`/`altSeq`/`modSeq` + a collapsed `TERMINAL_KEYS_EXTRA` row of Home/End/PgUp/PgDn/F1–F12), a `--kb-inset` padding fix for iOS Safari's keyboard-overlay behavior (new `keyboardInset.ts`), a shared pinch-driven font-size store (new `terminalFont.ts`), and flick-scroll-with-momentum plus a long-press Paste/Copy menu (new `terminalTouch.ts`, DOM-free arithmetic). All gated on `useIsMobile()`/a phone media block; desktop untouched. Web suite went 494 → 546 tests.

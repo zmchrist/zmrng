@@ -309,3 +309,17 @@ non-obvious root cause, or is likely to recur. Template in
   `packages/server/src/phases.ts`, `packages/desktop/src-tauri/src/main.rs`,
   `scripts/zmrng-doctor.sh`
 - **Date Found:** 2026-09-20
+
+### On-screen key bar buttons dead on iOS Safari when `touchstart` is prevented
+- **Error:** No thrown error — bar buttons (Esc/Tab/Ctrl/arrows/etc.) simply do nothing on
+  iOS Safari, though the same code works fine on desktop/Android.
+- **Cause:** iOS Safari synthesizes compatibility mouse events (`mousedown`/`mouseup`/
+  `click`) from a touch interaction. Calling `preventDefault()` on `touchstart` suppresses
+  those synthesized events too — including the `click` that fires the button's handler —
+  so the button never actually does anything on iOS.
+- **Solution:** Prevent the synthesized `mousedown` instead (`onMouseDown={(e) =>
+  e.preventDefault()}`), and leave `touchstart` alone. Preventing `mousedown` is already
+  enough to stop the button stealing focus from the xterm textarea (which would otherwise
+  close the soft keyboard), while `click` still fires normally.
+- **Files:** `packages/web/src/components/Terminal.tsx`
+- **Date Found:** 2026-09-20

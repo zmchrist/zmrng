@@ -1,5 +1,6 @@
 /* xterm host + (phone only) the on-screen key bar. Tokens only. */
 .wrap {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -13,16 +14,41 @@
   width: 100%;
 }
 
-/* Keys a soft keyboard has no room for: Esc, Tab, a sticky Ctrl, and arrows.
+/* Keys a soft keyboard has no room for: Esc, Tab, sticky Ctrl/Alt, arrows and
+   the shell symbols, plus a collapsed second row of navigation/function keys.
    Sits directly above the phone keyboard, 44px targets, never wraps wider than
    the viewport. */
+.bar {
+  flex: none;
+  background: var(--surface-strong);
+  border-top: 1px solid var(--border);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 .keys {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  padding: 6px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* The expand/dismiss controls never scroll away with the keys. */
+.controls {
   flex: none;
   display: flex;
   gap: 6px;
-  padding: 6px;
-  overflow-x: auto;
-  background: var(--surface-strong);
+  padding: 6px 6px 6px 0;
+  border-left: 1px solid var(--border);
+}
+
+.keysExtra {
   border-top: 1px solid var(--border);
 }
 
@@ -47,4 +73,59 @@
   color: var(--accent);
   background: var(--accent-soft);
   border-color: var(--accent-line);
+}
+
+/* Long-press Paste/Copy menu — positioned by clampMenuPosition, so it is always
+   fully inside the terminal wrap. */
+.menuBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.menu {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  background: var(--surface-strong);
+  backdrop-filter: blur(var(--blur));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.menuItem {
+  min-width: 132px;
+  height: 40px;
+  padding: 0 12px;
+  text-align: left;
+  font-family: var(--font);
+  font-size: 15px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+}
+.menuItem:active {
+  background: var(--surface-hover);
+}
+
+/* Phone only. The wrap's padding is driven by --kb-inset (set from
+   keyboardInset.ts): padding is inside the box, so it shrinks .host, the
+   existing ResizeObserver refits, and both the key bar and the cursor line stay
+   above the soft keyboard. */
+@media (max-width: 768px) {
+  .wrap {
+    padding-bottom: var(--kb-inset, 0px);
+    transition: padding-bottom var(--transition);
+  }
+
+  /* Our own touchstart/move handlers own pinch and flick-scroll — the browser
+     must not claim them first. */
+  .host {
+    touch-action: none;
+  }
 }
