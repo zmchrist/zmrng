@@ -32,7 +32,19 @@ Wraps one long-lived headless `claude` child process per task.
 - **`send(text, attachments?: Attachment[])`** writes a stream-json `user` turn to the
   child's stdin, built via `buildUserMessage(text, attachments)`.
 - **`interrupt()`** writes a `{type:'control_request', request_id:<uuid>, request:{subtype:'interrupt'}}` line to stdin (ESC-style hard stop; child stays alive and idles). Wrapped in try/catch for a closed stdin.
-- **`kill()`** ends stdin and sends SIGTERM (both wrapped in try/catch).
+- **Process group:** the child is spawned `detached: true`, so it becomes its own
+  process-group leader (pgid == child.pid). This lets `kill()` signal the **whole tree**
+  — `claude` *and* the grandchildren it spawns (subagent claudes, bash, git, semgrep,
+  osv-scanner, vitest, tsc, vite) — instead of the bare pid, which would leave those
+  grandchildren orphaned to launchd (PPID 1) burning CPU/RAM.
+- **`kill()`** ends stdin and `signalTree('SIGTERM')`, then arms a 5s (`SIGKILL_GRACE_MS`)
+  `unref`'d timer that `signalTree('SIGKILL')`s a wedged child; the exit handler clears it.
+  **`signalTree(signal)`** sends `process.kill(-pid, signal)` (the group), falling back to a
+  bare-pid `child.kill(signal)` if the group send throws (child already reaped, or no pgroup).
+- **`killGroupSync()`** — synchronous, timer-free group `SIGKILL` for the `process.on('exit')`
+  backstop in `index.ts` (see `TaskManager.hardKillAll`); guarantees the worker tree dies
+  with the server even when the 2s force-exit beats the async 5s escalation. Exposed as an
+  optional method on the `RunnerLike` seam (test doubles may omit it).
 - **`pendingTasks`** — bounded `Map<tool_use_id, subagent_type>`; prunes on result; capped at 200 entries (oldest evicted) to prevent unbounded growth.
 - Callbacks: `onSession`, `onAssistantText`, `onPartial`, `onResult`, `onToolUse(name, summary, isSubagent, subagentType?)`, `onSubagentResult(subagentType, summary, isError)`, `onExit`, `onSpawnError`.
 - Helpers `asRecord` / `asString` keep parsing typed without `any`. `summarizeTool(name, input)` and `summarizeResult(content)` produce compact one-line summaries.
@@ -167,10 +179,14 @@ The phase state machine and orchestration.
   prevents a hard Stop from failing the task. `pendingAttachments` is cleaned up the same
   way — deleted in `cancel()`/`deleteTask()` alongside `interrupting`/`blockedFrom` — so an
   un-started task's held attachments never leak past its lifecycle.
-- **`resume` / `done` / `cancel` / `shutdown`** — resume a `blocked` task after the
-  missing agent is added; finish + local-sync after merge + remove worktree; cancel +
-  remove worktree; kill all live runners. `done()`/`cancel()`/`fail()`/`onPr()` each call
-  `interrupting.delete(taskId)` to prevent flag leakage across a task's lifecycle.
+- **`resume` / `done` / `cancel` / `shutdown` / `hardKillAll`** — resume a `blocked` task
+  after the missing agent is added; finish + local-sync after merge + remove worktree; cancel
+  + remove worktree; `shutdown()` `kill()`s all live runners (graceful SIGTERM→SIGKILL).
+  `hardKillAll()` is the synchronous last-resort called from `index.ts`'s `process.on('exit')`
+  backstop — it group-`SIGKILL`s every live worker tree (`runner.killGroupSync?.()`) so a
+  force-exit that beats the async escalation can't strand `claude` grandchildren orphaned to
+  launchd. `done()`/`cancel()`/`fail()`/`onPr()` each call `interrupting.delete(taskId)` to
+  prevent flag leakage across a task's lifecycle.
 - `planKickoff` → run `/core_piv_loop:plan-feature`, QA the plan, emit `ZMRNG_PLAN_READY`.
   `executeKickoff(branch, defaultBranch, planPath)` → `/core_piv_loop:execute` →
   `ZMRNG_VALIDATING` → qa/code-reviewer/doc-updater chain → commit **on the branch** →
