@@ -1,0 +1,122 @@
+/* Phone shell chrome — pinned top bar + hamburger drawer. Rendered only below
+   the phone breakpoint (see useIsMobile); the desktop title bar / activity rail
+   are untouched. Tokens only, and 44px-minimum touch targets throughout. */
+.wrap {
+  flex: none;
+  position: relative;
+  z-index: 40;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 8px;
+  padding-top: env(safe-area-inset-top);
+  box-sizing: content-box;
+  background: var(--surface-strong);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border-bottom: 1px solid var(--border);
+}
+
+.iconBtn {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 19px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition), background var(--transition);
+}
+.iconBtn:active {
+  color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.brand {
+  flex: none;
+  font-family: var(--font-brand);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text);
+}
+
+.crumb {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--status-done);
+}
+.connDown {
+  background: var(--status-failed);
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+  background: color-mix(in srgb, var(--well-strong) 70%, transparent);
+  border: none;
+}
+
+.drawer {
+  position: absolute;
+  z-index: 2;
+  top: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--surface-strong);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 12px;
+  font-size: 15px;
+  text-align: left;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+}
+.itemActive,
+.item:active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.itemGlyph {
+  width: 20px;
+  text-align: center;
+  font-size: 16px;
+}

@@ -25,6 +25,7 @@ import { SecurityPanel } from './SecurityPanel'
 import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
 import type { HandoffPrefill } from '../teamHandoff'
 import type { SecurityScan } from '../types'
+import type { MobileWorkspaceView } from '../mobileNav'
 
 /** Worker-pane tabs — the fixed Cosmos IDE tab set (replaces the draggable grid). */
 type PaneTab = 'worker' | 'files' | 'terminal' | 'chat'
@@ -48,6 +49,9 @@ interface Props {
   /** Whether the Tasks side panel is collapsed (ephemeral, driven by re-clicking
    *  the Workspace activity-rail button). */
   tasksCollapsed: boolean
+  /** Phone shell: which single view to fill the screen with. `undefined` on
+   *  desktop, where the task panel + tab strip layout is used unchanged. */
+  mobileView?: MobileWorkspaceView
   /** Per-tab state for the multi-tab Chat and Terminal panes + their
    *  persistence sinks (global UI state). Feed the tabbed ChatCard/TerminalCard
    *  dropped into the IDE's Chat/Terminal tabs. */
@@ -113,6 +117,7 @@ export function WorkspaceView({
   config,
   selectedId,
   tasksCollapsed,
+  mobileView,
   chatTabs,
   onChatTabsChange,
   terminalTabs,
@@ -189,11 +194,17 @@ export function WorkspaceView({
 
   const status = task?.status ?? null
 
+  // Phone shell: one view fills the screen, driven by the hamburger drawer
+  // instead of the tab strip. 'tasks' stacks the task list above the worker log.
+  const isMobile = mobileView !== undefined
+  const activeTab: PaneTab = isMobile ? (mobileView === 'tasks' ? 'worker' : mobileView) : tab
+  const showTasks = isMobile ? mobileView === 'tasks' : !tasksCollapsed
+
   return (
-    <div className={styles.center}>
+    <div className={styles.center} data-mobile={isMobile || undefined}>
       <aside
-        className={`${styles.tasksPanel} ${tasksCollapsed ? styles.tasksPanelCollapsed : ''}`}
-        aria-hidden={tasksCollapsed || undefined}
+        className={`${styles.tasksPanel} ${showTasks ? '' : styles.tasksPanelCollapsed}`}
+        aria-hidden={!showTasks || undefined}
       >
         <div className={styles.tasksHead}>
           <span className={styles.tasksLabel}>Tasks</span>
@@ -226,6 +237,7 @@ export function WorkspaceView({
       </aside>
 
       <section className={styles.pane}>
+        {!isMobile && (
         <div className={styles.tabStrip} role="tablist" aria-label="Worker pane">
           {PANE_TABS.map((t) => (
             <button
@@ -240,12 +252,13 @@ export function WorkspaceView({
             </button>
           ))}
         </div>
+        )}
 
         <div className={styles.paneBody}>
           {/* Worker */}
           <div
             className={styles.tabPanel}
-            style={{ display: tab === 'worker' ? 'flex' : 'none' }}
+            style={{ display: activeTab === 'worker' ? 'flex' : 'none' }}
             role="tabpanel"
           >
             <WorkerLogPanel
@@ -263,7 +276,7 @@ export function WorkspaceView({
           {/* Files */}
           <div
             className={styles.tabPanel}
-            style={{ display: tab === 'files' ? 'flex' : 'none' }}
+            style={{ display: activeTab === 'files' ? 'flex' : 'none' }}
             role="tabpanel"
           >
             <div className={styles.filesSplit}>
@@ -310,7 +323,7 @@ export function WorkspaceView({
               survive both card-tab and pane-tab switches. */}
           <div
             className={styles.tabPanel}
-            style={{ display: tab === 'terminal' ? 'flex' : 'none' }}
+            style={{ display: activeTab === 'terminal' ? 'flex' : 'none' }}
             role="tabpanel"
           >
             <TerminalCard tabs={terminalTabs} onTabsChange={onTerminalTabsChange} />
@@ -320,7 +333,7 @@ export function WorkspaceView({
               mounted so sessions survive tab switches. */}
           <div
             className={styles.tabPanel}
-            style={{ display: tab === 'chat' ? 'flex' : 'none' }}
+            style={{ display: activeTab === 'chat' ? 'flex' : 'none' }}
             role="tabpanel"
           >
             <ChatCard tabs={chatTabs} onTabsChange={onChatTabsChange} repos={repos} />

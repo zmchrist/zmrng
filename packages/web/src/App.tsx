@@ -30,6 +30,18 @@ import { nextRailState } from './railState'
 import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState, type TerminalTabState } from './windowTabs'
 import type { HandoffPrefill } from './teamHandoff'
 import { isTauriRuntime } from './runtime'
+import { useIsMobile } from './useIsMobile'
+import { MobileNav } from './components/MobileNav'
+import {
+  initialMobileNav,
+  modeForView,
+  selectView,
+  toggleDrawer,
+  viewForMode,
+  workspaceViewFor,
+  type MobileNavState,
+  type MobileView,
+} from './mobileNav'
 
 /** Activity-rail nav — persistent across every mode; ⚙ opens Settings. */
 const RAIL: ReadonlyArray<{ id: WorkspaceMode; glyph: string; label: string }> = [
@@ -76,6 +88,24 @@ export default function App() {
   // The effective Team workspace URL: the persisted per-user value wins over the
   // ZMRNG_WORKSPACE_URL env default surfaced via ServerConfig.
   const effectiveWorkspaceUrl = settings.workspaceUrl || cfg?.workspaceUrl || ''
+  // ---- phone shell -------------------------------------------------------
+  // Below the phone breakpoint the Workspace split collapses to ONE full-screen
+  // view at a time, chosen from the hamburger drawer. Desktop is untouched.
+  const isMobile = useIsMobile()
+  const [nav, setNav] = useState<MobileNavState>(() => ({
+    ...initialMobileNav,
+    view: viewForMode(storedMode === 'tasks' || storedMode === 'board' ? 'workspace' : storedMode),
+  }))
+  const onSelectMobileView = useCallback(
+    (v: MobileView) => {
+      setNav((prev) => selectView(prev, v))
+      setMode(modeForView(v))
+    },
+    [setMode],
+  )
+  const onToggleMobileDrawer = useCallback(() => setNav(toggleDrawer), [])
+  const onCloseMobileDrawer = useCallback(() => setNav((prev) => ({ ...prev, drawerOpen: false })), [])
+
   // Ephemeral: whether the Workspace Tasks side panel is collapsed. Re-clicking
   // the active Workspace rail button toggles it; leaving Workspace re-expands it.
   const [tasksCollapsed, setTasksCollapsed] = useState(false)
@@ -317,7 +347,18 @@ export default function App() {
       )}
 
       <div className={styles.frame}>
-        {/* title bar (persistent) */}
+        {/* title bar (persistent) — replaced by the hamburger bar on a phone */}
+        {isMobile ? (
+          <MobileNav
+            view={nav.view}
+            drawerOpen={nav.drawerOpen}
+            connected={connected}
+            onToggleDrawer={onToggleMobileDrawer}
+            onCloseDrawer={onCloseMobileDrawer}
+            onSelect={onSelectMobileView}
+            onSettings={() => setSettingsOpen((v) => !v)}
+          />
+        ) : (
         <div className={styles.tbar} data-tauri-drag-region>
           <span className={styles.tbBrand}>zmrng</span>
           <span className={styles.tbSep}>›</span>
@@ -327,9 +368,11 @@ export default function App() {
             {connected ? 'connected' : 'offline'}
           </span>
         </div>
+        )}
 
         {/* body: persistent activity rail | swappable mode content */}
         <div className={styles.frameBody}>
+          {!isMobile && (
           <nav className={styles.arail} aria-label="Navigation">
             {RAIL.map((r) => (
               <button
@@ -354,6 +397,7 @@ export default function App() {
               ⚙
             </button>
           </nav>
+          )}
 
           <div
             className={styles.modeContent}
@@ -369,6 +413,7 @@ export default function App() {
               config={cfg}
               selectedId={selectedId}
               tasksCollapsed={tasksCollapsed}
+              mobileView={isMobile ? (workspaceViewFor(nav.view) ?? 'tasks') : undefined}
               chatTabs={chatTabs}
               onChatTabsChange={setChatTabs}
               terminalTabs={terminalTabs}
@@ -420,7 +465,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* status bar (persistent) */}
+        {/* status bar (persistent) — dropped on a phone to keep the view full */}
+        {!isMobile && (
         <div className={styles.sbar}>
           <span className={styles.sbBranch}>{branch}</span>
           <span className={styles.sbItem}>
@@ -429,6 +475,7 @@ export default function App() {
           <span className={styles.sbSpacer} />
           <span className={styles.sbItem}>{modelLabel}</span>
         </div>
+        )}
       </div>
 
       <SettingsModal
