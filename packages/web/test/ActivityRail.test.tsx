@@ -1,0 +1,58 @@
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { ActivityRail } from '../src/components/ActivityRail'
+
+const noop = () => undefined
+
+describe('ActivityRail', () => {
+  it('renders one button per mode plus Settings', () => {
+    render(<ActivityRail mode="workspace" teamUnread={false} onSelect={noop} onSettings={noop} />)
+    expect(screen.getByRole('button', { name: 'Workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Team' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'KB' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+  })
+
+  it('draws the Team icon as an outline svg bubble, not a unicode glyph', () => {
+    const { container } = render(
+      <ActivityRail mode="workspace" teamUnread={false} onSelect={noop} onSettings={noop} />,
+    )
+    const team = screen.getByRole('button', { name: 'Team' })
+    const svg = team.querySelector('svg')
+    expect(svg).not.toBeNull()
+    expect(svg?.getAttribute('fill')).toBe('none')
+    expect(svg?.getAttribute('stroke')).toBe('currentColor')
+    expect(container.textContent).not.toContain('🗨')
+  })
+
+  it('hides the unread orb by default', () => {
+    render(<ActivityRail mode="workspace" teamUnread={false} onSelect={noop} onSettings={noop} />)
+    expect(screen.queryByTestId('team-unread-orb')).toBeNull()
+  })
+
+  it('shows the unread orb on the Team icon and announces it', () => {
+    render(<ActivityRail mode="workspace" teamUnread onSelect={noop} onSettings={noop} />)
+    const orb = screen.getByTestId('team-unread-orb')
+    expect(orb).toBeInTheDocument()
+    const team = screen.getByRole('button', { name: 'Team — new messages' })
+    expect(team).toContainElement(orb)
+  })
+
+  it('marks the active mode pressed', () => {
+    render(<ActivityRail mode="team" teamUnread={false} onSelect={noop} onSettings={noop} />)
+    expect(screen.getByRole('button', { name: 'Team' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'KB' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('reports clicks', () => {
+    const onSelect = vi.fn()
+    const onSettings = vi.fn()
+    render(
+      <ActivityRail mode="workspace" teamUnread={false} onSelect={onSelect} onSettings={onSettings} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
+    expect(onSelect).toHaveBeenCalledWith('team')
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(onSettings).toHaveBeenCalled()
+  })
+})

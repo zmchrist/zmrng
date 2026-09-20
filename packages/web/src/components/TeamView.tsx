@@ -58,6 +58,12 @@ interface Props {
   /** Bubble a `new-version` frame's sha up to App (WS-B / D3). TeamView owns the
    *  socket but NOT the update banner — the phase-gate needs App's `tasks`. */
   onNewVersion?: (sha: string) => void
+  /** Report the newest message id the operator has now READ in a channel —
+   *  fired when a channel is open on the active Team tab, and again as live
+   *  messages land while they watch it. Clears that channel's unread orb in
+   *  App. Per channel by design: switching to the Team tab alone clears
+   *  nothing. */
+  onChannelRead?: (channelId: number, messageId: number) => void
   /** Whether the Team tab is the ACTIVE mode. The view is always mounted (App
    *  keeps it in the DOM via `display:none`), so the workspace socket is gated
    *  on this flag: an idle client on another mode opens ZERO sockets, entering
@@ -97,6 +103,7 @@ function TeamViewComponent({
   onSendToZmrng,
   onOpenKbPage,
   onNewVersion,
+  onChannelRead,
   active,
 }: Props) {
   const socketUrl = workspaceSocketUrl(workspaceUrl)
@@ -176,6 +183,18 @@ function TeamViewComponent({
   useEffect(() => {
     notifyThreadChanged()
   }, [thread, notifyThreadChanged])
+
+  // Reading the open channel clears its unread orb. Reported through a ref-held
+  // callback so a new prop identity never re-runs the report on its own.
+  const onChannelReadRef = useRef(onChannelRead)
+  useEffect(() => {
+    onChannelReadRef.current = onChannelRead
+  }, [onChannelRead])
+  useEffect(() => {
+    if (!active || openId === null || thread.length === 0) return
+    const newest = thread.reduce((max, m) => (m.id > max ? m.id : max), 0)
+    if (newest > 0) onChannelReadRef.current?.(openId, newest)
+  }, [active, openId, thread])
 
   /** Send a pre-encoded frame if the socket is live (dropped otherwise). */
   const sendFrame = (data: string): void => {
