@@ -1,0 +1,87 @@
+/* ---- activity rail (persistent, static across every mode) ------------- */
+.arail {
+  width: 52px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0;
+  background: var(--surface);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border-right: 1px solid var(--border);
+}
+.arailBtn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  transition: color var(--transition), background var(--transition);
+}
+.arailBtn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.arailActive,
+.arailActive:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.arailBottom {
+  margin-top: auto;
+}
+
+/* Icon box — the positioning context for the unread orb, so the orb hangs off
+   the glyph itself rather than the button's padding box. */
+.arailIcon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+.arailSvg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* Unread orb: a small accent dot at the icon's top-right with a soft pulsing
+   glow. Color and glow come from the theme accent token — never hard-coded. */
+.arailOrb {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  box-shadow: 0 0 5px var(--accent);
+  animation: arailOrbPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes arailOrbPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.82);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arailOrb {
+    animation: none;
+  }
+}

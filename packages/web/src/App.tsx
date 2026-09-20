@@ -20,6 +20,7 @@ import type {
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
 import { TeamView } from './components/TeamView'
+import { ActivityRail } from './components/ActivityRail'
 import { KbView } from './components/KbView'
 import { UpdateBanner } from './components/UpdateBanner'
 import { SettingsModal } from './components/SettingsModal'
@@ -30,6 +31,8 @@ import { nextRailState } from './railState'
 import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState, type TerminalTabState } from './windowTabs'
 import type { HandoffPrefill } from './teamHandoff'
 import { isTauriRuntime } from './runtime'
+import { workspaceHttpOrigin } from './teamConfig'
+import { emptyUnread, hasUnread, markRead, observeTips, type ChannelTip } from './teamUnread'
 import { useIsMobile } from './useIsMobile'
 import { MobileNav } from './components/MobileNav'
 import {
@@ -43,13 +46,6 @@ import {
   type MobileView,
 } from './mobileNav'
 
-/** Activity-rail nav — persistent across every mode; ⚙ opens Settings. */
-const RAIL: ReadonlyArray<{ id: WorkspaceMode; glyph: string; label: string }> = [
-  { id: 'workspace', glyph: '≣', label: 'Workspace' },
-  { id: 'team', glyph: '🗨', label: 'Team' },
-  { id: 'kb', glyph: '❏', label: 'KB' },
-]
-
 // Read once — the runtime never changes mid-session.
 const isNativeApp = isTauriRuntime()
 
@@ -60,6 +56,11 @@ const isNativeApp = isTauriRuntime()
 // of a live turn is transient token noise finalized into an `event` anyway.
 const MAX_EVENTS = 2000
 const MAX_LIVE_CHARS = 200_000
+
+// How often to re-check the team workspace for new messages while the operator
+// is off the Team tab. Deliberately lazy — this is an ambient "something
+// happened" hint, not a live feed.
+const UNREAD_POLL_MS = 30_000
 
 export default function App() {
   const [tasks, setTasks] = useState<Record<string, Task>>({})
@@ -88,6 +89,49 @@ export default function App() {
   // The effective Team workspace URL: the persisted per-user value wins over the
   // ZMRNG_WORKSPACE_URL env default surfaced via ServerConfig.
   const effectiveWorkspaceUrl = settings.workspaceUrl || cfg?.workspaceUrl || ''
+  // ---- Team unread orb (in-memory only, resets on relaunch) --------------
+  // The workspace socket is gated on the Team tab being active (#149), so while
+  // the operator is elsewhere there is no live feed to listen to. Instead poll a
+  // cheap newest-message tip per channel over REST and fold it through the pure
+  // `teamUnread` reducer; the rail orb lights when any channel has a message the
+  // operator has not read. Nothing is persisted — no server, DB or type change.
+  const [unread, setUnread] = useState(emptyUnread)
+  const onChannelRead = useCallback((channelId: number, messageId: number) => {
+    setUnread((prev) => markRead(prev, channelId, messageId))
+  }, [])
+  useEffect(() => {
+    const origin = workspaceHttpOrigin(effectiveWorkspaceUrl)
+    // Only poll while OFF the Team tab: on it, TeamView owns the live socket and
+    // the orb is hidden anyway.
+    if (mode === 'team' || !origin || !settings.teamHandle) return
+    let cancelled = false
+    const poll = async (): Promise<void> => {
+      try {
+        const channels = await api.listChannels(origin)
+        const tips = await Promise.all(
+          channels.map(async (c): Promise<ChannelTip | null> => {
+            const [newest] = await api.getChannelMessages(c.id, { limit: 1 }, origin)
+            return newest
+              ? { channelId: c.id, messageId: newest.id, author: newest.author }
+              : null
+          }),
+        )
+        if (cancelled) return
+        const seen = tips.filter((t): t is ChannelTip => t !== null)
+        setUnread((prev) => observeTips(prev, seen, settings.teamHandle))
+      } catch {
+        // The VPS workspace is optional and may be unreachable — stay quiet and
+        // retry on the next tick.
+      }
+    }
+    void poll()
+    const timer = setInterval(() => void poll(), UNREAD_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [mode, effectiveWorkspaceUrl, settings.teamHandle])
+
   // ---- phone shell -------------------------------------------------------
   // Below the phone breakpoint the Workspace split collapses to ONE full-screen
   // view at a time, chosen from the hamburger drawer. Desktop is untouched.
@@ -373,30 +417,12 @@ export default function App() {
         {/* body: persistent activity rail | swappable mode content */}
         <div className={styles.frameBody}>
           {!isMobile && (
-          <nav className={styles.arail} aria-label="Navigation">
-            {RAIL.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                className={`${styles.arailBtn} ${mode === r.id ? styles.arailActive : ''}`}
-                aria-pressed={mode === r.id}
-                aria-label={r.label}
-                title={r.label}
-                onClick={() => onRailClick(r.id)}
-              >
-                {r.glyph}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={`${styles.arailBtn} ${styles.arailBottom}`}
-              aria-label="Settings"
-              title="Settings"
-              onClick={() => setSettingsOpen((v) => !v)}
-            >
-              ⚙
-            </button>
-          </nav>
+            <ActivityRail
+              mode={mode}
+              teamUnread={mode !== 'team' && hasUnread(unread)}
+              onSelect={onRailClick}
+              onSettings={() => setSettingsOpen((v) => !v)}
+            />
           )}
 
           <div
@@ -448,6 +474,7 @@ export default function App() {
               onSendToZmrng={onSendToZmrng}
               onOpenKbPage={onOpenKbPage}
               onNewVersion={onNewVersion}
+              onChannelRead={onChannelRead}
               active={mode === 'team'}
             />
           </div>
