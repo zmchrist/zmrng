@@ -241,6 +241,11 @@ export class Runner {
       cwd: opts.cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Own process group (leader pgid == child.pid) so kill() can signal the
+      // WHOLE tree — `claude` plus its grandchildren (subagent claudes, bash,
+      // git, semgrep, osv-scanner, vitest, tsc, vite). Killing the bare pid
+      // leaves those orphaned to launchd, still burning CPU/RAM (the freeze).
+      detached: true,
     })
 
     this.child.on('error', (err) => this.cb.onSpawnError(err))
@@ -407,22 +412,50 @@ export class Runner {
     } catch {
       // stdin already closed
     }
-    try {
-      this.child.kill('SIGTERM')
-    } catch {
-      // already exited
-    }
+    this.signalTree('SIGTERM')
     if (this.killTimer) return
     this.killTimer = setTimeout(() => {
       this.killTimer = undefined
-      try {
-        this.child.kill('SIGKILL')
-      } catch {
-        // already exited
-      }
+      this.signalTree('SIGKILL')
     }, Runner.SIGKILL_GRACE_MS)
     // Don't let the escalation timer keep the event loop (or a test) alive.
     this.killTimer.unref?.()
+  }
+
+  /**
+   * Signal the child's whole process group (spawned `detached`, so pgid ==
+   * child.pid) — reaching `claude`'s grandchildren, not just `claude` itself.
+   * Falls back to a bare-pid signal if the group send fails (child already
+   * reaped, or a platform without process groups).
+   */
+  private signalTree(signal: NodeJS.Signals): void {
+    const pid = this.child.pid
+    try {
+      if (pid) process.kill(-pid, signal)
+      else this.child.kill(signal)
+    } catch {
+      try {
+        this.child.kill(signal)
+      } catch {
+        // already exited
+      }
+    }
+  }
+
+  /**
+   * Synchronous last-resort group SIGKILL — safe from a `process.on('exit')`
+   * handler (no async, no timers). The node shutdown force-exit (index.ts) can
+   * fire before the async SIGKILL escalation above runs; this guarantees the
+   * worker tree dies with the server instead of orphaning to launchd.
+   */
+  killGroupSync(): void {
+    const pid = this.child.pid
+    if (!pid) return
+    try {
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      // already exited
+    }
   }
 }
 
@@ -435,6 +468,8 @@ export interface RunnerLike {
   send(text: string, attachments?: Attachment[]): void
   interrupt(): void
   kill(): void
+  /** Synchronous last-resort group SIGKILL for the process-exit backstop. */
+  killGroupSync?(): void
 }
 
 /** Builds the worker process wrapper for a task's phase. Swappable for tests/adapters. */
