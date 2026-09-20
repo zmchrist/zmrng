@@ -102,6 +102,7 @@ packages/web/src/
   chatThread.ts   — React-free bubble-thread reducer for the standalone chat pane (emptyThread/pushUser/appendPartial/finalizeAssistant/pushToolNote/endTurn/resetThread)
   attachments.ts  — pure image/PDF drop-paste helpers (mimeToKind/validateFile/fileToAttachment/filesFromPaste/filesFromDrop), mirroring the server's allow-list/size limits
   mobileNav.ts    — pure phone-navigation model (MOBILE_VIEWS / MobileNavState / toggleDrawer / closeDrawer / selectView / modeForView / workspaceViewFor / viewForMode). Below the 768px phone breakpoint the Workspace split collapses to ONE full-screen view at a time, picked from the hamburger drawer
+  mobileTaskPanel.ts — pure phone-only helper behind the Tasks / Worker view's swipe-to-hide task panel (SWIPE_THRESHOLD_PX / beginSwipe / resolveSwipe / loadTasksCollapsed / saveTasksCollapsed). Swipe up on the handle collapses the task list, swipe down or tap restores it; the flag is one global setting persisted to localStorage (zmrng-mobile-tasks-collapsed)
   useIsMobile.ts  — useSyncExternalStore over matchMedia(MOBILE_QUERY = '(max-width: 768px)'); true while the viewport is phone-sized
   terminalKeys.ts — TERMINAL_KEYS (Esc/Tab/sticky Ctrl/arrows) + ctrlSeq() for the phone terminal's on-screen key bar
   useAttachments.ts — shared hook (attachments/addFiles/remove/clear/error/onPaste/onDrop) used by NewTaskForm, ClarifyChat, and ChatPane
@@ -160,6 +161,11 @@ no horizontal scrolling anywhere. Rules:
   pad with `env(safe-area-inset-*)` for the notch/home bar.
 - Mobile rules are additive `@media (max-width: 768px)` blocks (or the
   `data-mobile` flag on `WorkspaceView`'s center) — never edit a desktop rule.
+- In the Tasks / Worker view a 44px handle bar sits at the task panel's bottom
+  edge: swipe up on it to collapse the panel (the worker log grows into the
+  space), swipe down or tap to restore it. The gesture is recognised on the
+  handle only, so list/log scrolling is untouched, and the state persists via
+  `mobileTaskPanel.ts`.
 - The app is installable to the Home Screen (`public/manifest.webmanifest` +
   iOS/Android meta tags in `index.html`). There is deliberately **no service
   worker** — the UI is a live WebSocket client and useless offline.
