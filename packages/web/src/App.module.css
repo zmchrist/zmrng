@@ -3,36 +3,21 @@
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  padding: 12px;
-  gap: 12px;
-}
-
-/* Native app: the OS window already supplies rounded corners, shadow, and
-   chrome, so drop the inset margin/border/radius. Otherwise the glass frame
-   reads as a second, simulated window floating inside the real one. */
-.app[data-native] {
-  padding: 0;
-}
-.app[data-native] .frame {
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
 }
 
 /* ===== Persistent Cosmos app frame ======================================
-   ONE unified glass card wraps every mode. The title bar, left activity rail,
-   and status bar stay STATIC across Workspace / Board / Team — only the center
-   mode content swaps. */
+   ONE unified glass surface fills the whole viewport (browser and native app
+   alike — no inset margin, border, radius, or shadow, so it never reads as a
+   window floating inside a window). It wraps every mode: the title bar, left
+   activity rail, and status bar stay STATIC across Workspace / Board / Team —
+   only the center mode content swaps. */
 .frame {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: var(--shadow), var(--hairline);
 }
 
 /* ---- title bar (persistent) ------------------------------------------- */
@@ -357,5 +342,25 @@
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* ---- phone shell -------------------------------------------------------- *
+ * The frame goes edge-to-edge and fills the dynamic viewport height, so the
+ * layout tracks iOS/Android browser chrome collapsing instead of overflowing.
+ * Desktop rules above are untouched.                                         */
+@media (max-width: 768px) {
+  .app {
+    padding: 0;
+    gap: 0;
+    height: 100dvh;
+  }
+  .frame {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .frameBody {
+    padding-bottom: env(safe-area-inset-bottom);
   }
 }

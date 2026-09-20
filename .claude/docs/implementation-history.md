@@ -253,3 +253,27 @@ from `packages/web/package.json` and the now-unused `worker.format` block from
 `vite.config.ts`. The underlying `/ws/chat` route and the text Chat pane are untouched; the
 dormant `voice` opt-in flag on the chat `start` frame (`chatProtocol.ts`/`types.ts`/
 `chatAgent.ts`) is retained but no longer set by any UI.
+
+## Reap orphaned worker process trees on shutdown (2026-09-20)
+Fixed a resource leak where zmrng agent processes (headless `claude`, ~325–350 MB RSS
+each) and their tool subprocesses could be orphaned to launchd (PPID 1) on shutdown and
+keep burning CPU/RAM — enough leaked workers freeze the host. Root cause: workers were
+spawned **not** detached and killed by **bare PID**, so `claude`'s grandchildren (subagent
+claudes, bash, git, semgrep, osv-scanner, vitest, tsc, vite) survived a hard kill; two
+races made it worse (node's 2 s force-exit could beat a worker's 5 s SIGKILL escalation;
+the Tauri shell hard-killed the node sidecar after a blind 800 ms, mid-teardown). Three
+layers: (1) `runner.ts` spawns workers `detached: true` (own process group, pgid ==
+child.pid) and `kill()` now `signalTree()`s the whole group via `process.kill(-pid, …)`
+with a bare-pid fallback; new `killGroupSync()` (sync, timer-free) is exposed as an
+optional method on the `RunnerLike` seam. (2) `index.ts` adds a synchronous
+`process.on('exit')` backstop → `TaskManager.hardKillAll()` group-`SIGKILL`s every live
+worker tree, closing the force-exit-vs-escalation race. (3) `main.rs` replaces the blind
+800 ms sleep with a liveness poll up to ~6 s (idle quit stays instant, busy quit gets full
+grace so node reaps its own trees, only a node wedged past 6 s is force-killed). Also adds
+`scripts/zmrng-doctor.sh`, a zero-dependency (`bash`+`ps`+`lsof`+`pgrep`) leak detector
+that finds every process whose cwd sits under a zmrng `worktrees/` dir, tags each LIVE vs
+ORPHAN, totals CPU+RAM, and (with `--kill`) reaps orphans without touching the live app.
+The `runner.ts`/`index.ts`/`phases.ts` layers apply to the headless VPS instance
+(`zmrng.service`); `main.rs` is desktop-only. Verified: typecheck, lint, tests, `cargo
+check`, a live group-kill proof (detached parent+grandchild → 0 survivors), and the
+doctor's full detect→reap→verify loop.

@@ -1429,6 +1429,11 @@ function shutdown(signal: string): void {
 }
 process.on('SIGINT', () => shutdown('SIGINT'))
 process.on('SIGTERM', () => shutdown('SIGTERM'))
+// Synchronous backstop: the shutdown() force-exit (2s) can fire before a worker's
+// async SIGKILL escalation (5s) runs. On ANY exit path, group-SIGKILL every live
+// worker tree so `claude` grandchildren die with the server instead of orphaning
+// to launchd and burning CPU/RAM. Cheap and idempotent when already clean.
+process.on('exit', () => manager.hardKillAll())
 
 // Version poller (WS-B / D3). Disabled by default (versionPollMs === 0) so
 // laptops never background-fetch; the VPS opts in via ZMRNG_VERSION_POLL_MS.
