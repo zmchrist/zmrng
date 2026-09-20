@@ -84,47 +84,6 @@
   display: flex;
 }
 
-/* ---- activity rail (persistent, static across every mode) ------------- */
-.arail {
-  width: 52px;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 10px 0;
-  background: var(--surface);
-  backdrop-filter: var(--glass);
-  -webkit-backdrop-filter: var(--glass);
-  border-right: 1px solid var(--border);
-}
-.arailBtn {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  font-size: 16px;
-  line-height: 1;
-  color: var(--text-dim);
-  background: transparent;
-  border: none;
-  border-radius: 7px;
-  transition: color var(--transition), background var(--transition);
-}
-.arailBtn:hover {
-  color: var(--text);
-  background: var(--surface-hover);
-}
-.arailActive,
-.arailActive:hover {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-.arailBottom {
-  margin-top: auto;
-}
-
 /* ---- mode content region: swaps per mode, fills the rest -------------- */
 .modeContent {
   flex: 1;
