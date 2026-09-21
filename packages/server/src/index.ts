@@ -339,8 +339,8 @@ app.get('/api/projects/files', (): WorktreeFileTree => {
   }
 })
 
-// Read one file under the Projects dir (no-task file viewing). Read-only:
-// arbitrary project files are never written through this route.
+// Read one file under the Projects dir — the Workspace Files tab always
+// browses this fixed directory, independent of task selection.
 app.get('/api/projects/file', (req, reply) => {
   const { path } = req.query as { path?: string }
   if (!path) return reply.code(400).send({ error: 'path is required' })
@@ -349,6 +349,24 @@ app.get('/api/projects/file', (req, reply) => {
   } catch (err) {
     const code = err instanceof WorktreeFileError ? 400 : 500
     app.log.error({ err, path }, 'failed to read project file')
+    return reply.code(code).send({ error: errMsg(err) })
+  }
+})
+
+// Write text content into a file under the Projects dir. Same guards as the
+// per-task route: path traversal/symlink escapes and binary (image/pdf) paths
+// are rejected by `writeWorktreeFile`.
+app.put('/api/projects/file', (req, reply) => {
+  const body = req.body as { path?: string; content?: string } | undefined
+  if (!body?.path || body.content === undefined) {
+    return reply.code(400).send({ error: 'path and content are required' })
+  }
+  try {
+    writeWorktreeFile(config.projectsDir, body.path, body.content)
+    return { ok: true }
+  } catch (err) {
+    const code = err instanceof WorktreeFileError ? 400 : 500
+    app.log.error({ err, path: body.path }, 'failed to write project file')
     return reply.code(code).send({ error: errMsg(err) })
   }
 })

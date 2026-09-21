@@ -463,9 +463,10 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   stored `workspaceUrl` wins over the `ZMRNG_WORKSPACE_URL` env default (App merges).
   (This list predates several routes — `/api/agents`, `/api/preflight`, `/api/ui-state`,
   `/api/tasks/:id/{files,file,notes,chat}`, `/api/tasks/:id/archive`, and the
-  Projects-dir browsing pair `GET /api/projects/files` (dotfile-skipping, depth-capped
-  tree of `config.projectsDir`) + `GET /api/projects/file?path=` (read-only read of an
-  arbitrary project file, for no-task file viewing) — that already exist in `index.ts`; a
+  Projects-dir browsing trio `GET /api/projects/files` (dotfile-skipping, depth-capped
+  tree of `config.projectsDir`) + `GET`/`PUT /api/projects/file` (read + text-file write
+  of an arbitrary project file, both guarded by `files.ts`'s traversal/symlink checks, with
+  `PUT` additionally rejecting image/PDF paths) — that already exist in `index.ts`; a
   fuller pass is owed here, tracked as a doc-sync gap rather than documented speculatively
   in this change.)
 - **WS:** `GET /ws` — adds the socket to the hub, sends a `snapshot`. `GET /ws/terminal` —
