@@ -100,14 +100,6 @@ function collectFilePaths(entries: WorktreeFileNode[], acc: string[] = []): stri
   return acc
 }
 
-/** Sentinel tree key for the no-task Projects-dir listing. */
-const PROJECTS_KEY = '__projects__'
-
-interface Loaded {
-  id: string
-  tree: WorktreeFileTree
-}
-
 /**
  * The Cosmos Workspace CENTER: a task panel (task list + new-task) beside a
  * worker pane (Worker · Files · Terminal · Chat tabs). The persistent app frame
@@ -143,7 +135,7 @@ export function WorkspaceView({
   onDelete,
 }: Props) {
   const [tab, setTab] = useState<PaneTab>('worker')
-  const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const [loaded, setLoaded] = useState<WorktreeFileTree | null>(null)
   const [nonce, setNonce] = useState(0)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
@@ -156,26 +148,24 @@ export function WorkspaceView({
   // the browser fires afterwards; the click path exists for keyboard users.
   const touchHandledRef = useRef(false)
 
-  const taskId = task?.id ?? null
-  const worktree = task?.worktree ?? null
-  const treeKey = taskId ?? PROJECTS_KEY
-
+  // The Files tab always browses the configured Projects dir — it deliberately
+  // does NOT follow task selection, so a task's worktree is never listed here.
   useEffect(() => {
     let cancelled = false
-    const fetchTree = taskId ? api.getFiles(taskId) : api.getProjectFiles()
-    fetchTree
+    api
+      .getProjectFiles()
       .then((tree) => {
-        if (!cancelled) setLoaded({ id: treeKey, tree })
+        if (!cancelled) setLoaded(tree)
       })
       .catch(() => {
-        if (!cancelled) setLoaded({ id: treeKey, tree: { root: null, entries: [] } })
+        if (!cancelled) setLoaded({ root: null, entries: [] })
       })
     return () => {
       cancelled = true
     }
-  }, [taskId, treeKey, worktree, nonce])
+  }, [nonce])
 
-  const current = loaded && loaded.id === treeKey ? loaded.tree : null
+  const current = loaded
   const hasTree = !!current && current.entries.length > 0
 
   // Clear the selected file when it no longer exists in a freshly fetched tree
@@ -335,7 +325,7 @@ export function WorkspaceView({
             <div className={styles.filesSplit}>
               <div className={styles.fileTreeCol}>
                 <div className={styles.filesToolbar}>
-                  <span className={styles.filesLabel}>{task ? 'Files' : 'Projects'}</span>
+                  <span className={styles.filesLabel}>Files</span>
                   <button
                     type="button"
                     className={styles.refresh}
@@ -355,10 +345,6 @@ export function WorkspaceView({
                       onOpen={openFile}
                       selectedPath={selectedPath}
                     />
-                  ) : task ? (
-                    <div className={styles.paneEmpty}>
-                      No worktree yet — the file tree appears once this task starts working.
-                    </div>
                   ) : (
                     <div className={styles.paneEmpty}>
                       No projects found in the configured directory.
@@ -367,7 +353,7 @@ export function WorkspaceView({
                 </div>
               </div>
               <div className={styles.viewerCol}>
-                <Viewer taskId={taskId} path={selectedPath} />
+                <Viewer path={selectedPath} />
               </div>
             </div>
           </div>
