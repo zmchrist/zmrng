@@ -15,12 +15,18 @@ import type { Attachment } from '../src/types.js'
 
 // Redirect the `claude` binary to a trivial real Node process for the Runner
 // exit/send test below — never spawns the actual claude CLI (hermetic).
+const spawned = vi.hoisted(() => ({
+  opts: [] as Array<{ env?: Record<string, string | undefined> }>,
+}))
+
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>()
   return {
     ...actual,
-    spawn: (_cmd: string, _args: readonly string[], opts: unknown) =>
-      actual.spawn(process.execPath, ['-e', 'process.exit(0)'], opts as never),
+    spawn: (_cmd: string, _args: readonly string[], opts: unknown) => {
+      spawned.opts.push(opts as { env?: Record<string, string | undefined> })
+      return actual.spawn(process.execPath, ['-e', 'process.exit(0)'], opts as never)
+    },
   }
 })
 
@@ -288,5 +294,49 @@ describe('Runner.send after the child has exited', () => {
     } finally {
       process.off('uncaughtException', onUncaught)
     }
+  })
+})
+
+// The orchestrator's fleet is what saturates the box: every worker turn ends in
+// a validation gate, and each vitest run used to claim `cores - 1` forks. Worker
+// children are capped tighter (2) than an interactive operator run (the configs'
+// default of 3), so the fleet cannot oversubscribe the machine.
+describe('worker child environment', () => {
+  const { env: shellEnv } = process
+
+  function noopCallbacks(onExit: () => void): RunnerCallbacks {
+    return {
+      onSession: () => {},
+      onAssistantText: () => {},
+      onPartial: () => {},
+      onResult: () => {},
+      onToolUse: () => {},
+      onSubagentResult: () => {},
+      onExit,
+      onSpawnError: () => {},
+    }
+  }
+
+  it('caps vitest forks for the worker child via ZMRNG_VITEST_MAX_FORKS=2', async () => {
+    spawned.opts.length = 0
+
+    await new Promise<void>((resolve) => {
+      new Runner(
+        { cwd: process.cwd(), model: 'sonnet', effort: 'medium', systemPrompt: 'x' },
+        noopCallbacks(() => resolve()),
+      )
+    })
+
+    const childEnv = spawned.opts.at(-1)?.env
+    expect(childEnv?.ZMRNG_VITEST_MAX_FORKS).toBe('2')
+  })
+
+  it('bounds the vitest fork count in both workspace configs (default 3)', async () => {
+    const expected = Number(shellEnv.ZMRNG_VITEST_MAX_FORKS ?? 3)
+    const server = (await import('../vitest.config.js')).default
+    const web = (await import('../../web/vitest.config.js')).default
+
+    expect(server.test?.poolOptions?.forks?.maxForks).toBe(expected)
+    expect(web.test?.poolOptions?.forks?.maxForks).toBe(expected)
   })
 })

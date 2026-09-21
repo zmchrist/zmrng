@@ -309,3 +309,49 @@ non-obvious root cause, or is likely to recur. Template in
   `packages/server/src/phases.ts`, `packages/desktop/src-tauri/src/main.rs`,
   `scripts/zmrng-doctor.sh`
 - **Date Found:** 2026-09-20
+
+### `verify.sh`'s combined test step hid a red server suite behind a green web tail
+- **Error:** `.claude/verify.sh` reported `FAIL test` but the printed "first 40 lines"
+  of output were actually the **last** 40 lines (`tail -n "$HEAD_LINES"` despite the
+  comment/heading saying "first"), and since `npm run test --workspaces` runs the web
+  workspace last, a green web suite's output buried a red server suite's failure
+  entirely — the operator/agent saw a passing-looking tail and had to go re-run
+  `npm run test -w @zmrng/server` by hand to find the actual failure.
+  Distinct from vitest fork-count flakes (see below) — this was a **reporting** bug: the
+  underlying failure was real, just hidden.
+- **Cause:** One `test` step spanning both workspaces, combined with a `tail` that
+  contradicted its own "first N lines" framing.
+- **Solution:** Split into `test:server` / `test:web` steps (`npm run test -w
+  @zmrng/<ws>`, dispatched via a `run_step` helper) so the summary names the failing
+  workspace, switched the head-window print to actual `head -n 40`, and added a
+  labelled `tail -n 20` block whenever output exceeds the head window so nothing long
+  silently loses its tail either.
+- **Files:** `.claude/verify.sh`
+- **Date Found:** 2026-09-21
+
+### Load-induced vitest flakes when multiple workers validate concurrently
+- **Error:** Server/web test suites fail intermittently (timeouts, act()-warnings,
+  effects that never resolve) only when several zmrng task workers are validating at
+  the same time — the same suite is green in isolation. `KbView.spaces.test.tsx` was
+  the most visible case: a passive effect scheduled by resolving `getSpaces` (which
+  sets `spaceId` and schedules a *second* effect that calls `api.getSpaceTree`) could
+  still be pending when a test's `afterEach` ran under load, and `vi.restoreAllMocks()`
+  resets a plain `vi.fn()` to return `undefined` — so the pending effect got `undefined`
+  instead of a promise and threw.
+- **Cause:** Two compounding issues: (1) vitest's default fork pool claims `cores - 1`
+  per run with no cap, so several worker validation gates running at once
+  oversubscribed the host; (2) `KbView.spaces.test.tsx` only waited for the switcher's
+  first effect (`getSpaces`) to settle, not the second, dependent effect
+  (`getSpaceTree`) it triggers — under load that second effect was still in flight at
+  teardown, racing `afterEach`'s mock reset.
+- **Solution:** (1) Cap the fork pool — `vitest.config.ts` reads
+  `ZMRNG_VITEST_MAX_FORKS` (default 3) into `test.poolOptions.forks.maxForks`;
+  `runner.ts` sets it to `2` for worker children. (2) Fix the test itself:
+  `renderKb()` now also `waitFor(() => expect(getSpaceTree).toHaveBeenCalled())` before
+  returning, so the second effect has started before the test proceeds, and
+  `afterEach` uses `vi.clearAllMocks()` (clears call history only) instead of
+  `vi.restoreAllMocks()` (which would reset the mocks back to returning `undefined`
+  and reintroduce the same race for any effect still pending at teardown).
+- **Files:** `packages/server/vitest.config.ts`, `packages/web/vitest.config.ts`,
+  `packages/server/src/runner.ts`, `packages/web/test/KbView.spaces.test.tsx`
+- **Date Found:** 2026-09-21

@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, realpathSync, rmSync } from 'node:fs'
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
@@ -109,4 +117,136 @@ describe('stop_validate.py', () => {
       }
     },
   )
+})
+
+// ---------------------------------------------------------------------------
+// verify.sh — the shared gate (agent, loop.sh, and the Stop hook via
+// validate.sh). The gate used to run `npm run test --workspaces`, so a server
+// failure was concatenated *above* the web workspace's green output and then
+// printed with `tail` under a "first N lines" heading — the failure scrolled
+// off entirely and the summary said only "FAIL test". These tests drive the
+// real script against a temp npm-workspaces fixture.
+// ---------------------------------------------------------------------------
+
+const VERIFY = path.resolve(__dirname, '../../../.claude/verify.sh')
+
+interface FixtureScripts {
+  server: string
+  web: string
+}
+
+function makeVerifyFixture(scripts: FixtureScripts): string {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'zmrng-verify-')))
+  mkdirSync(path.join(root, '.claude'), { recursive: true })
+  copyFileSync(VERIFY, path.join(root, '.claude', 'verify.sh'))
+  chmodSync(path.join(root, '.claude', 'verify.sh'), 0o755)
+  writeFileSync(
+    path.join(root, 'package.json'),
+    JSON.stringify({
+      name: 'verify-fixture',
+      private: true,
+      workspaces: ['packages/*'],
+      scripts: {
+        typecheck: 'exit 0',
+        lint: 'exit 0',
+        test: 'npm run test --workspaces --if-present',
+        build: 'exit 0',
+      },
+    }),
+  )
+  for (const [dir, pkg] of [
+    ['server', '@zmrng/server'],
+    ['web', '@zmrng/web'],
+  ] as const) {
+    mkdirSync(path.join(root, 'packages', dir), { recursive: true })
+    writeFileSync(
+      path.join(root, 'packages', dir, 'package.json'),
+      JSON.stringify({
+        name: pkg,
+        version: '0.0.0',
+        scripts: { test: scripts[dir] },
+      }),
+    )
+  }
+  return root
+}
+
+function runVerify(root: string): { status: number; stdout: string } {
+  try {
+    const stdout = execFileSync('bash', [path.join(root, '.claude', 'verify.sh'), '--fast'], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+    return { status: 0, stdout }
+  } catch (err) {
+    const e = err as { status: number; stdout: string }
+    return { status: e.status, stdout: e.stdout }
+  }
+}
+
+describe('verify.sh', () => {
+  const roots: string[] = []
+  afterEach(() => {
+    while (roots.length) rmSync(roots.pop() as string, { recursive: true, force: true })
+  })
+
+  function fixture(scripts: FixtureScripts): string {
+    const root = makeVerifyFixture(scripts)
+    roots.push(root)
+    return root
+  }
+
+  it('passes with a per-workspace test step for each workspace', () => {
+    const root = fixture({ server: 'exit 0', web: 'exit 0' })
+
+    const { status, stdout } = runVerify(root)
+
+    expect(status).toBe(0)
+    expect(stdout).toContain('=============== verify summary ================')
+    expect(stdout).toContain('PASS  test:server')
+    expect(stdout).toContain('PASS  test:web')
+  }, 60_000)
+
+  it('names the failing workspace in the summary when the server suite fails', () => {
+    const root = fixture({
+      server: 'echo SERVER_BOOM && exit 1',
+      web: 'echo web-green',
+    })
+
+    const { status, stdout } = runVerify(root)
+
+    expect(status).not.toBe(0)
+    expect(stdout).toContain('FAIL  test:server')
+    expect(stdout).toContain('PASS  test:web')
+  }, 60_000)
+
+  // The marker lives inside a script *file*, never on the command line — npm's
+  // own error block echoes the failing command near the tail, which would make
+  // a command-line marker appear in `tail` output too.
+  function withServerScript(body: string): string {
+    const root = fixture({ server: 'bash ./boom.sh', web: 'exit 0' })
+    writeFileSync(path.join(root, 'packages', 'server', 'boom.sh'), body)
+    return root
+  }
+
+  it('prints the head of the failing output, matching its own "first N lines" wording', () => {
+    const root = withServerScript(
+      'echo HEAD_MARKER\nfor i in $(seq 1 200); do echo filler-$i; done\nexit 1\n',
+    )
+
+    const { stdout } = runVerify(root)
+
+    expect(stdout).toContain('first 40 lines')
+    expect(stdout).toContain('HEAD_MARKER')
+  }, 60_000)
+
+  it('still shows the tail when the output is longer than the head window', () => {
+    const root = withServerScript(
+      'for i in $(seq 1 200); do echo filler-$i; done\necho TAIL_MARKER\nexit 1\n',
+    )
+
+    const { stdout } = runVerify(root)
+
+    expect(stdout).toContain('TAIL_MARKER')
+  }, 60_000)
 })

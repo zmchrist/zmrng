@@ -136,16 +136,81 @@ export async function createWorktree(
   return { branch, worktreePath }
 }
 
+interface HookCommand {
+  type: 'command'
+  command: string
+  timeout?: number
+  statusMessage?: string
+}
+interface HookGroup {
+  matcher?: string
+  hooks: HookCommand[]
+}
+
+/**
+ * Hook scripts that are seeded even when the target repo registers its own copy
+ * of the same script. `security_guard.py` is the one hook whose absence costs
+ * safety rather than speed, and the two implementations are known to differ in
+ * source; its duplicated cost is a `python3` startup per tool call, not a test
+ * suite. Settled in `.agents/plans/worker-fleet-cpu-contention.md` (T1).
+ */
+const HOOK_DEDUPE_EXEMPT = new Set(['security_guard.py'])
+
+/**
+ * Hook-script basenames the worktree's own `.claude/settings.json` already
+ * registers, across every event. Matching is on the **basename** because the
+ * two registrations intentionally differ by path (`.claude/hooks/<name>` for
+ * the target's own copy vs `.claude/zmrng-hooks/<name>` for the seeded one), so
+ * only the basename is stable.
+ *
+ * Defensive by design: a missing or malformed `settings.json` means "the target
+ * registers nothing" and seeding proceeds unchanged.
+ */
+function targetRegisteredHooks(worktreePath: string): Set<string> {
+  const names = new Set<string>()
+  const settingsPath = path.join(worktreePath, '.claude', 'settings.json')
+  if (!existsSync(settingsPath)) return names
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(settingsPath, 'utf8'))
+  } catch {
+    return names
+  }
+  const hooks = (parsed as { hooks?: unknown } | null)?.hooks
+  const commands: string[] = []
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child)
+      return
+    }
+    if (node && typeof node === 'object') {
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        if (key === 'command' && typeof value === 'string') commands.push(value)
+        else walk(value)
+      }
+    }
+  }
+  walk(hooks)
+  for (const command of commands) {
+    for (const match of command.match(/[A-Za-z0-9_.-]+\.py/g) ?? []) names.add(match)
+  }
+  return names
+}
+
 /**
  * Hook registrations seeded into `.claude/settings.local.json`, pointing at the
  * copies under `.claude/zmrng-hooks/`. Merged additively with any settings the
  * target worktree already has (never overwrites the target's own entries).
  * H3 will adapt these scripts further; this is the minimal wiring so
  * `security_guard.py` fires immediately.
+ *
+ * `skip` holds hook-script basenames the target worktree already registers
+ * itself; those registrations are dropped so the hook does not fire twice
+ * (Claude Code merges `settings.json` with `settings.local.json`).
  */
-function zmrngHooksConfig(): Record<string, unknown[]> {
+function zmrngHooksConfig(skip: ReadonlySet<string> = new Set()): Record<string, HookGroup[]> {
   const hookPath = (name: string): string => `\${CLAUDE_PROJECT_DIR}/.claude/zmrng-hooks/${name}`
-  return {
+  const all: Record<string, HookGroup[]> = {
     PreToolUse: [
       {
         matcher: 'Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Glob|Grep',
@@ -193,6 +258,17 @@ function zmrngHooksConfig(): Record<string, unknown[]> {
       },
     ],
   }
+
+  const keep = (hook: HookCommand): boolean =>
+    ![...skip].some((name) => hook.command.includes(name))
+  const filtered: Record<string, HookGroup[]> = {}
+  for (const [event, groups] of Object.entries(all)) {
+    const kept = groups
+      .map((group) => ({ ...group, hooks: group.hooks.filter(keep) }))
+      .filter((group) => group.hooks.length > 0)
+    if (kept.length > 0) filtered[event] = kept
+  }
+  return filtered
 }
 
 const HOOKS_SKIPPED_NOTE =
@@ -314,8 +390,21 @@ export async function seedHarness(
     }
   }
 
+  // Hook scripts the target worktree registers itself — seeding those would make
+  // them fire twice per event (Claude Code merges settings.json with
+  // settings.local.json), which for stop_validate.py means running the whole
+  // validation gate twice per turn. ZMRNG_FORCE_SEED_HOOKS=1 restores the old
+  // seed-everything behaviour.
+  const skipHooks = new Set<string>()
   if (hooksAvailable) {
+    const forceSeed = process.env.ZMRNG_FORCE_SEED_HOOKS === '1'
+    const registered = forceSeed ? new Set<string>() : targetRegisteredHooks(worktreePath)
     for (const name of listFiles(path.join(harnessDir, 'hooks'))) {
+      if (registered.has(name) && !HOOK_DEDUPE_EXEMPT.has(name)) {
+        skipHooks.add(name)
+        notes.push(`harness hook ${name} not seeded — target repo registers its own`)
+        continue
+      }
       copyFileSync(path.join(harnessDir, 'hooks', name), path.join(hooksDestDir, name))
     }
     seeded.push('.claude/zmrng-hooks/')
@@ -350,7 +439,7 @@ export async function seedHarness(
   }
   if (hooksAvailable) {
     const hooks = (settings.hooks as Record<string, unknown[]> | undefined) ?? {}
-    for (const [event, entries] of Object.entries(zmrngHooksConfig())) {
+    for (const [event, entries] of Object.entries(zmrngHooksConfig(skipHooks))) {
       const existing = hooks[event] ?? []
       for (const entry of entries) {
         const dupe = existing.some((e) => JSON.stringify(e) === JSON.stringify(entry))
