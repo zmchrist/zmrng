@@ -225,6 +225,13 @@ export class Runner {
     const env = { ...process.env }
     if (config.authMode === 'oauth') delete env.ANTHROPIC_API_KEY
 
+    // Bound the worker's test runner. A worker turn ends in a validation gate,
+    // and vitest otherwise claims `cores - 1` forks per run — several workers
+    // validating at once oversubscribed the box ~2x and produced load-induced
+    // flakes. Workers get a tighter cap (2) than the configs' default (3), so
+    // the operator's own interactive runs stay fast.
+    env.ZMRNG_VITEST_MAX_FORKS = '2'
+
     const args = [
       ...CLAUDE_ARGS_BASE,
       '--model',

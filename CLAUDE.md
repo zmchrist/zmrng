@@ -55,7 +55,9 @@ website. Always finish by re-bundling the app so the `.app` ships the new code.
 - **Frontend:** React 19 + Vite, CSS Modules + design tokens (frosted-glass theme)
 - **Language:** TypeScript throughout (ESM, `NodeNext`/`bundler` resolution)
 - **No cloud.** Tests run on **Vitest** (both workspaces) — validate with
-  `npm run typecheck && npm run lint && npm test && npm run build`
+  `npm run typecheck && npm run lint && npm test && npm run build`. Vitest's fork pool
+  is capped via `ZMRNG_VITEST_MAX_FORKS` (default 3; `runner.ts` sets `2` for worker
+  children) — see `.claude/rules/testing.md`.
 
 ## Project structure
 ```
@@ -90,7 +92,10 @@ fine — every hook carries `from __future__ import annotations`):
 Hooks fire only when Claude Code is launched from this repo (project-root
 `.claude/`). zmrng **workers** run inside a target repo and do NOT inherit these
 hooks — their guardrails are the prompt strings in `phases.ts` (pinned by
-`prompts.test.ts`).
+`prompts.test.ts`). When a target repo registers its own copy of one of these hook
+scripts, `seedHarness` skips seeding the duplicate (except `security_guard.py`) so it
+doesn't fire twice per event — override with `ZMRNG_FORCE_SEED_HOOKS=1`. Detail:
+`.claude/docs/services-reference.md`.
 
 ## Key conventions
 
