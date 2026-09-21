@@ -9,7 +9,10 @@ import type { AgentSummary, TaskStatus, WorkspaceLayout } from '../src/types'
 // mount, which we never want to hit the network in a unit test.
 vi.mock('../src/api', () => ({
   api: {
-    readFile: vi.fn().mockResolvedValue({ path: 'x', format: 'code', encoding: 'utf8', content: '' }),
+    readProjectFile: vi
+      .fn()
+      .mockResolvedValue({ path: 'x', format: 'code', encoding: 'utf8', content: '' }),
+    writeProjectFile: vi.fn().mockResolvedValue({ ok: true }),
     getChat: vi.fn().mockResolvedValue([]),
     listAgents: vi.fn().mockResolvedValue([]),
     writeFile: vi.fn().mockResolvedValue({ ok: true }),

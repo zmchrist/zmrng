@@ -126,7 +126,7 @@ export function WorkspaceTabs({
   function content(tab: WsTab): ReactNode {
     switch (tab.kind) {
       case 'file':
-        return <Viewer taskId={taskId} path={tab.path ?? null} />
+        return <Viewer path={tab.path ?? null} />
       case 'log':
         return <WorkerLogPanel events={events} live={live} status={status} onMessage={onMessage} />
       case 'chat':

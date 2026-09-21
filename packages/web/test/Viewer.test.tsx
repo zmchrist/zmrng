@@ -6,8 +6,18 @@ import type { WorktreeFileContent } from '../src/types'
 // CodeMirror + pdf.js are heavy and lazy-loaded — stub both so the Viewer's
 // dispatch logic (editor vs. rendered preview) is what's under test.
 vi.mock('../src/components/CodeEditor', () => ({
-  CodeEditor: ({ initialValue }: { initialValue: string }) => (
-    <textarea data-testid="code-editor" defaultValue={initialValue} />
+  CodeEditor: ({
+    initialValue,
+    onChange,
+  }: {
+    initialValue: string
+    onChange: (v: string) => void
+  }) => (
+    <textarea
+      data-testid="code-editor"
+      defaultValue={initialValue}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }))
 vi.mock('../src/components/PdfViewer', () => ({
@@ -16,10 +26,12 @@ vi.mock('../src/components/PdfViewer', () => ({
 
 const readFile = vi.fn()
 const readProjectFile = vi.fn()
+const writeProjectFile = vi.fn()
 vi.mock('../src/api', () => ({
   api: {
     readFile: (...a: unknown[]) => readFile(...a),
     readProjectFile: (...a: unknown[]) => readProjectFile(...a),
+    writeProjectFile: (...a: unknown[]) => writeProjectFile(...a),
   },
 }))
 
@@ -36,24 +48,40 @@ describe('<Viewer>', () => {
   beforeEach(() => {
     readFile.mockReset()
     readProjectFile.mockReset()
+    writeProjectFile.mockReset()
+    writeProjectFile.mockResolvedValue({ ok: true })
   })
 
-  it('reads from the Projects dir (read-only) when no task is selected', async () => {
+  it('always reads from the Projects dir, never a task worktree', async () => {
     readProjectFile.mockResolvedValue(fileOf('code', 'const x = 1'))
-    render(<Viewer taskId={null} path="zmrng/README.md" />)
+    render(<Viewer path="zmrng/README.md" />)
 
     await screen.findByTestId('code-editor')
-    // No-task files come from the projects endpoint, never the task endpoint…
     expect(readProjectFile).toHaveBeenCalledWith('zmrng/README.md')
     expect(readFile).not.toHaveBeenCalled()
-    // …and are read-only, so there is no Save control.
-    expect(screen.queryByRole('button', { name: /save/i })).toBeNull()
-    expect(screen.getByText('read-only')).toBeInTheDocument()
+  })
+
+  it('saves a Projects-dir text file through the projects write endpoint', async () => {
+    readProjectFile.mockResolvedValue(fileOf('code', 'const x = 1'))
+    render(<Viewer path="zmrng/a.ts" />)
+
+    const editor = await screen.findByTestId('code-editor')
+    // The Save control exists (Projects-dir text files are writable) and is
+    // disabled until the draft actually diverges from the loaded content.
+    const save = screen.getByRole('button', { name: /save/i })
+    expect(save).toBeDisabled()
+    expect(screen.queryByText('read-only')).toBeNull()
+
+    fireEvent.change(editor, { target: { value: 'const x = 2' } })
+    await waitFor(() => expect(save).toBeEnabled())
+    fireEvent.click(save)
+
+    await waitFor(() => expect(writeProjectFile).toHaveBeenCalledWith('zmrng/a.ts', 'const x = 2'))
   })
 
   it('opens a markdown file in the editor (not a split) with a toggle to the preview', async () => {
-    readFile.mockResolvedValue(fileOf('markdown', '# Heading'))
-    render(<Viewer taskId="t1" path="notes.md" />)
+    readProjectFile.mockResolvedValue(fileOf('markdown', '# Heading'))
+    render(<Viewer path="notes.md" />)
 
     // Default view is the editor, and only the editor — no rendered preview.
     await screen.findByTestId('code-editor')
@@ -71,23 +99,23 @@ describe('<Viewer>', () => {
   })
 
   it('shows no preview toggle for a non-markdown code file', async () => {
-    readFile.mockResolvedValue(fileOf('code', 'const x = 1'))
-    render(<Viewer taskId="t1" path="a.ts" />)
+    readProjectFile.mockResolvedValue(fileOf('code', 'const x = 1'))
+    render(<Viewer path="a.ts" />)
 
     await screen.findByTestId('code-editor')
     expect(screen.queryByRole('button', { name: /preview/i })).toBeNull()
   })
 
   it('renders image and pdf read-only, with no editor or toggle', async () => {
-    readFile.mockResolvedValue(fileOf('pdf', 'base64data'))
-    const { unmount } = render(<Viewer taskId="t1" path="doc.pdf" />)
+    readProjectFile.mockResolvedValue(fileOf('pdf', 'base64data'))
+    const { unmount } = render(<Viewer path="doc.pdf" />)
     await screen.findByTestId('pdf-viewer')
     expect(screen.queryByTestId('code-editor')).toBeNull()
     expect(screen.queryByRole('button', { name: /preview/i })).toBeNull()
     unmount()
 
-    readFile.mockResolvedValue(fileOf('image', 'base64img'))
-    render(<Viewer taskId="t1" path="pic.png" />)
+    readProjectFile.mockResolvedValue(fileOf('image', 'base64img'))
+    render(<Viewer path="pic.png" />)
     await waitFor(() => expect(screen.getByRole('img')).toBeInTheDocument())
     expect(screen.queryByTestId('code-editor')).toBeNull()
     expect(screen.queryByRole('button', { name: /preview/i })).toBeNull()

@@ -110,9 +110,15 @@ export const api = {
     req<WorktreeFileContent>(`/api/tasks/${id}/file?path=${encodeURIComponent(path)}`),
   /** Projects-dir file tree, shown when no task is selected. */
   getProjectFiles: () => req<WorktreeFileTree>('/api/projects/files'),
-  /** Read one file under the Projects dir (read-only; no-task viewing). */
+  /** Read one file under the Projects dir — what the Files tab always browses. */
   readProjectFile: (path: string) =>
     req<WorktreeFileContent>(`/api/projects/file?path=${encodeURIComponent(path)}`),
+  /** Save one text file under the Projects dir (binary paths are rejected server-side). */
+  writeProjectFile: (path: string, content: string) =>
+    req<{ ok: true }>('/api/projects/file', {
+      method: 'PUT',
+      body: JSON.stringify({ path, content }),
+    }),
   writeFile: (id: string, path: string, content: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/file`, {
       method: 'PUT',

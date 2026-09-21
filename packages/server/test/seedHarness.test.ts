@@ -423,6 +423,10 @@ describe('seedHarness', () => {
           // stop_validate would auto-detect + run this worktree's stack; run it
           // from the fresh temp worktree (empty git repo) so it detects nothing.
           cwd: worktreeDir,
+          // stop_validate anchors on CLAUDE_PROJECT_DIR when it is set, so an
+          // inherited value would make it re-run the REAL repo's validation gate
+          // (recursively, to its timeout) instead of the empty temp worktree.
+          env: { ...process.env, CLAUDE_PROJECT_DIR: worktreeDir },
         })
       }, `${name} should exit 0 on python3 with {} stdin`).not.toThrow()
     }
