@@ -15,6 +15,14 @@ Wraps one long-lived headless `claude` child process per task.
 - **Max OAuth only:** the constructor copies `process.env` and `delete`s
   `ANTHROPIC_API_KEY` before spawn, so the child authenticates with the operator's
   Max login and never bills the metered API.
+- **Vitest fork cap for workers:** immediately after that strip, the constructor also
+  sets `env.ZMRNG_VITEST_MAX_FORKS = '2'` in the child env. A worker turn ends by
+  running the validation gate (`verify.sh`), and vitest's own default (`cores - 1`
+  forks) meant several concurrent workers validating at once oversubscribed the host —
+  load-induced flakes. `packages/server/vitest.config.ts` / `packages/web/vitest.config.ts`
+  read `ZMRNG_VITEST_MAX_FORKS` (default 3, used by the operator's own interactive
+  `npm test`) into `test.poolOptions.forks.maxForks`; the worker's tighter `2` only
+  applies inside the spawned `claude` child's env, never the operator's shell.
 - **stdout parsing:** buffers chunks, splits on `\n`, `JSON.parse` per line (tolerant —
   non-JSON lines ignored). Dispatches by `type`:
   - first line with a `session_id` → `onSession(sid)`
@@ -394,6 +402,31 @@ Env parsing + repo registry.
 - **`removeWorktree(repoPath, worktreePath)`** — `worktree remove --force` + `prune`
   (both best-effort).
 - **`slugify(title)`** — branch-safe slug.
+- **Hook dedupe (`seedHarness`)** — before seeding `.claude/zmrng-hooks/` and
+  registering them into `.claude/settings.local.json`, `seedHarness` calls
+  **`targetRegisteredHooks(worktreePath)`**: reads the worktree's own (target-repo-owned)
+  `.claude/settings.json`, defensively walks every hook event (missing/malformed file →
+  empty set, seed everything), and collects `.py` basenames out of each hook's `command`
+  string via `command.match(/[A-Za-z0-9_.-]+\.py/g)`. Matching is on **basename only**
+  because the seeded copy lives under `.claude/zmrng-hooks/<name>` while the target's own
+  copy lives under `.claude/hooks/<name>` — only the basename is stable across the two
+  paths. For every hook script the target already registers, `seedHarness` skips **both**
+  the file copy into `.claude/zmrng-hooks/` and the `settings.local.json` registration,
+  and pushes a `harness hook <name> not seeded — target repo registers its own` note —
+  registering the same script twice would fire it twice per event (Claude Code merges
+  `settings.json` with `settings.local.json`), which for `stop_validate.py` meant running
+  the whole validation gate twice per turn.
+  - **`HOOK_DEDUPE_EXEMPT`** (`Set(['security_guard.py'])`) — always seeded regardless of
+    what the target registers; it's the one hook whose absence costs safety rather than
+    speed, and the two implementations are known to differ in source. The duplicated cost
+    is one `python3` startup per tool call, not a test suite.
+  - **`ZMRNG_FORCE_SEED_HOOKS=1`** — escape hatch env var that restores the old
+    seed-everything behaviour (treats `targetRegisteredHooks` as empty).
+  - **`zmrngHooksConfig(skip)`** — now takes the skip set and filters it out of every
+    hook group across every event before the config is merged into
+    `settings.local.json`; a group left with zero hooks (or an event left with zero
+    groups) is dropped entirely rather than registered empty.
+  - Settled in `.agents/plans/worker-fleet-cpu-contention.md` (T1).
 
 ## WsHub — `packages/server/src/ws.ts`
 
