@@ -6,6 +6,8 @@ dist/
 *.db-wal
 worktrees/*
 !worktrees/.gitkeep
+# Agent worktrees (the pattern above is root-anchored, so it misses this path)
+.claude/worktrees/
 .env
 config/repos.json
 config/agents.json
