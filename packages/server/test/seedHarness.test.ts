@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, beforeEach, describe, it, expect } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { seedHarness } from '../src/worktree.js'
 
 // The repo's REAL harness/ dir, resolved relative to this test file
@@ -230,6 +230,151 @@ describe('seedHarness', () => {
       readFileSync(path.join(worktreeDir, '.claude', 'settings.local.json'), 'utf8'),
     )
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('security_guard.py')
+  })
+
+  // ---------------------------------------------------------------------
+  // Hook dedupe — a target repo that registers its own copy of a harness hook
+  // used to get a SECOND registration seeded under .claude/zmrng-hooks/, and
+  // Claude Code merges settings.json with settings.local.json, so both fired.
+  // For stop_validate.py that meant running the whole validation gate twice per
+  // turn. Matching is on the script BASENAME because the two registrations
+  // intentionally differ by path (.claude/hooks vs .claude/zmrng-hooks).
+  // ---------------------------------------------------------------------
+
+  /** Write a `.claude/settings.json` in the worktree registering `names` under `event`. */
+  function writeTargetSettings(event: string, names: string[]): void {
+    const dir = path.join(worktreeDir, '.claude')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      path.join(dir, 'settings.json'),
+      JSON.stringify({
+        hooks: {
+          [event]: names.map((name) => ({
+            hooks: [
+              { type: 'command', command: `python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/${name}"` },
+            ],
+          })),
+        },
+      }),
+    )
+  }
+
+  /** Every hook command registered in the seeded settings.local.json. */
+  function seededHookCommands(): string[] {
+    const settingsPath = path.join(worktreeDir, '.claude', 'settings.local.json')
+    if (!existsSync(settingsPath)) return []
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'))
+    const hooks = (settings.hooks ?? {}) as Record<
+      string,
+      Array<{ hooks: Array<{ command: string }> }>
+    >
+    return Object.values(hooks)
+      .flat()
+      .flatMap((group) => group.hooks.map((h) => h.command))
+  }
+
+  function seededHook(name: string): boolean {
+    return seededHookCommands().some((c) => c.includes(name))
+  }
+
+  it('skips seeding a hook the target worktree already registers, keeping the rest', async () => {
+    writeTargetSettings('Stop', ['stop_validate.py'])
+
+    const notes = await seedHarness(worktreeDir, '/some/target/repo', harnessDir, 'python3')
+
+    expect(existsSync(path.join(worktreeDir, '.claude', 'zmrng-hooks', 'stop_validate.py'))).toBe(
+      false,
+    )
+    expect(seededHook('stop_validate.py')).toBe(false)
+    expect(notes).toContain(
+      'harness hook stop_validate.py not seeded — target repo registers its own',
+    )
+
+    // The non-duplicated hooks are still seeded.
+    expect(seededHook('branch_guard.py')).toBe(true)
+    expect(seededHook('pr_shape_guard.py')).toBe(true)
+    expect(seededHook('post_tool_use_lint.py')).toBe(true)
+    expect(existsSync(path.join(worktreeDir, '.claude', 'zmrng-hooks', 'branch_guard.py'))).toBe(
+      true,
+    )
+  })
+
+  it('seeds all five when the target worktree has no settings.json', async () => {
+    await seedHarness(worktreeDir, '/some/target/repo', harnessDir, 'python3')
+
+    for (const name of [
+      'security_guard.py',
+      'branch_guard.py',
+      'pr_shape_guard.py',
+      'post_tool_use_lint.py',
+      'stop_validate.py',
+    ]) {
+      expect(seededHook(name), `${name} should be seeded`).toBe(true)
+    }
+  })
+
+  it('matches basenames across every event, not just Stop', async () => {
+    writeTargetSettings('PostToolUse', ['post_tool_use_lint.py'])
+
+    await seedHarness(worktreeDir, '/some/target/repo', harnessDir, 'python3')
+
+    expect(seededHook('post_tool_use_lint.py')).toBe(false)
+    expect(seededHook('stop_validate.py')).toBe(true)
+  })
+
+  it('falls back to seeding everything when settings.json is malformed', async () => {
+    mkdirSync(path.join(worktreeDir, '.claude'), { recursive: true })
+    writeFileSync(path.join(worktreeDir, '.claude', 'settings.json'), '{ not json')
+
+    await seedHarness(worktreeDir, '/some/target/repo', harnessDir, 'python3')
+
+    expect(seededHook('stop_validate.py')).toBe(true)
+    expect(seededHook('post_tool_use_lint.py')).toBe(true)
+  })
+
+  it('ZMRNG_FORCE_SEED_HOOKS=1 restores seeding of every hook', async () => {
+    writeTargetSettings('Stop', ['stop_validate.py'])
+    vi.stubEnv('ZMRNG_FORCE_SEED_HOOKS', '1')
+    try {
+      await seedHarness(worktreeDir, '/some/target/repo', harnessDir, 'python3')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+
+    expect(seededHook('stop_validate.py')).toBe(true)
+    expect(existsSync(path.join(worktreeDir, '.claude', 'zmrng-hooks', 'stop_validate.py'))).toBe(
+      true,
+    )
+  })
+
+  it('stays idempotent — seeding twice with a deduped hook registers nothing extra', async () => {
+    writeTargetSettings('Stop', ['stop_validate.py'])
+
+    await seedHarness(worktreeDir, '/some/target/repo', harnessDir, 'python3')
+    const first = seededHookCommands()
+    await seedHarness(worktreeDir, '/some/target/repo', harnessDir, 'python3')
+    const second = seededHookCommands()
+
+    expect(second).toEqual(first)
+    expect(seededHook('stop_validate.py')).toBe(false)
+  })
+
+  // SETTLED (plan: worker-fleet-cpu-contention, T1): security_guard.py is
+  // EXEMPT from the dedupe and stays doubled. It is the one hook whose absence
+  // costs safety rather than speed, and the two copies differ in source; its
+  // duplicated cost is a python3 startup per tool call, not a test suite.
+  it('always seeds security_guard.py, even when the target registers its own', async () => {
+    writeTargetSettings('PreToolUse', ['security_guard.py'])
+
+    const notes = await seedHarness(worktreeDir, '/some/target/repo', harnessDir, 'python3')
+
+    expect(existsSync(path.join(worktreeDir, '.claude', 'zmrng-hooks', 'security_guard.py'))).toBe(
+      true,
+    )
+    expect(seededHook('security_guard.py')).toBe(true)
+    expect(notes).not.toContain(
+      'harness hook security_guard.py not seeded — target repo registers its own',
+    )
   })
 
   // The decisive worker-parity check: seed from the REAL repo harness/ dir (not
