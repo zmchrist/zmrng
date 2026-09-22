@@ -116,7 +116,24 @@
   background: var(--accent-soft);
 }
 .itemGlyph {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  transition: transform var(--transition);
+}
+/* Active entry's icon enlarges slightly; accent color comes from .itemActive. */
+.itemActive .itemGlyph,
+.item:active .itemGlyph {
+  transform: scale(1.15);
+}
+.itemSvg {
   width: 20px;
-  text-align: center;
-  font-size: 16px;
+  height: 20px;
+  display: block;
+}
+.barIcon {
+  width: 22px;
+  height: 22px;
+  display: block;
 }
