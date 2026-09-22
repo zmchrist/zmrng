@@ -83,7 +83,6 @@ Edit `ZMRNG_ENV_FILE` (default `/etc/zmrng/workspace.env`). The workspace-releva
 |---|---|
 | `ZMRNG_PORT` | port the server listens on |
 | `ZMRNG_DATA_DIR` | where `zmrng.db` lives (channels/messages/members persist here) |
-| `ZMRNG_WORKSPACE_URL` | server-side default URL surfaced via `GET /api/config`; teammates can instead set it per-client in Settings |
 | `ZMRNG_WORKSPACE_REPO_PATH` | absolute path to a read-only reference checkout the `@agent` bot `git pull`s before answering; blank = pull skipped |
 | `ZMRNG_WORKSPACE_BOT_AGENT` | id of the `AgentTarget` (`config/agents.json`) that acts as the bot; blank = first configured agent |
 | `ZMRNG_WORKSPACE_BOT_HANDLE` | the @mention handle that triggers the bot (default `@agent`) |
@@ -137,9 +136,9 @@ curl -fsS http://<tailnet-ip>:4500/api/config | head -c 200
 
 Two people (or two browsers, each with a distinct handle) on the tailnet:
 
-1. **Roster** — both open the app, go to the **Team** tab, set the workspace URL to
-   `http://<tailnet-ip>:4500`, and self-assert a handle. Each should see **both** handles
-   in the live presence roster.
+1. **Roster** — both open the app, go to the **Team** tab (it connects to the fixed
+   VPS base baked into the client, `teamConfig.WORKSPACE_URL` — nothing to enter) and
+   self-assert a handle. Each should see **both** handles in the live presence roster.
 2. **Channels + live messaging** — one posts in `#general`; the other sees it arrive live
    (no refresh). Reload → scrollback loads over `GET /api/channels/:id/messages`.
 3. **@agent bot** (only if configured) — someone posts `@agent <question>` in a channel;
