@@ -87,7 +87,7 @@ fine — every hook carries `from __future__ import annotations`):
 | `worktree_guard.py` | Before Edit/Write/MultiEdit | Blocks a **second** concurrent session from editing a worktree already claimed by another live session — each agent works in its own worktree (branches don't isolate agents, directories do). Stale locks self-expire (`HERMES_WORKTREE_LOCK_TTL`, default 3600s). Override: `HERMES_ALLOW_SHARED_WORKTREE=1`. Operator-harness only — NOT seeded into workers (each already gets a dedicated worktree). |
 | `pr_shape_guard.py` | Before Bash | Rejects `gh pr create` with `--fill` or without `--body-file`. Override: `HERMES_ALLOW_PR_FILL=1` |
 | `post_tool_use_lint.py` | After editing code | Advisory linter (tsc for TS) — never blocks |
-| `stop_validate.py` | When the turn tries to end | Runs `.claude/validate.sh` (→ `verify.sh --fast`); blocks the stop if it fails |
+| `stop_validate.py` | When the turn tries to end | Runs `.claude/validate.sh` (→ `verify.sh --fast`, scoped to the workspaces the turn changed — see `.claude/rules/testing.md`); blocks the stop if it fails |
 
 Hooks fire only when Claude Code is launched from this repo (project-root
 `.claude/`). zmrng **workers** run inside a target repo and do NOT inherit these
