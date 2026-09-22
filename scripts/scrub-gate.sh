@@ -13,11 +13,16 @@ set -euo pipefail
 # Former project name | former client repo name.
 FORBIDDEN='pheme|bluebeam'
 
-# Exclude this gate's own source (it necessarily spells the forbidden names) and
-# the plan, whose acceptance section documents the gate.
+# Exclude this gate's own source (it necessarily spells the forbidden names), the
+# plan whose acceptance section documents the gate, and the commit-identity
+# consolidation artifacts: `.mailmap.consolidate` must spell the old author name
+# verbatim for `git` to remap it, and its plan/handoff describe that mapping.
 if git grep -I -i -n -w -E "$FORBIDDEN" -- . \
   ':(exclude)scripts/scrub-gate.sh' \
-  ':(exclude).agents/plans/public-readiness-and-harness-productization.md' ; then
+  ':(exclude).agents/plans/public-readiness-and-harness-productization.md' \
+  ':(exclude).agents/plans/commit-identity-consolidation.md' \
+  ':(exclude).agents/handoffs/commit-identity-consolidation-handoff.md' \
+  ':(exclude).mailmap.consolidate' ; then
   echo "" >&2
   echo "✗ scrub gate: a forbidden project/client name appears above as a whole word." >&2
   echo "  Genericize it before merging (see .agents/plans/public-readiness-and-harness-productization.md)." >&2
