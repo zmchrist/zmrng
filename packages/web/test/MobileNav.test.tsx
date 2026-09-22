@@ -39,7 +39,13 @@ describe('<MobileNav>', () => {
     const labels = within(nav)
       .getAllByRole('button')
       .map((b) => b.textContent ?? '')
-    expect(labels).toEqual(MOBILE_VIEWS.map((v) => `${v.glyph}${v.label}`))
+    expect(labels).toEqual(MOBILE_VIEWS.map((v) => v.label))
+    // Every entry draws an outline svg icon from the shared source — no text glyphs.
+    within(nav)
+      .getAllByRole('button')
+      .forEach((b, i) => {
+        expect(b.querySelector('svg')?.getAttribute('data-icon')).toBe(MOBILE_VIEWS[i].icon)
+      })
 
     fireEvent.click(within(nav).getAllByRole('button')[4])
     expect(props.onSelect).toHaveBeenCalledWith('team')
@@ -60,6 +66,9 @@ describe('<MobileNav>', () => {
   it('surfaces the connection state and a Settings gear', () => {
     const props = setup({ connected: false })
     expect(screen.getByLabelText('offline')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /settings/i }).querySelector('svg')?.getAttribute('data-icon'),
+    ).toBe('settings')
     fireEvent.click(screen.getByRole('button', { name: /settings/i }))
     expect(props.onSettings).toHaveBeenCalled()
   })

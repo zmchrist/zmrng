@@ -1,4 +1,5 @@
 import { MOBILE_VIEWS, mobileViewLabel, type MobileView } from '../mobileNav'
+import { NavIcon } from './NavIcon'
 import styles from './MobileNav.module.css'
 
 interface Props {
@@ -47,7 +48,7 @@ export function MobileNav({
           title={connected ? 'connected' : 'offline'}
         />
         <button type="button" className={styles.iconBtn} aria-label="Settings" onClick={onSettings}>
-          ⚙
+          <NavIcon name="settings" className={styles.barIcon} />
         </button>
       </div>
 
@@ -68,8 +69,8 @@ export function MobileNav({
                 aria-current={view === v.id ? 'page' : undefined}
                 onClick={() => onSelect(v.id)}
               >
-                <span className={styles.itemGlyph} aria-hidden="true">
-                  {v.glyph}
+                <span className={styles.itemGlyph}>
+                  <NavIcon name={v.icon} className={styles.itemSvg} />
                 </span>
                 {v.label}
               </button>
