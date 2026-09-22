@@ -734,10 +734,6 @@ export interface ServerConfig {
   maxLanes: number
   targetRepo: string
   defaultRepoId: string
-  /** Optional server-side default VPS workspace-server URL (from
-   *  ZMRNG_WORKSPACE_URL). Empty when unset; the persisted `WorkspaceSettings`
-   *  value (GET/PUT /api/settings) wins over this when present. */
-  workspaceUrl: string
   /** The shared team-agent bot handle (default `@agent`), from
    *  ZMRNG_WORKSPACE_BOT_HANDLE. Used by the Team chat's mention autocomplete +
    *  highlighter — visual only; the server-side reply trigger is unchanged. */
@@ -868,11 +864,10 @@ export interface KbPageFromMessageInput {
  * "unset". MANUAL MIRROR of `packages/server/src/types.ts`.
  */
 export interface WorkspaceSettings {
-  /** VPS team-workspace server URL for the Team tab. Wins over the
-   *  `ZMRNG_WORKSPACE_URL` env default (ServerConfig.workspaceUrl) when
-   *  non-empty. */
-  workspaceUrl: string
-  /** The teammate's self-asserted display-name handle for the Team roster. */
+  /** The teammate's self-asserted display-name handle for the Team roster.
+   *  The Team workspace URL is deliberately NOT here — it is fixed in this
+   *  client (`teamConfig.WORKSPACE_URL`) because the whole team shares one
+   *  Tailscale-reachable VPS, so there is nothing per-user to persist. */
   teamHandle: string
 }
 
