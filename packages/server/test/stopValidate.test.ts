@@ -171,11 +171,20 @@ function makeVerifyFixture(scripts: FixtureScripts): string {
   return root
 }
 
-function runVerify(root: string): { status: number; stdout: string } {
+interface VerifyOpts {
+  /** Drop `--fast` to exercise the unscoped pre-PR gate. */
+  fast?: boolean
+  extraEnv?: Record<string, string>
+}
+
+function runVerify(root: string, opts: VerifyOpts = {}): { status: number; stdout: string } {
+  const args = [path.join(root, '.claude', 'verify.sh')]
+  if (opts.fast !== false) args.push('--fast')
   try {
-    const stdout = execFileSync('bash', [path.join(root, '.claude', 'verify.sh'), '--fast'], {
+    const stdout = execFileSync('bash', args, {
       cwd: root,
       encoding: 'utf8',
+      env: { ...process.env, ...(opts.extraEnv ?? {}) },
     })
     return { status: 0, stdout }
   } catch (err) {
@@ -249,4 +258,129 @@ describe('verify.sh', () => {
 
     expect(stdout).toContain('TAIL_MARKER')
   }, 60_000)
+})
+
+// ---------------------------------------------------------------------------
+// verify.sh --fast — workspace scoping. The turn-stop gate used to run both
+// workspaces' suites unconditionally; the web suite alone is ~59% of the gate's
+// wall time (jsdom construction, not the tests). A turn that never touched web
+// paid it anyway. Scoping only ever *removes* work it can positively prove is
+// unnecessary — every ambiguous case falls back to running both.
+// ---------------------------------------------------------------------------
+
+describe('verify.sh --fast workspace scoping', () => {
+  const roots: string[] = []
+  afterEach(() => {
+    while (roots.length) rmSync(roots.pop() as string, { recursive: true, force: true })
+  })
+
+  function git(root: string, args: string[]): void {
+    execFileSync('git', args, { cwd: root, stdio: 'ignore' })
+  }
+
+  /** A fixture that IS a git repo, with an `origin/main` ref to diff against. */
+  function gitFixture(): string {
+    const root = makeVerifyFixture({ server: 'echo SERVER_RAN', web: 'echo WEB_RAN' })
+    roots.push(root)
+    git(root, ['init', '-q', '-b', 'main'])
+    git(root, ['config', 'user.email', 'test@example.com'])
+    git(root, ['config', 'user.name', 'test'])
+    git(root, ['add', '-A'])
+    git(root, ['commit', '-qm', 'baseline'])
+    // Stand in for the remote the real gate diffs against.
+    git(root, ['update-ref', 'refs/remotes/origin/main', 'HEAD'])
+    return root
+  }
+
+  function change(root: string, rel: string): void {
+    const full = path.join(root, rel)
+    mkdirSync(path.dirname(full), { recursive: true })
+    writeFileSync(full, `// changed ${Date.now()}\n`)
+  }
+
+  it('skips test:web when only the server workspace changed', () => {
+    const root = gitFixture()
+    change(root, 'packages/server/src/thing.ts')
+
+    const { status, stdout } = runVerify(root)
+
+    expect(status).toBe(0)
+    expect(stdout).toContain('PASS  test:server')
+    expect(stdout).toContain('SKIP  test:web')
+  }, 60_000)
+
+  it('skips test:server when only the web workspace changed', () => {
+    const root = gitFixture()
+    change(root, 'packages/web/src/thing.tsx')
+
+    const { status, stdout } = runVerify(root)
+
+    expect(status).toBe(0)
+    expect(stdout).toContain('PASS  test:web')
+    expect(stdout).toContain('SKIP  test:server')
+  }, 60_000)
+
+  it('runs both when both workspaces changed', () => {
+    const root = gitFixture()
+    change(root, 'packages/server/src/thing.ts')
+    change(root, 'packages/web/src/thing.tsx')
+
+    const { stdout } = runVerify(root)
+
+    expect(stdout).toContain('PASS  test:server')
+    expect(stdout).toContain('PASS  test:web')
+  }, 60_000)
+
+  it('skips both when only inert docs changed', () => {
+    const root = gitFixture()
+    change(root, '.agents/notes/whatever.md')
+
+    const { status, stdout } = runVerify(root)
+
+    expect(status).toBe(0)
+    expect(stdout).toContain('SKIP  test:server')
+    expect(stdout).toContain('SKIP  test:web')
+  }, 60_000)
+
+  it('runs both when a root config changed — the conservative branch', () => {
+    const root = gitFixture()
+    // A root file that is neither workspace-scoped nor inert. Not package.json:
+    // rewriting that would break the fixture's own npm scripts.
+    change(root, 'tsconfig.base.json')
+
+    const { stdout } = runVerify(root)
+
+    expect(stdout).toContain('PASS  test:server')
+    expect(stdout).toContain('PASS  test:web')
+  }, 60_000)
+
+  it('runs both outside a git repo — fail-safe when the change set is unknowable', () => {
+    const root = makeVerifyFixture({ server: 'echo SERVER_RAN', web: 'echo WEB_RAN' })
+    roots.push(root)
+
+    const { stdout } = runVerify(root)
+
+    expect(stdout).toContain('PASS  test:server')
+    expect(stdout).toContain('PASS  test:web')
+  }, 60_000)
+
+  it('runs both when ZMRNG_VERIFY_NO_SCOPE=1 overrides a scoped change set', () => {
+    const root = gitFixture()
+    change(root, 'packages/server/src/thing.ts')
+
+    const { stdout } = runVerify(root, { extraEnv: { ZMRNG_VERIFY_NO_SCOPE: '1' } })
+
+    expect(stdout).toContain('PASS  test:server')
+    expect(stdout).toContain('PASS  test:web')
+  }, 60_000)
+
+  it('never scopes the full pre-PR gate, only --fast', () => {
+    const root = gitFixture()
+    change(root, 'packages/server/src/thing.ts')
+
+    const { stdout } = runVerify(root, { fast: false })
+
+    expect(stdout).toContain('PASS  test:server')
+    expect(stdout).toContain('PASS  test:web')
+  }, 90_000)
 })
