@@ -23,9 +23,15 @@ Vite already present for web).
 - **Server** (`packages/server`) — `environment: 'node'`. Tests + fixtures live in
   `packages/server/test/` (kept out of the `tsc` build, which compiles `src/` only).
   Config: `packages/server/vitest.config.ts`.
-- **Web** (`packages/web`) — `environment: 'jsdom'` + `@testing-library/react`.
+- **Web** (`packages/web`) — `environment: 'happy-dom'` + `@testing-library/react`.
   Tests in `packages/web/test/`; setup in `packages/web/test/setup.ts` (jest-dom
-  matchers). Config: `packages/web/vitest.config.ts`.
+  matchers, plus a `scrollIntoView` stub neither DOM implementation provides).
+  Config: `packages/web/vitest.config.ts`. happy-dom replaced jsdom because
+  environment construction — not the tests — dominated the suite: measured over 8
+  interleaved runs, wall time went 33.5s → 18.8s and the `environment` phase 38s →
+  13.9s, with all 571 tests passing unchanged. The swap needed no test edits: the
+  files that need `matchMedia`/`ResizeObserver`/`visualViewport` already stub them
+  by hand, since jsdom did not provide those either.
 
 Run: `npm test` (both), `npm run test:watch` (both), or `-w @zmrng/server` /
 `-w @zmrng/web` for one workspace.
@@ -45,9 +51,10 @@ summary instead of being hidden behind the other workspace's output.
 `verify.sh --fast` — the turn-stop gate — skips a workspace's suite when the turn
 did not touch that workspace, reported as `SKIP  test:web (workspace unchanged)`
 plus a summary line naming why. The web suite is ~59% of the gate's wall time and
-almost all of that is jsdom construction rather than tests (`tests 8.00s` vs
-`environment 37.55s` across 54 files), so a server-only or docs-only turn was
-paying ~37s for nothing.
+almost all of that was DOM-environment construction rather than tests (`tests 8.00s`
+vs `environment 37.55s` across 54 files, measured under jsdom), so a server-only or
+docs-only turn was paying ~37s for nothing. The happy-dom swap cut that cost roughly
+in half; scoping removes the rest of it on turns that never touch web.
 
 Scoping may only ever **remove** work it can positively prove is unnecessary.
 The changed-path set is branch commits (`merge-base HEAD origin/main`) plus
@@ -61,11 +68,15 @@ server↔web type-mirror drift, the exact failure scoping could otherwise hide. 
 full pre-PR gate (`verify.sh` with no flag) is **never** scoped. Override:
 `ZMRNG_VERIFY_NO_SCOPE=1`.
 
-Rejected alternatives, both measured: `pool: 'threads'` is only ~10% at equal
+Rejected alternatives, all measured: `pool: 'threads'` is only ~10% at equal
 concurrency (its apparent 45% was higher default parallelism), and `isolate: false`
-is 4x faster but fails 81 of 519 tests — the web suite depends on per-file
-isolation. Making the web suite itself cheaper remains open as a separate
-test-hygiene project.
+is ~4x faster but fails 73-81 of 571 tests and swings between 5s and 63s per run.
+**Do not retry `isolate: false` as a test-hygiene project** — it is not a mock-leak
+problem. It reproduces with two throwaway files that each render their own trivial
+`<button>`, with no mocks, hooks, timers or shared state: whichever file runs second
+in a worker renders nothing and every query misses. That is a defect in the Vitest
+3.2.7 + React 19 + `@testing-library/react` + DOM-environment combination, not
+something per-file test hygiene can fix; it needs an upstream fix, not a refactor.
 
 ## What's covered
 - **`phases.ts`** — `parsePlanDecision()` and every control-token regex
