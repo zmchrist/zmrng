@@ -279,7 +279,7 @@ export const api = {
       body: JSON.stringify(state),
     }),
 
-  /** Durable server-side Team prefs (workspace URL + display-name handle). */
+  /** Durable server-side Team prefs (the display-name handle). */
   getSettings: () => req<WorkspaceSettings>('/api/settings'),
   /** PATCH-style: send only the keys to change; returns the full settings. */
   putSettings: (patch: Partial<WorkspaceSettings>) =>

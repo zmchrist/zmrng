@@ -31,7 +31,7 @@ import { nextRailState } from './railState'
 import { hydrateChatTabs, hydrateTerminalTabs, type ChatTabState, type TabsState, type TerminalTabState } from './windowTabs'
 import type { HandoffPrefill } from './teamHandoff'
 import { isTauriRuntime } from './runtime'
-import { workspaceHttpOrigin } from './teamConfig'
+import { WORKSPACE_URL, workspaceHttpOrigin } from './teamConfig'
 import { emptyUnread, hasUnread, markRead, observeTips, type ChannelTip } from './teamUnread'
 import { useIsMobile } from './useIsMobile'
 import { MobileNav } from './components/MobileNav'
@@ -70,10 +70,10 @@ export default function App() {
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
   const [repos, setRepos] = useState<RepoTarget[]>([])
-  // Durable server-side Team prefs (workspace URL + display-name handle),
+  // Durable server-side Team prefs (the display-name handle),
   // persisted in zmrng.db so they survive a refresh/app-reopen/rebuild/reboot —
   // browser localStorage proved unreliable for these in the desktop shell.
-  const [settings, setSettings] = useState<WorkspaceSettings>({ workspaceUrl: '', teamHandle: '' })
+  const [settings, setSettings] = useState<WorkspaceSettings>({ teamHandle: '' })
   const ui = useUiState()
   // Workspace is the default home; migrate the retired `'tasks'`/`'board'` modes to it.
   const storedMode = ui.state.global.mode ?? 'workspace'
@@ -86,9 +86,6 @@ export default function App() {
     setSettings((prev) => ({ ...prev, ...patch }))
     api.putSettings(patch).then(setSettings).catch(() => undefined)
   }, [])
-  // The effective Team workspace URL: the persisted per-user value wins over the
-  // ZMRNG_WORKSPACE_URL env default surfaced via ServerConfig.
-  const effectiveWorkspaceUrl = settings.workspaceUrl || cfg?.workspaceUrl || ''
   // ---- Team unread orb (in-memory only, resets on relaunch) --------------
   // The workspace socket is gated on the Team tab being active (#149), so while
   // the operator is elsewhere there is no live feed to listen to. Instead poll a
@@ -100,7 +97,9 @@ export default function App() {
     setUnread((prev) => markRead(prev, channelId, messageId))
   }, [])
   useEffect(() => {
-    const origin = workspaceHttpOrigin(effectiveWorkspaceUrl)
+    // The Team VPS is fixed in code (teamConfig.WORKSPACE_URL) — no per-user
+    // setting, no env default, nothing to configure.
+    const origin = workspaceHttpOrigin(WORKSPACE_URL)
     // Only poll while OFF the Team tab: on it, TeamView owns the live socket and
     // the orb is hidden anyway.
     if (mode === 'team' || !origin || !settings.teamHandle) return
@@ -130,7 +129,7 @@ export default function App() {
       cancelled = true
       clearInterval(timer)
     }
-  }, [mode, effectiveWorkspaceUrl, settings.teamHandle])
+  }, [mode, settings.teamHandle])
 
   // ---- phone shell -------------------------------------------------------
   // Below the phone breakpoint the Workspace split collapses to ONE full-screen
@@ -466,7 +465,6 @@ export default function App() {
             style={{ display: mode === 'team' ? 'flex' : 'none' }}
           >
             <TeamView
-              workspaceUrl={effectiveWorkspaceUrl}
               teamHandle={settings.teamHandle}
               botHandle={cfg?.botHandle ?? '@agent'}
               repos={repos}
@@ -509,8 +507,6 @@ export default function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         connected={connected}
-        workspaceUrl={settings.workspaceUrl}
-        onWorkspaceUrlChange={(url) => saveSettings({ workspaceUrl: url })}
       />
     </div>
   )

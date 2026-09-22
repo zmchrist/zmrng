@@ -185,9 +185,6 @@ app.get('/api/config', () => ({
   maxLanes: config.maxLanes,
   targetRepo: config.targetRepo,
   defaultRepoId: config.defaultRepoId,
-  // Optional server-side default VPS workspace-server URL for the Team tab. The
-  // per-teammate localStorage value (client-side) wins over this when set.
-  workspaceUrl: config.workspaceUrl,
   // The shared team-agent bot handle (default `@agent`), surfaced so the Team
   // chat's mention autocomplete/highlighter know the agent's name. Visual only —
   // the server-side reply trigger (`detectMention`) is unchanged.
@@ -289,16 +286,20 @@ app.put('/api/ui-state', (req, reply) => {
   }
 })
 
-// Durable per-user Team prefs (workspace URL + display-name handle) persisted in
-// zmrng.db. Previously browser localStorage only, which proved unreliable across
+// Durable per-user Team prefs (the display-name handle) persisted in zmrng.db.
+// Previously browser localStorage only, which proved unreliable across
 // refresh/app-reopen/rebuild in the desktop shell; the sidecar DB lives in the
-// persistent per-user data dir, so these survive all of those. Keys are the DB's
+// persistent per-user data dir, so it survives all of those. Keys are the DB's
 // alone — the wire shape is the typed WorkspaceSettings.
-const SETTING_WORKSPACE_URL = 'workspace_url'
+//
+// The Team workspace URL is deliberately NOT a setting: it is fixed in the web
+// client (`teamConfig.WORKSPACE_URL`) because the whole team shares one
+// Tailscale-reachable VPS. A `workspace_url` row written by an older build is
+// never read or accepted again — migrations here are additive-only, so the dead
+// row is left in place rather than deleted.
 const SETTING_TEAM_HANDLE = 'team_handle'
 
 app.get('/api/settings', (): WorkspaceSettings => ({
-  workspaceUrl: db.getSetting(SETTING_WORKSPACE_URL) ?? '',
   teamHandle: db.getSetting(SETTING_TEAM_HANDLE) ?? '',
 }))
 
@@ -311,14 +312,10 @@ app.put('/api/settings', (req, reply) => {
   }
   try {
     const now = new Date().toISOString()
-    if (typeof body.workspaceUrl === 'string') {
-      db.setSetting(SETTING_WORKSPACE_URL, body.workspaceUrl, now)
-    }
     if (typeof body.teamHandle === 'string') {
       db.setSetting(SETTING_TEAM_HANDLE, body.teamHandle, now)
     }
     return {
-      workspaceUrl: db.getSetting(SETTING_WORKSPACE_URL) ?? '',
       teamHandle: db.getSetting(SETTING_TEAM_HANDLE) ?? '',
     } satisfies WorkspaceSettings
   } catch (err) {

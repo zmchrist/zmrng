@@ -27,15 +27,11 @@ import { api } from '../api'
 import { buildHandoffPrefill, type HandoffPrefill } from '../teamHandoff'
 import { resolveDefaultSpace, deriveKbTitle } from '../kbFromMessage'
 import { collectFolders, type KbFolderOption } from '../kbTree'
-import { workspaceSocketUrl, workspaceHttpOrigin } from '../teamConfig'
+import { WORKSPACE_URL, workspaceSocketUrl, workspaceHttpOrigin } from '../teamConfig'
 import { ThinkingDots } from './ThinkingDots'
 import { formatMessageTime } from '../teamTime'
 
 interface Props {
-  /** The effective VPS team-workspace URL (the persisted per-user
-   *  WorkspaceSettings value, already merged over the ServerConfig env default
-   *  by App). Used directly — resolution happens upstream. */
-  workspaceUrl: string
   /** The teammate's persisted display-name handle (server-side
    *  WorkspaceSettings). Seeds the roster identity; empty ⇒ show the join form. */
   teamHandle: string
@@ -74,6 +70,15 @@ interface Props {
   active: boolean
 }
 
+// Both derived once from the fixed code constant (teamConfig.WORKSPACE_URL) —
+// the whole team shares one VPS, so there is nothing to configure and nothing
+// that can go missing across a rebuild or reboot. `HTTP_ORIGIN` is the VPS REST
+// surface for channel list/create/scrollback: that data lives on the VPS, not
+// the teammate's local server, so those calls MUST be origin-prefixed —
+// otherwise a channel is created in the local SQLite and no teammate sees it.
+const SOCKET_URL = workspaceSocketUrl(WORKSPACE_URL)
+const HTTP_ORIGIN = workspaceHttpOrigin(WORKSPACE_URL)
+
 const PING_MS = 25000
 const RECONNECT_MS = 2000
 const SCROLLBACK_LIMIT = 50
@@ -95,7 +100,6 @@ function channelLabel(name: string): string {
  * unit-tested in isolation.
  */
 function TeamViewComponent({
-  workspaceUrl,
   teamHandle,
   onHandleChange,
   botHandle,
@@ -106,12 +110,6 @@ function TeamViewComponent({
   onChannelRead,
   active,
 }: Props) {
-  const socketUrl = workspaceSocketUrl(workspaceUrl)
-  // The VPS http origin for channel REST (list/create/scrollback). Channel data
-  // lives on the VPS, not the teammate's local server, so these calls MUST be
-  // origin-prefixed — otherwise a channel is created in the local SQLite and no
-  // teammate ever sees it.
-  const httpOrigin = workspaceHttpOrigin(workspaceUrl)
   // The roster identity is the persisted handle prop itself — no local copy, so
   // an async settings load (or a save elsewhere) flows straight through without
   // a setState-in-effect sync. Join/leave lift the change up via onHandleChange.
@@ -208,7 +206,7 @@ function TeamViewComponent({
   // ws, clears timers, nulls wsRef, setConnected(false)) — so leaving the tab
   // tears the socket down; returning re-runs the effect and connects fresh.
   useEffect(() => {
-    if (!active || !handle || !socketUrl) return
+    if (!active || !handle) return
     let closed = false
     let ws: WebSocket | null = null
     let ping: ReturnType<typeof setInterval> | undefined
@@ -216,7 +214,7 @@ function TeamViewComponent({
 
     const connect = (): void => {
       try {
-        ws = new WebSocket(socketUrl)
+        ws = new WebSocket(SOCKET_URL)
       } catch {
         reconnect = setTimeout(connect, RECONNECT_MS)
         return
@@ -272,14 +270,14 @@ function TeamViewComponent({
       setConnected(false)
       setRoster(emptyRoster())
     }
-  }, [handle, socketUrl, active])
+  }, [handle, active])
 
   // ---- load the channel list once connected; default to the first channel ----
   useEffect(() => {
     if (!handle || !connected) return
     let cancelled = false
     api
-      .listChannels(httpOrigin)
+      .listChannels(HTTP_ORIGIN)
       .then((list) => {
         if (cancelled) return
         setChannels(list)
@@ -291,7 +289,7 @@ function TeamViewComponent({
     return () => {
       cancelled = true
     }
-  }, [handle, connected, httpOrigin])
+  }, [handle, connected])
 
   // ---- open a channel: REST scrollback + subscribe to live fan-out ----
   // The thread is reset in the channel-switch handlers (not here) to keep this
@@ -301,7 +299,7 @@ function TeamViewComponent({
     if (!connected || openId === null) return
     let cancelled = false
     api
-      .getChannelMessages(openId, { limit: SCROLLBACK_LIMIT }, httpOrigin)
+      .getChannelMessages(openId, { limit: SCROLLBACK_LIMIT }, HTTP_ORIGIN)
       .then((page) => {
         if (!cancelled) setThread((prev) => loadScrollback(prev, page))
       })
@@ -313,7 +311,7 @@ function TeamViewComponent({
       cancelled = true
       sendFrame(encodeUnsubscribe(openId))
     }
-  }, [connected, openId, httpOrigin])
+  }, [connected, openId])
 
   /** Switch the open channel, clearing the previous channel's thread. */
   const openChannelId = (id: number): void => {
@@ -477,7 +475,7 @@ function TeamViewComponent({
     setCreateBusy(true)
     setCreateError(null)
     try {
-      const created = await api.createChannel(name, newRepo || null, httpOrigin)
+      const created = await api.createChannel(name, newRepo || null, HTTP_ORIGIN)
       setNewName('')
       setNewRepo('')
       setCreating(false)
@@ -562,19 +560,6 @@ function TeamViewComponent({
 
   /** Close the KB picker without promoting. */
   const closeKbPicker = (): void => setKbFor(null)
-
-  if (!socketUrl) {
-    return (
-      <div className={styles.team}>
-        <div className={styles.empty}>
-          <p className={styles.emptyTitle}>No team workspace configured</p>
-          <p className={styles.emptyHint}>
-            Set the VPS team-workspace URL in <strong>Settings</strong> to connect.
-          </p>
-        </div>
-      </div>
-    )
-  }
 
   if (!handle) {
     return (

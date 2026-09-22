@@ -795,14 +795,14 @@ describe('stale column (agent-task-persistence)', () => {
 describe('settings (durable per-user prefs)', () => {
   it('returns undefined for an unset key', () => {
     const db = new Db(dbPath)
-    expect(db.getSetting('workspace_url')).toBeUndefined()
+    expect(db.getSetting('some_pref')).toBeUndefined()
     db.close()
   })
 
   it('round-trips a value, trimming whitespace', () => {
     const db = new Db(dbPath)
-    db.setSetting('workspace_url', '  wss://vps.example  ', '2026-09-07T00:00:00.000Z')
-    expect(db.getSetting('workspace_url')).toBe('wss://vps.example')
+    db.setSetting('some_pref', '  wss://vps.example  ', '2026-09-07T00:00:00.000Z')
+    expect(db.getSetting('some_pref')).toBe('wss://vps.example')
     db.close()
   })
 
@@ -816,18 +816,18 @@ describe('settings (durable per-user prefs)', () => {
 
   it('a blank/whitespace value clears the key (reads back as undefined)', () => {
     const db = new Db(dbPath)
-    db.setSetting('workspace_url', 'wss://vps.example', '2026-09-07T00:00:00.000Z')
-    db.setSetting('workspace_url', '   ', '2026-09-07T00:00:01.000Z')
-    expect(db.getSetting('workspace_url')).toBeUndefined()
+    db.setSetting('some_pref', 'wss://vps.example', '2026-09-07T00:00:00.000Z')
+    db.setSetting('some_pref', '   ', '2026-09-07T00:00:01.000Z')
+    expect(db.getSetting('some_pref')).toBeUndefined()
     db.close()
   })
 
   it('survives a reopen of the same DB file (persistent, like the sidecar data dir)', () => {
     const db = new Db(dbPath)
-    db.setSetting('workspace_url', 'wss://vps.example', '2026-09-07T00:00:00.000Z')
+    db.setSetting('some_pref', 'wss://vps.example', '2026-09-07T00:00:00.000Z')
     db.close()
     const reopened = new Db(dbPath)
-    expect(reopened.getSetting('workspace_url')).toBe('wss://vps.example')
+    expect(reopened.getSetting('some_pref')).toBe('wss://vps.example')
     reopened.close()
   })
 })
