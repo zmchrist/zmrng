@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { workspaceSocketUrl, workspaceHttpOrigin } from '../src/teamConfig'
+import { WORKSPACE_URL, workspaceSocketUrl, workspaceHttpOrigin } from '../src/teamConfig'
+
+describe('WORKSPACE_URL (the fixed VPS base)', () => {
+  it('is the shared Tailscale VPS, fixed in code so nothing has to be entered', () => {
+    expect(WORKSPACE_URL).toBe('http://<vps-ip>:4500')
+  })
+
+  it('derives a usable socket URL and REST origin with no configuration', () => {
+    expect(workspaceSocketUrl(WORKSPACE_URL)).toBe('ws://<vps-ip>:4500/ws/workspace')
+    expect(workspaceHttpOrigin(WORKSPACE_URL)).toBe('http://<vps-ip>:4500')
+  })
+})
 
 describe('workspaceSocketUrl', () => {
   it('appends the /ws/workspace path to a bare base', () => {

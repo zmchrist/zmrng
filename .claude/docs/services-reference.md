@@ -440,7 +440,7 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   base64-encoded image/PDF attachments (up to `MAX_ATTACHMENTS` × `MAX_ATTACHMENT_BYTES`
   each) doesn't hit `FST_ERR_CTP_BODY_TOO_LARGE`.
 - **REST:** `GET /api/config` (model, maxLanes, targetRepo, defaultRepoId, authMode; also
-  `workspaceUrl` and `botHandle` for the Team tab — see Team workspace below),
+  `botHandle` for the Team tab — see Team workspace below),
   `GET /api/repos` (the registry), `GET /api/tasks`, `POST /api/tasks`
   (title/body/model/effort/style/repoId/flow/**attachments**), `GET /api/tasks/:id/events`,
   **`GET /api/tasks/:id/security-scans`** (→ `db.listSecurityScansForTask(id)`, mirrors the
@@ -455,12 +455,14 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   present (image/PDF-only turns are valid — `POST /api/tasks` still always requires a
   title, `POST /api/tasks/:id/message` requires text or an attachment).
   `GET`/`PUT /api/settings` returns/patches the durable per-user `WorkspaceSettings`
-  (`{ workspaceUrl, teamHandle }`) persisted in `zmrng.db` (the `settings` kv table) —
-  the Team workspace URL + display-name handle moved here from browser `localStorage`,
-  which was unreliable across refresh/app-reopen/rebuild in the desktop shell; the
-  sidecar DB lives in the persistent per-user data dir. `PUT` is PATCH-style (only the
-  keys present are written; a blank value clears one) and echoes the full document. The
-  stored `workspaceUrl` wins over the `ZMRNG_WORKSPACE_URL` env default (App merges).
+  (`{ teamHandle }`) persisted in `zmrng.db` (the `settings` kv table) — the Team
+  display-name handle moved here from browser `localStorage`, which was unreliable
+  across refresh/app-reopen/rebuild in the desktop shell; the sidecar DB lives in the
+  persistent per-user data dir. `PUT` is PATCH-style (only the keys present are written;
+  a blank value clears one) and echoes the full document. The Team workspace **URL is
+  not a setting**: it is fixed in the web client (`teamConfig.WORKSPACE_URL`), so
+  `ZMRNG_WORKSPACE_URL` is gone and a `workspace_url` row left by an older build is
+  never read or accepted again (additive-only migrations — the dead row stays).
   (This list predates several routes — `/api/agents`, `/api/preflight`, `/api/ui-state`,
   `/api/tasks/:id/{files,file,notes,chat}`, `/api/tasks/:id/archive`, and the
   Projects-dir browsing trio `GET /api/projects/files` (dotfile-skipping, depth-capped
@@ -740,7 +742,8 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
   `toggleReaction` (see Emoji reactions above).
 - **REST**: `GET /api/channels` (list) · `GET /api/channels/:id/messages?before=&limit=`
   (paginated scrollback, `limit` clamped to `MAX_MESSAGE_PAGE`, always 200 — a bad id yields an
-  empty page). `GET /api/config` carries `workspaceUrl` (optional server default for the tab).
+  empty page). The VPS base the tab talks to is the fixed `teamConfig.WORKSPACE_URL`
+  constant — not server config, not a per-user setting.
 - **WsHub rooms**: `join(room, socket)` / `leaveAll(socket)` / `broadcastRoom(room, data)` over
   a `Map<string, Set<socket>>`, alongside the flat `/ws` broadcast set. The workspace socket
   joins the `'workspace'` room for roster re-broadcasts.
@@ -751,8 +754,8 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
   `appendMessage`/`loadScrollback`/`applyReaction` — dedupes by id so REST scrollback and live
   frames merge cleanly), `teamConfig.ts` (localStorage handle/URL + socket-URL resolution),
   `emojiSet.ts` (`REACTION_EMOJI` curated static set for the reaction picker). `TeamView`
-  component owns the socket (glue, like `Terminal.tsx`); Settings holds the VPS workspace-URL
-  field.
+  component owns the socket (glue, like `Terminal.tsx`); Settings has no workspace-URL
+  field — the base is a code constant.
 - **Repo-scoped channels + handoff (T3)**: `POST /api/channels` creates a channel via
   `Db.createChannel(name, repoId|null, now)` then broadcasts `{type:'channels', channels}` to
   the `workspace` room (blank → 400, duplicate name → existing row, never a 500). A channel's

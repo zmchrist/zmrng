@@ -310,6 +310,15 @@ describe('terminal config fields', () => {
   })
 })
 
+describe('team workspace URL is not server config', () => {
+  it('exposes no workspaceUrl on the resolved config (the env var is ignored)', () => {
+    // The Team VPS base is fixed in the web client (teamConfig.WORKSPACE_URL)
+    // for every install, so neither ZMRNG_WORKSPACE_URL nor a persisted setting
+    // can point a client anywhere else.
+    expect('workspaceUrl' in config).toBe(false)
+  })
+})
+
 describe('resolveAgents', () => {
   /** Write an agents.json into a fresh config dir and return that dir. */
   function agentsConfigDir(json: unknown): string {

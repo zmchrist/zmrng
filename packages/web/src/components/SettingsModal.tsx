@@ -19,10 +19,6 @@ interface Props {
   /** WS connection state — used to detect the down→up transition after a
    *  reboot so the page can be reloaded once the server is actually back. */
   connected: boolean
-  /** The persisted VPS team-workspace URL (server-side WorkspaceSettings). */
-  workspaceUrl: string
-  /** Persist an edit to the workspace URL (server-side, durable). */
-  onWorkspaceUrlChange: (url: string) => void
 }
 
 /**
@@ -39,8 +35,6 @@ export function SettingsModal({
   open,
   onClose,
   connected,
-  workspaceUrl,
-  onWorkspaceUrlChange,
 }: Props) {
   const mounted = usePanelMount(open)
   const [themeId, setThemeId] = useState(() => loadStoredTheme().themeId)
@@ -204,24 +198,6 @@ export function SettingsModal({
               step={1}
               value={opacity}
               onChange={(e) => onOpacityChange(Number(e.target.value))}
-            />
-          </div>
-
-          <div className={styles.section}>
-            <div className={styles.sectionHead}>
-              <span className={styles.sectionTitle}>Team workspace</span>
-            </div>
-            <p className={styles.rebootHint}>
-              VPS team-workspace server URL for the <strong>Team</strong> tab (e.g.{' '}
-              <code>wss://host.tailnet.ts.net:4500</code>). Reachable over Tailscale only.
-            </p>
-            <input
-              type="text"
-              className={styles.workspaceInput}
-              aria-label="Team workspace VPS URL"
-              placeholder="wss://host.tailnet.ts.net:4500"
-              value={workspaceUrl}
-              onChange={(e) => onWorkspaceUrlChange(e.target.value)}
             />
           </div>
 

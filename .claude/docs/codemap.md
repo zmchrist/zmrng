@@ -69,16 +69,21 @@ same server binary, run on a VPS) over ONE multiplexed WebSocket at
 `GET /ws/workspace`. Teammates self-assert a free-text display-name handle (no
 password, no verification — stored as a `members` row) and appear in a live,
 workspace-wide presence roster driven by connection lifecycle plus a periodic
-ping/pong heartbeat. The VPS URL and the teammate's display-name handle are
-per-user settings entered in Settings/the Team join form, persisted **server-side**
-in `zmrng.db` (the `settings` kv table, `WorkspaceSettings` = `{ workspaceUrl,
-teamHandle }`, read/written over `GET`/`PUT /api/settings`). They moved off browser
-`localStorage`, which was unreliable across refresh/app-reopen/rebuild in the
-desktop shell — the sidecar DB lives in the persistent per-user data dir, so the
-values survive all of those. The stored `workspaceUrl` wins over the optional
-`ZMRNG_WORKSPACE_URL` env default surfaced through `GET /api/config` (App merges
-the two; `teamConfig.ts` now holds only the pure `workspaceSocketUrl`/
-`workspaceHttpOrigin` transport coercers).
+ping/pong heartbeat. The teammate's display-name handle is a per-user setting
+entered in the Team join form, persisted **server-side** in `zmrng.db` (the
+`settings` kv table, `WorkspaceSettings` = `{ teamHandle }`, read/written over
+`GET`/`PUT /api/settings`). It moved off browser `localStorage`, which was
+unreliable across refresh/app-reopen/rebuild in the desktop shell — the sidecar DB
+lives in the persistent per-user data dir, so the value survives all of those.
+
+The **VPS URL is fixed in code**: `teamConfig.WORKSPACE_URL`
+(`http://<vps-ip>:4500`) alongside the pure `workspaceSocketUrl`/
+`workspaceHttpOrigin` transport coercers. The whole team shares one
+Tailscale-reachable VPS, so every install (desktop app and browser) points at it
+with nothing to enter and nothing that can go missing across a rebuild or reboot.
+There is deliberately no Settings field, no `ZMRNG_WORKSPACE_URL` env override,
+and no persisted value — an older build's `workspace_url` settings row is dead
+data, never read (migrations stay additive-only, so it is not deleted).
 
 On top of that shell, **channels + live messaging** (T2): `channels` (a fixed
 `#general` plus optional repo-tied ones) and `messages` (`kind ∈ human|agent`)

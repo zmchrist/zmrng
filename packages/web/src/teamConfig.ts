@@ -1,9 +1,16 @@
-// Pure URL helpers for the Team tab's VPS workspace-server base. The workspace
-// URL and the self-asserted display-name handle are now persisted server-side in
-// `zmrng.db` (WorkspaceSettings, GET/PUT /api/settings) rather than browser
-// localStorage, which proved unreliable across refresh/app-reopen/rebuild in the
-// desktop shell. App merges the persisted value over the ServerConfig env
-// default and hands the effective base to these transport coercers.
+// Pure URL helpers for the Team tab's VPS workspace-server base, plus the fixed
+// base itself. The whole team shares ONE Tailscale-reachable VPS, so the URL is
+// a code constant rather than per-machine configuration: every install (desktop
+// app and browser) points at the same host with nothing to type, and a rebuild
+// or reboot always yields it. There is deliberately no Settings field, no env
+// override, and no persisted value — an earlier per-user setting proved both
+// unreliable across rebuilds and pointless for a single shared VPS.
+
+/**
+ * The fixed VPS team-workspace base. Reachable over Tailscale only (the tailnet
+ * IS the access control — see the POC exposure precondition in CLAUDE.md).
+ */
+export const WORKSPACE_URL = 'http://<vps-ip>:4500'
 
 /**
  * Strip a configured base down to a bare origin (scheme + host[:port]),
