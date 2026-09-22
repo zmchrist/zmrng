@@ -10,7 +10,6 @@ const PdfViewer = lazy(() => import('./PdfViewer').then((m) => ({ default: m.Pdf
 const CodeEditor = lazy(() => import('./CodeEditor').then((m) => ({ default: m.CodeEditor })))
 
 interface Props {
-  taskId: string | null
   path: string | null
 }
 
@@ -82,11 +81,9 @@ function ViewerBody({
   )
 }
 
-/** A fetch result tagged with the (taskId, path) it was fetched for, so a
- *  fetch that lands after the user opened a different file is never shown.
- *  `taskId` is null when the file was read from the Projects dir (no task). */
+/** A fetch result tagged with the path it was fetched for, so a fetch that
+ *  lands after the user opened a different file is never shown. */
 interface Fetched {
-  taskId: string | null
   path: string
   file: WorktreeFileContent | null
   error: string | null
@@ -94,10 +91,11 @@ interface Fetched {
 
 /** Format-dispatched viewer/editor for the Workspace center dock: markdown +
  *  code are read-write via CodeMirror 6, images render natively, PDFs via
- *  pdf.js — all read-only. Edits save into the task's worktree over the
- *  server's file endpoint (a real `git status`-visible write, not a scratch
- *  buffer). */
-export function Viewer({ taskId, path }: Props) {
+ *  pdf.js — those two read-only. Files always resolve against the configured
+ *  Projects dir, never a task worktree, so the viewer does not change with task
+ *  selection; edits save through the server's projects file endpoint (a real
+ *  on-disk write, not a scratch buffer). */
+export function Viewer({ path }: Props) {
   const [fetched, setFetched] = useState<Fetched | null>(null)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -106,46 +104,44 @@ export function Viewer({ taskId, path }: Props) {
   useEffect(() => {
     if (!path) return
     let cancelled = false
-    // With a task, read/write its worktree; with no task, read-only from the
-    // Projects dir (arbitrary project browsing).
-    const read = taskId ? api.readFile(taskId, path) : api.readProjectFile(path)
-    read
+    api
+      .readProjectFile(path)
       .then((f) => {
         if (cancelled) return
-        setFetched({ taskId, path, file: f, error: null })
+        setFetched({ path, file: f, error: null })
         setDraft(f.encoding === 'utf8' ? f.content : '')
         setMdView('edit')
       })
       .catch((err) => {
-        if (!cancelled) setFetched({ taskId, path, file: null, error: errMsg(err) })
+        if (!cancelled) setFetched({ path, file: null, error: errMsg(err) })
       })
     return () => {
       cancelled = true
     }
-  }, [taskId, path])
+  }, [path])
 
-  const current = fetched && fetched.taskId === taskId && fetched.path === path ? fetched : null
+  const current = fetched && fetched.path === path ? fetched : null
   const loading = !!path && !current
   const error = current?.error ?? null
   const file = current?.file ?? null
 
-  // Only a task worktree is writable; Projects-dir files are read-only.
-  const editable = !!taskId && file?.encoding === 'utf8'
+  // Every text file under the Projects dir is writable; image/pdf stay read-only.
+  const editable = file?.encoding === 'utf8'
   const dirty = editable && draft !== file.content
 
   const save = useCallback(() => {
-    if (!taskId || !path || !file || file.encoding !== 'utf8') return
+    if (!path || !file || file.encoding !== 'utf8') return
     setSaving(true)
     api
-      .writeFile(taskId, path, draft)
+      .writeProjectFile(path, draft)
       .then(() => {
-        setFetched({ taskId, path, file: { ...file, content: draft }, error: null })
+        setFetched({ path, file: { ...file, content: draft }, error: null })
       })
       .catch((err) => {
-        setFetched({ taskId, path, file, error: errMsg(err) })
+        setFetched({ path, file, error: errMsg(err) })
       })
       .finally(() => setSaving(false))
-  }, [taskId, path, file, draft])
+  }, [path, file, draft])
 
   useEffect(() => {
     if (!editable) return

@@ -915,10 +915,10 @@ export const PROTECTED_SPACE_NAME = 'zmrng'
  * "unset". Mirrored in `packages/web/src/types.ts`.
  */
 export interface WorkspaceSettings {
-  /** VPS team-workspace server URL for the Team tab. Wins over the
-   *  `ZMRNG_WORKSPACE_URL` env default when non-empty. */
-  workspaceUrl: string
-  /** The teammate's self-asserted display-name handle for the Team roster. */
+  /** The teammate's self-asserted display-name handle for the Team roster.
+   *  The Team workspace URL is deliberately NOT here — it is fixed in the web
+   *  client (`teamConfig.WORKSPACE_URL`) because the whole team shares one
+   *  Tailscale-reachable VPS, so there is nothing per-user to persist. */
   teamHandle: string
 }
 

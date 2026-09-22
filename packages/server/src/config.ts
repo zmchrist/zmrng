@@ -138,13 +138,6 @@ export interface Config {
    */
   terminalBufferBytes: number
   /**
-   * Optional server-side default URL of the VPS team-workspace server, surfaced
-   * through `GET /api/config` so a machine can pre-seed the Team tab's default.
-   * Empty when `ZMRNG_WORKSPACE_URL` is unset; the per-teammate localStorage
-   * value wins over this when present.
-   */
-  workspaceUrl: string
-  /**
    * Absolute path to the shared read-only reference checkout the team @mention
    * agent `git pull`s before answering (D8). Empty when `ZMRNG_WORKSPACE_REPO_PATH`
    * is unset — the pull is then skipped gracefully. The live path is
@@ -695,7 +688,6 @@ function buildConfig(): Config {
     shell: process.env.SHELL?.trim() || '/bin/sh',
     terminalGraceMs: Number(process.env.ZMRNG_TERMINAL_GRACE_MS ?? 600000),
     terminalBufferBytes: Number(process.env.ZMRNG_TERMINAL_BUFFER_BYTES ?? 262144),
-    workspaceUrl: process.env.ZMRNG_WORKSPACE_URL?.trim() || '',
     workspaceRepoPath: process.env.ZMRNG_WORKSPACE_REPO_PATH?.trim() || '',
     workspaceBotAgentId: process.env.ZMRNG_WORKSPACE_BOT_AGENT?.trim() || '',
     workspaceBotHandle: process.env.ZMRNG_WORKSPACE_BOT_HANDLE?.trim() || '@agent',

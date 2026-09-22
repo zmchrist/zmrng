@@ -36,14 +36,25 @@ beforeEach(() => {
   deleteSpace.mockReset()
 })
 afterEach(() => {
-  vi.restoreAllMocks()
+  // Clear call history only — never restoreAllMocks() here. Restoring resets
+  // these plain vi.fn()s to return `undefined`, so any passive effect that
+  // flushes after teardown would see `api.getSpaceTree(...)` hand back
+  // undefined instead of a promise. The window spies created inside individual
+  // tests are re-created by each test that needs one.
+  vi.clearAllMocks()
 })
 
 /** Render the KB view (inactive, so no workspace socket opens) and wait for the
- *  seeded spaces to load into the switcher. */
+ *  seeded spaces to load into the switcher.
+ *
+ *  Waiting on the switcher alone is not enough: resolving getSpaces sets
+ *  spaceId, which schedules a SECOND passive effect loading that space's tree.
+ *  Leaving it pending at teardown is exactly the race that made this file flake
+ *  under CPU contention, so wait for the tree load to have started too. */
 async function renderKb(teamHandle: string) {
   render(<KbView teamHandle={teamHandle} onHandleChange={() => {}} active={false} />)
   await screen.findByRole('button', { name: 'general' })
+  await waitFor(() => expect(getSpaceTree).toHaveBeenCalled())
 }
 
 describe('<KbView> spaces — create/delete affordances', () => {

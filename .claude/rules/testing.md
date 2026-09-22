@@ -30,6 +30,17 @@ Vite already present for web).
 Run: `npm test` (both), `npm run test:watch` (both), or `-w @zmrng/server` /
 `-w @zmrng/web` for one workspace.
 
+### Fork cap (load-induced flakes)
+Both `vitest.config.ts`s set `test.poolOptions.forks.maxForks` from
+`ZMRNG_VITEST_MAX_FORKS` (default 3) instead of leaving it at vitest's own default
+(`cores - 1`). `runner.ts` sets `ZMRNG_VITEST_MAX_FORKS=2` in a worker child's env
+(right after the `ANTHROPIC_API_KEY` strip), so several workers validating at once
+don't each claim most of the box — an oversubscribed host produces flaky failures that
+are load, not a real regression. `.claude/verify.sh` runs the test step split per
+workspace (`test:server`, `test:web`, via `npm run test -w @zmrng/<ws>`) rather than one
+combined `npm run test --workspaces` step, so a failing workspace is named in the
+summary instead of being hidden behind the other workspace's output.
+
 ## What's covered
 - **`phases.ts`** — `parsePlanDecision()` and every control-token regex
   (`READY_RE`, `PLAN_READY_RE`, `VALIDATING_RE`, `BLOCKED_RE`, `PR_RE`), including

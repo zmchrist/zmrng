@@ -11,9 +11,8 @@
   font-family: var(--font);
 }
 
-/* ---- empty / join states — centered within the card body ---- */
+/* ---- join state — centered within the card body ---- */
 
-.empty,
 .join {
   margin: auto;
   display: flex;
@@ -28,14 +27,12 @@
   -webkit-backdrop-filter: var(--glass);
 }
 
-.emptyTitle,
 .joinLabel {
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
 }
 
-.emptyHint,
 .joinHint {
   font-size: 13px;
   color: var(--text-dim);

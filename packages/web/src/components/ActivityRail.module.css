@@ -47,6 +47,11 @@
   place-items: center;
   width: 18px;
   height: 18px;
+  transition: transform var(--transition);
+}
+/* Active icon enlarges slightly; the accent color comes from .arailActive. */
+.arailActive .arailIcon {
+  transform: scale(1.15);
 }
 .arailSvg {
   width: 18px;

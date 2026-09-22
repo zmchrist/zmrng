@@ -15,6 +15,14 @@ Wraps one long-lived headless `claude` child process per task.
 - **Max OAuth only:** the constructor copies `process.env` and `delete`s
   `ANTHROPIC_API_KEY` before spawn, so the child authenticates with the operator's
   Max login and never bills the metered API.
+- **Vitest fork cap for workers:** immediately after that strip, the constructor also
+  sets `env.ZMRNG_VITEST_MAX_FORKS = '2'` in the child env. A worker turn ends by
+  running the validation gate (`verify.sh`), and vitest's own default (`cores - 1`
+  forks) meant several concurrent workers validating at once oversubscribed the host —
+  load-induced flakes. `packages/server/vitest.config.ts` / `packages/web/vitest.config.ts`
+  read `ZMRNG_VITEST_MAX_FORKS` (default 3, used by the operator's own interactive
+  `npm test`) into `test.poolOptions.forks.maxForks`; the worker's tighter `2` only
+  applies inside the spawned `claude` child's env, never the operator's shell.
 - **stdout parsing:** buffers chunks, splits on `\n`, `JSON.parse` per line (tolerant —
   non-JSON lines ignored). Dispatches by `type`:
   - first line with a `session_id` → `onSession(sid)`
@@ -394,6 +402,31 @@ Env parsing + repo registry.
 - **`removeWorktree(repoPath, worktreePath)`** — `worktree remove --force` + `prune`
   (both best-effort).
 - **`slugify(title)`** — branch-safe slug.
+- **Hook dedupe (`seedHarness`)** — before seeding `.claude/zmrng-hooks/` and
+  registering them into `.claude/settings.local.json`, `seedHarness` calls
+  **`targetRegisteredHooks(worktreePath)`**: reads the worktree's own (target-repo-owned)
+  `.claude/settings.json`, defensively walks every hook event (missing/malformed file →
+  empty set, seed everything), and collects `.py` basenames out of each hook's `command`
+  string via `command.match(/[A-Za-z0-9_.-]+\.py/g)`. Matching is on **basename only**
+  because the seeded copy lives under `.claude/zmrng-hooks/<name>` while the target's own
+  copy lives under `.claude/hooks/<name>` — only the basename is stable across the two
+  paths. For every hook script the target already registers, `seedHarness` skips **both**
+  the file copy into `.claude/zmrng-hooks/` and the `settings.local.json` registration,
+  and pushes a `harness hook <name> not seeded — target repo registers its own` note —
+  registering the same script twice would fire it twice per event (Claude Code merges
+  `settings.json` with `settings.local.json`), which for `stop_validate.py` meant running
+  the whole validation gate twice per turn.
+  - **`HOOK_DEDUPE_EXEMPT`** (`Set(['security_guard.py'])`) — always seeded regardless of
+    what the target registers; it's the one hook whose absence costs safety rather than
+    speed, and the two implementations are known to differ in source. The duplicated cost
+    is one `python3` startup per tool call, not a test suite.
+  - **`ZMRNG_FORCE_SEED_HOOKS=1`** — escape hatch env var that restores the old
+    seed-everything behaviour (treats `targetRegisteredHooks` as empty).
+  - **`zmrngHooksConfig(skip)`** — now takes the skip set and filters it out of every
+    hook group across every event before the config is merged into
+    `settings.local.json`; a group left with zero hooks (or an event left with zero
+    groups) is dropped entirely rather than registered empty.
+  - Settled in `.agents/plans/worker-fleet-cpu-contention.md` (T1).
 
 ## WsHub — `packages/server/src/ws.ts`
 
@@ -407,7 +440,7 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   base64-encoded image/PDF attachments (up to `MAX_ATTACHMENTS` × `MAX_ATTACHMENT_BYTES`
   each) doesn't hit `FST_ERR_CTP_BODY_TOO_LARGE`.
 - **REST:** `GET /api/config` (model, maxLanes, targetRepo, defaultRepoId, authMode; also
-  `workspaceUrl` and `botHandle` for the Team tab — see Team workspace below),
+  `botHandle` for the Team tab — see Team workspace below),
   `GET /api/repos` (the registry), `GET /api/tasks`, `POST /api/tasks`
   (title/body/model/effort/style/repoId/flow/**attachments**), `GET /api/tasks/:id/events`,
   **`GET /api/tasks/:id/security-scans`** (→ `db.listSecurityScansForTask(id)`, mirrors the
@@ -422,17 +455,20 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   present (image/PDF-only turns are valid — `POST /api/tasks` still always requires a
   title, `POST /api/tasks/:id/message` requires text or an attachment).
   `GET`/`PUT /api/settings` returns/patches the durable per-user `WorkspaceSettings`
-  (`{ workspaceUrl, teamHandle }`) persisted in `zmrng.db` (the `settings` kv table) —
-  the Team workspace URL + display-name handle moved here from browser `localStorage`,
-  which was unreliable across refresh/app-reopen/rebuild in the desktop shell; the
-  sidecar DB lives in the persistent per-user data dir. `PUT` is PATCH-style (only the
-  keys present are written; a blank value clears one) and echoes the full document. The
-  stored `workspaceUrl` wins over the `ZMRNG_WORKSPACE_URL` env default (App merges).
+  (`{ teamHandle }`) persisted in `zmrng.db` (the `settings` kv table) — the Team
+  display-name handle moved here from browser `localStorage`, which was unreliable
+  across refresh/app-reopen/rebuild in the desktop shell; the sidecar DB lives in the
+  persistent per-user data dir. `PUT` is PATCH-style (only the keys present are written;
+  a blank value clears one) and echoes the full document. The Team workspace **URL is
+  not a setting**: it is fixed in the web client (`teamConfig.WORKSPACE_URL`), so
+  `ZMRNG_WORKSPACE_URL` is gone and a `workspace_url` row left by an older build is
+  never read or accepted again (additive-only migrations — the dead row stays).
   (This list predates several routes — `/api/agents`, `/api/preflight`, `/api/ui-state`,
   `/api/tasks/:id/{files,file,notes,chat}`, `/api/tasks/:id/archive`, and the
-  Projects-dir browsing pair `GET /api/projects/files` (dotfile-skipping, depth-capped
-  tree of `config.projectsDir`) + `GET /api/projects/file?path=` (read-only read of an
-  arbitrary project file, for no-task file viewing) — that already exist in `index.ts`; a
+  Projects-dir browsing trio `GET /api/projects/files` (dotfile-skipping, depth-capped
+  tree of `config.projectsDir`) + `GET`/`PUT /api/projects/file` (read + text-file write
+  of an arbitrary project file, both guarded by `files.ts`'s traversal/symlink checks, with
+  `PUT` additionally rejecting image/PDF paths) — that already exist in `index.ts`; a
   fuller pass is owed here, tracked as a doc-sync gap rather than documented speculatively
   in this change.)
 - **WS:** `GET /ws` — adds the socket to the hub, sends a `snapshot`. `GET /ws/terminal` —
@@ -706,7 +742,8 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
   `toggleReaction` (see Emoji reactions above).
 - **REST**: `GET /api/channels` (list) · `GET /api/channels/:id/messages?before=&limit=`
   (paginated scrollback, `limit` clamped to `MAX_MESSAGE_PAGE`, always 200 — a bad id yields an
-  empty page). `GET /api/config` carries `workspaceUrl` (optional server default for the tab).
+  empty page). The VPS base the tab talks to is the fixed `teamConfig.WORKSPACE_URL`
+  constant — not server config, not a per-user setting.
 - **WsHub rooms**: `join(room, socket)` / `leaveAll(socket)` / `broadcastRoom(room, data)` over
   a `Map<string, Set<socket>>`, alongside the flat `/ws` broadcast set. The workspace socket
   joins the `'workspace'` room for roster re-broadcasts.
@@ -717,8 +754,8 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
   `appendMessage`/`loadScrollback`/`applyReaction` — dedupes by id so REST scrollback and live
   frames merge cleanly), `teamConfig.ts` (localStorage handle/URL + socket-URL resolution),
   `emojiSet.ts` (`REACTION_EMOJI` curated static set for the reaction picker). `TeamView`
-  component owns the socket (glue, like `Terminal.tsx`); Settings holds the VPS workspace-URL
-  field.
+  component owns the socket (glue, like `Terminal.tsx`); Settings has no workspace-URL
+  field — the base is a code constant.
 - **Repo-scoped channels + handoff (T3)**: `POST /api/channels` creates a channel via
   `Db.createChannel(name, repoId|null, now)` then broadcasts `{type:'channels', channels}` to
   the `workspace` room (blank → 400, duplicate name → existing row, never a 500). A channel's

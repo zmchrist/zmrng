@@ -41,6 +41,7 @@ zmrng/
 │           ├── attachments.ts  — pure DOM-free-ish helpers for image/PDF drop-paste: mimeToKind/validateFile (mirrors server ALLOWED_MEDIA_TYPES/MAX_ATTACHMENT_BYTES)/fileToAttachment (FileReader → base64, no data-URL prefix)/filesFromPaste/filesFromDrop
 │           ├── useAttachments.ts — shared attachment state + paste/drop handlers for the three composers (NewTaskForm, ClarifyChat, ChatPane): addFiles (validate + read, capped at MAX_ATTACHMENTS)/remove/clear/error/onPaste/onDrop
 │           ├── mobileNav.ts   — pure, DOM-free phone-navigation model: `MOBILE_VIEWS` (Tasks/Worker · Files · Terminal · Chat · Team chat · KB), `MobileNavState` + `toggleDrawer`/`closeDrawer`/`selectView`, and the view↔mode mapping (`modeForView`/`workspaceViewFor`/`viewForMode`/`mobileViewLabel`). Below the 768px phone breakpoint the Workspace split collapses to ONE full-screen view at a time, picked from the hamburger drawer; desktop is untouched
+│           ├── mobileTaskPanel.ts — pure, DOM-free phone-only gesture + persistence helper for the Tasks / Worker view's swipe-to-hide task panel: `SWIPE_THRESHOLD_PX`, `beginSwipe`/`resolveSwipe` (swipe up → collapsed, swipe down → expanded, sub-threshold movement → tap toggle), and `loadTasksCollapsed`/`saveTasksCollapsed` over localStorage (`zmrng-mobile-tasks-collapsed`). Rendered by `WorkspaceView`'s handle bar; desktop is untouched
 │           ├── useIsMobile.ts — `useSyncExternalStore` over `matchMedia('(max-width: 768px)')` (`MOBILE_QUERY`); true while the viewport is phone-sized. Store-based rather than state+effect so it never trips `react-hooks/set-state-in-effect` and tracks orientation changes
 │           ├── terminalKeys.ts — pure data for the phone terminal's on-screen key bar: `TERMINAL_KEYS` (row 1, always visible: Esc, Tab, sticky Ctrl+Alt modifiers, the four repeat-on-hold arrows, `| ~ / - _`) + `TERMINAL_KEYS_EXTRA` (row 2, collapsed by default: Home/End/PgUp/PgDn, F1–F12, xterm's normal-mode sequences) + `ctrlSeq(data)`/`altSeq(data)`/`modSeq(data, mods)` mapping one typed character through the armed modifier(s) (unknown/multi-char input passes through unchanged)
 │           ├── keyboardInset.ts — the phone soft-keyboard inset: `KEYBOARD_MIN_INSET`, pure `keyboardInset(m)`/`barOffset(inset, gapBelowPx)`, and `useKeyboardInset()` (`useSyncExternalStore` over `visualViewport` resize+scroll, same shape as `useIsMobile.ts`). iOS Safari overlays the keyboard instead of shrinking the layout viewport, so `Terminal.tsx` pads its wrap by this to keep the key bar and cursor line above it
@@ -72,16 +73,21 @@ same server binary, run on a VPS) over ONE multiplexed WebSocket at
 `GET /ws/workspace`. Teammates self-assert a free-text display-name handle (no
 password, no verification — stored as a `members` row) and appear in a live,
 workspace-wide presence roster driven by connection lifecycle plus a periodic
-ping/pong heartbeat. The VPS URL and the teammate's display-name handle are
-per-user settings entered in Settings/the Team join form, persisted **server-side**
-in `zmrng.db` (the `settings` kv table, `WorkspaceSettings` = `{ workspaceUrl,
-teamHandle }`, read/written over `GET`/`PUT /api/settings`). They moved off browser
-`localStorage`, which was unreliable across refresh/app-reopen/rebuild in the
-desktop shell — the sidecar DB lives in the persistent per-user data dir, so the
-values survive all of those. The stored `workspaceUrl` wins over the optional
-`ZMRNG_WORKSPACE_URL` env default surfaced through `GET /api/config` (App merges
-the two; `teamConfig.ts` now holds only the pure `workspaceSocketUrl`/
-`workspaceHttpOrigin` transport coercers).
+ping/pong heartbeat. The teammate's display-name handle is a per-user setting
+entered in the Team join form, persisted **server-side** in `zmrng.db` (the
+`settings` kv table, `WorkspaceSettings` = `{ teamHandle }`, read/written over
+`GET`/`PUT /api/settings`). It moved off browser `localStorage`, which was
+unreliable across refresh/app-reopen/rebuild in the desktop shell — the sidecar DB
+lives in the persistent per-user data dir, so the value survives all of those.
+
+The **VPS URL is fixed in code**: `teamConfig.WORKSPACE_URL`
+(`http://100.92.187.96:4500`) alongside the pure `workspaceSocketUrl`/
+`workspaceHttpOrigin` transport coercers. The whole team shares one
+Tailscale-reachable VPS, so every install (desktop app and browser) points at it
+with nothing to enter and nothing that can go missing across a rebuild or reboot.
+There is deliberately no Settings field, no `ZMRNG_WORKSPACE_URL` env override,
+and no persisted value — an older build's `workspace_url` settings row is dead
+data, never read (migrations stay additive-only, so it is not deleted).
 
 On top of that shell, **channels + live messaging** (T2): `channels` (a fixed
 `#general` plus optional repo-tied ones) and `messages` (`kind ∈ human|agent`)

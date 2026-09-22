@@ -278,5 +278,23 @@ The `runner.ts`/`index.ts`/`phases.ts` layers apply to the headless VPS instance
 check`, a live group-kill proof (detached parent+grandchild → 0 survivors), and the
 doctor's full detect→reap→verify loop.
 
+## Worker-fleet CPU contention — hook dedupe, vitest fork cap, split verify.sh test step (2026-09-21)
+Several concurrent workers validating at once was oversubscribing the host: (1)
+`worktree.ts`'s `seedHarness` now reads the target worktree's own `.claude/settings.json`
+(`targetRegisteredHooks`) and skips re-seeding + re-registering any hook script the
+target repo already registers itself (basename match; `security_guard.py` stays exempt
+and always seeds; `ZMRNG_FORCE_SEED_HOOKS=1` restores the old seed-everything
+behaviour) — a duplicated `stop_validate.py` was running the whole validation gate twice
+per turn. (2) Both `vitest.config.ts`s cap `poolOptions.forks.maxForks` via
+`ZMRNG_VITEST_MAX_FORKS` (default 3); `runner.ts` sets it to `2` in a worker child's env.
+(3) `.claude/verify.sh` splits its `test` step into `test:server`/`test:web` so a failing
+workspace is named instead of hidden behind the other's output, and fixes a `tail`/`head`
+mismatch that had been showing the wrong end of failing output. (4)
+`KbView.spaces.test.tsx` fixes a load-sensitive flake — waits for the switcher's
+dependent second effect (`getSpaceTree`) before returning from `renderKb()`, and swaps
+`afterEach`'s `vi.restoreAllMocks()` for `vi.clearAllMocks()` so a still-pending effect at
+teardown can't be handed `undefined` instead of a promise. Plan:
+`.agents/plans/worker-fleet-cpu-contention.md`.
+
 ## Phone terminal — soft-keyboard key bar, pinch-resize, flick-scroll (2026-09-20)
 Frontend-only (`packages/web`, no server/types.ts change): phone-only `Terminal.tsx` additions — a two-row on-screen key bar (`terminalKeys.ts`, extended with `TerminalMod`/`altSeq`/`modSeq` + a collapsed `TERMINAL_KEYS_EXTRA` row of Home/End/PgUp/PgDn/F1–F12), a `--kb-inset` padding fix for iOS Safari's keyboard-overlay behavior (new `keyboardInset.ts`), a shared pinch-driven font-size store (new `terminalFont.ts`), and flick-scroll-with-momentum plus a long-press Paste/Copy menu (new `terminalTouch.ts`, DOM-free arithmetic). All gated on `useIsMobile()`/a phone media block; desktop untouched. Web suite went 494 → 546 tests.

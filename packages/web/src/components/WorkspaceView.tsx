@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import styles from './WorkspaceView.module.css'
 import type {
   Attachment,
@@ -26,6 +26,13 @@ import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
 import type { HandoffPrefill } from '../teamHandoff'
 import type { SecurityScan } from '../types'
 import type { MobileWorkspaceView } from '../mobileNav'
+import {
+  beginSwipe,
+  loadTasksCollapsed,
+  resolveSwipe,
+  saveTasksCollapsed,
+  type SwipeGesture,
+} from '../mobileTaskPanel'
 
 /** Worker-pane tabs — the fixed Cosmos IDE tab set (replaces the draggable grid). */
 type PaneTab = 'worker' | 'files' | 'terminal' | 'chat'
@@ -93,14 +100,6 @@ function collectFilePaths(entries: WorktreeFileNode[], acc: string[] = []): stri
   return acc
 }
 
-/** Sentinel tree key for the no-task Projects-dir listing. */
-const PROJECTS_KEY = '__projects__'
-
-interface Loaded {
-  id: string
-  tree: WorktreeFileTree
-}
-
 /**
  * The Cosmos Workspace CENTER: a task panel (task list + new-task) beside a
  * worker pane (Worker · Files · Terminal · Chat tabs). The persistent app frame
@@ -136,32 +135,37 @@ export function WorkspaceView({
   onDelete,
 }: Props) {
   const [tab, setTab] = useState<PaneTab>('worker')
-  const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const [loaded, setLoaded] = useState<WorktreeFileTree | null>(null)
   const [nonce, setNonce] = useState(0)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [seenPrefill, setSeenPrefill] = useState<HandoffPrefill | null>(null)
+  // Phone shell only: the task-list panel's collapsed flag, driven by the
+  // swipe handle and remembered across reloads (one global setting).
+  const [mobileTasksCollapsed, setMobileTasksCollapsed] = useState(loadTasksCollapsed)
+  const swipeRef = useRef<SwipeGesture | null>(null)
+  // A touch that already resolved must not be re-applied by the synthetic click
+  // the browser fires afterwards; the click path exists for keyboard users.
+  const touchHandledRef = useRef(false)
 
-  const taskId = task?.id ?? null
-  const worktree = task?.worktree ?? null
-  const treeKey = taskId ?? PROJECTS_KEY
-
+  // The Files tab always browses the configured Projects dir — it deliberately
+  // does NOT follow task selection, so a task's worktree is never listed here.
   useEffect(() => {
     let cancelled = false
-    const fetchTree = taskId ? api.getFiles(taskId) : api.getProjectFiles()
-    fetchTree
+    api
+      .getProjectFiles()
       .then((tree) => {
-        if (!cancelled) setLoaded({ id: treeKey, tree })
+        if (!cancelled) setLoaded(tree)
       })
       .catch(() => {
-        if (!cancelled) setLoaded({ id: treeKey, tree: { root: null, entries: [] } })
+        if (!cancelled) setLoaded({ root: null, entries: [] })
       })
     return () => {
       cancelled = true
     }
-  }, [taskId, treeKey, worktree, nonce])
+  }, [nonce])
 
-  const current = loaded && loaded.id === treeKey ? loaded.tree : null
+  const current = loaded
   const hasTree = !!current && current.entries.length > 0
 
   // Clear the selected file when it no longer exists in a freshly fetched tree
@@ -198,7 +202,13 @@ export function WorkspaceView({
   // instead of the tab strip. 'tasks' stacks the task list above the worker log.
   const isMobile = mobileView !== undefined
   const activeTab: PaneTab = isMobile ? (mobileView === 'tasks' ? 'worker' : mobileView) : tab
-  const showTasks = isMobile ? mobileView === 'tasks' : !tasksCollapsed
+  const showTasksView = isMobile ? mobileView === 'tasks' : !tasksCollapsed
+  const showTasks = showTasksView && !(isMobile && mobileTasksCollapsed)
+
+  const setCollapsed = useCallback((next: boolean) => {
+    setMobileTasksCollapsed(next)
+    saveTasksCollapsed(next)
+  }, [])
 
   return (
     <div className={styles.center} data-mobile={isMobile || undefined}>
@@ -235,6 +245,39 @@ export function WorkspaceView({
           />
         </div>
       </aside>
+
+      {/* Phone shell: swipe up on the handle to collapse the task list, swipe
+          down or tap (also the keyboard path) to bring it back. */}
+      {isMobile && showTasksView && (
+        <button
+          type="button"
+          className={styles.tasksHandle}
+          aria-expanded={!mobileTasksCollapsed}
+          aria-label={mobileTasksCollapsed ? 'Show task list' : 'Hide task list'}
+          title={mobileTasksCollapsed ? 'Show task list' : 'Hide task list'}
+          onTouchStart={(e) => {
+            swipeRef.current = beginSwipe(e.touches[0]?.clientY ?? 0)
+          }}
+          onTouchEnd={(e) => {
+            const gesture = swipeRef.current
+            swipeRef.current = null
+            if (!gesture) return
+            touchHandledRef.current = true
+            setCollapsed(
+              resolveSwipe(gesture, e.changedTouches[0]?.clientY ?? gesture.startY, mobileTasksCollapsed),
+            )
+          }}
+          onClick={() => {
+            if (touchHandledRef.current) {
+              touchHandledRef.current = false
+              return
+            }
+            setCollapsed(!mobileTasksCollapsed)
+          }}
+        >
+          <span className={styles.tasksHandleBar} aria-hidden="true" />
+        </button>
+      )}
 
       <section className={styles.pane}>
         {!isMobile && (
@@ -282,7 +325,7 @@ export function WorkspaceView({
             <div className={styles.filesSplit}>
               <div className={styles.fileTreeCol}>
                 <div className={styles.filesToolbar}>
-                  <span className={styles.filesLabel}>{task ? 'Files' : 'Projects'}</span>
+                  <span className={styles.filesLabel}>Files</span>
                   <button
                     type="button"
                     className={styles.refresh}
@@ -302,10 +345,6 @@ export function WorkspaceView({
                       onOpen={openFile}
                       selectedPath={selectedPath}
                     />
-                  ) : task ? (
-                    <div className={styles.paneEmpty}>
-                      No worktree yet — the file tree appears once this task starts working.
-                    </div>
                   ) : (
                     <div className={styles.paneEmpty}>
                       No projects found in the configured directory.
@@ -314,7 +353,7 @@ export function WorkspaceView({
                 </div>
               </div>
               <div className={styles.viewerCol}>
-                <Viewer taskId={taskId} path={selectedPath} />
+                <Viewer path={selectedPath} />
               </div>
             </div>
           </div>
