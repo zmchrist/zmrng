@@ -369,3 +369,29 @@ non-obvious root cause, or is likely to recur. Template in
 - **Files:** `packages/server/vitest.config.ts`, `packages/web/vitest.config.ts`,
   `packages/server/src/runner.ts`, `packages/web/test/KbView.spaces.test.tsx`
 - **Date Found:** 2026-09-21
+
+### `npm install` silently omits devDependencies when the shell has `NODE_ENV=production`
+- **Error:** A fresh worktree's `npm install` reports "added N packages" successfully,
+  but `vitest`, `typescript`, `eslint`, `@testing-library/*`, etc. are simply absent
+  from `node_modules` — `npx vitest run` (or any dev-only binary) then resolves the
+  package from a DIFFERENT, unrelated `node_modules` up the directory tree (e.g. the
+  parent repo's, since `.claude/worktrees/<id>/` nests inside the main checkout), which
+  loads a *second, independent copy* of React while the actual component code under
+  test resolves React from the worktree's own `node_modules` — two React instances in
+  one process produces `TypeError: Cannot read properties of null (reading 'useState')`
+  on literally every hook call, which looks like total environment corruption rather
+  than a dependency-install problem.
+- **Cause:** `npm install` respects `NODE_ENV=production` (a leftover from the
+  orchestrator/harness shell) and quietly runs as if `--omit=dev` were passed, even
+  though nothing on the command line asked for a production install. `npm config get
+  omit` reflects this as `dev` once `NODE_ENV=production` is exported. This is
+  independent of `vitest.config.ts`'s own `env: { NODE_ENV: 'test' }` fix — that only
+  covers the vitest *test-runtime* process env, not the `npm install` step that runs
+  before vitest is even invoked.
+- **Solution:** `npm install --include=dev` (or `unset NODE_ENV` first) in any shell
+  that may have inherited `NODE_ENV=production`. Symptom checklist: `ls node_modules |
+  grep -c vitest` empty, or `node -e "console.log(require.resolve('vitest/package.json'))"`
+  resolving to a path *outside* the current worktree.
+- **Files:** N/A (environment/install step, not a source file) — affects any fresh
+  `npm install` in a worktree nested under the main repo.
+- **Date Found:** 2026-09-22
