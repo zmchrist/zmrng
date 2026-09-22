@@ -41,6 +41,32 @@ workspace (`test:server`, `test:web`, via `npm run test -w @zmrng/<ws>`) rather 
 combined `npm run test --workspaces` step, so a failing workspace is named in the
 summary instead of being hidden behind the other workspace's output.
 
+### Workspace scoping (`--fast` only)
+`verify.sh --fast` — the turn-stop gate — skips a workspace's suite when the turn
+did not touch that workspace, reported as `SKIP  test:web (workspace unchanged)`
+plus a summary line naming why. The web suite is ~59% of the gate's wall time and
+almost all of that is jsdom construction rather than tests (`tests 8.00s` vs
+`environment 37.55s` across 54 files), so a server-only or docs-only turn was
+paying ~37s for nothing.
+
+Scoping may only ever **remove** work it can positively prove is unnecessary.
+The changed-path set is branch commits (`merge-base HEAD origin/main`) plus
+uncommitted work; paths classify as `packages/server/**`, `packages/web/**`, or
+inert (`.agents/**`, `docs/**`, `*.md`). Anything else — root configs, `.claude/**`
+— is **unknown** and forces both. Not a git repo, no `origin/main`, or an empty
+change set also fall back to both.
+
+`typecheck` and `lint` always run for both workspaces: `typecheck` is what catches
+server↔web type-mirror drift, the exact failure scoping could otherwise hide. The
+full pre-PR gate (`verify.sh` with no flag) is **never** scoped. Override:
+`ZMRNG_VERIFY_NO_SCOPE=1`.
+
+Rejected alternatives, both measured: `pool: 'threads'` is only ~10% at equal
+concurrency (its apparent 45% was higher default parallelism), and `isolate: false`
+is 4x faster but fails 81 of 519 tests — the web suite depends on per-file
+isolation. Making the web suite itself cheaper remains open as a separate
+test-hygiene project.
+
 ## What's covered
 - **`phases.ts`** — `parsePlanDecision()` and every control-token regex
   (`READY_RE`, `PLAN_READY_RE`, `VALIDATING_RE`, `BLOCKED_RE`, `PR_RE`), including
