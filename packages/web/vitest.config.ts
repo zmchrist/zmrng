@@ -26,7 +26,7 @@ export default defineConfig({
     poolOptions: {
       forks: { maxForks: MAX_FORKS },
     },
-    environment: 'jsdom',
+    environment: 'happy-dom',
     globals: true,
     setupFiles: ['./test/setup.ts'],
     include: ['test/**/*.test.{ts,tsx}'],
