@@ -199,3 +199,48 @@ Ordered by value/effort. Estimates are against the p50 571% demand.
 Note the direction of 4: the data says the current cap is tuned against the
 wrong resource. Agent concurrency could likely *increase* if validation
 concurrency were capped.
+
+---
+
+## Post-fix re-measurement — 2026-09-22
+
+Server restarted onto the merged build (#183, `3123228`); three tasks driven
+through the pipeline. Sample taken during the **executing** phase so it matches
+the baseline's workload. Raw data: `/tmp/zmrng-perf-heavy` (60 samples x 5s).
+Workload parity: `claude` process mean 3.0 in both windows.
+
+| Metric | Baseline | After | Change | Target |
+|---|---|---|---|---|
+| CPU demand p50 | 571% | 301% | -47% | <400% PASS |
+| CPU demand p90 | 685% | 494% | -28% | — |
+| CPU demand max | 858% | 568% | -34% | — |
+| Load avg p50 | 11.71 | 2.95 | -75% | — |
+| CPU PSI some avg10 p50 | 59.4% | 4.07% | -93% | — |
+| vitest procs mean | 13.9 | 2.8 | -80% | — |
+| vitest procs max | 27 | 9 | -67% | <=8 MISS by 1 |
+| Memory max | 3.8 GB | 3.2 GB | — | non-factor |
+
+Mechanism verified directly in a live worker rather than inferred:
+- T1 — each new worktree seeds only `security_guard.py` (was five doubled).
+- T2 — worker child env carries `ZMRNG_VITEST_MAX_FORKS=2`; API key still absent.
+
+Original thesis re-confirmed: agents are cheap. 3 `claude` processes = 15.6% CPU
+mean. The cost was never concurrency, it was the per-turn gate each agent spawns.
+
+### Caveats
+- `vitest max=9` exceeds the <=8 target by one. Two workspaces x 2 forks x 2
+  concurrent gates = 8, so 9 implies a brief third gate overlap. Cap is holding;
+  the target was slightly optimistic, not the mechanism failing.
+- Red-gate count NOT verified. The event query used returned 0 matches for all
+  three tasks including strings that should appear on a passing gate, so it is
+  almost certainly not matching the event schema -- treat as no data, not zero.
+
+### New defect found and fixed during this window
+`seedHarness.test.ts` ran zmrng's whole validation gate recursively inside one
+unit test: `stop_validate.py` resolves `CLAUDE_PROJECT_DIR` ahead of `cwd`, and
+the real Stop hook exports it pointing at this repo, defeating the test's
+`cwd: worktreeDir` isolation. Deterministic: 61.8s/fail with the var set,
+1.0s/pass without -- which is why manual re-runs always looked green and the
+failure read as a flake. Fixed on `fix/zc/seedharness-nested-gate` (`7e23bdf`).
+Lesson for this loop: reproduce under the *hook's* environment, not an
+interactive shell.
