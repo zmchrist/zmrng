@@ -33,6 +33,64 @@ FAST=0
 STEPS=("typecheck" "lint" "test:server" "test:web")
 [[ $FAST -eq 0 ]] && STEPS+=("build")
 
+# --- workspace scoping (--fast only) ---------------------------------------
+#
+# The turn-stop gate used to run both workspaces' suites on every turn, even
+# when the turn never touched one of them. The web suite alone is ~59% of the
+# gate's wall time, and almost all of that is jsdom construction rather than the
+# tests, so it is not worth paying for a server-only or docs-only turn.
+#
+# This may only ever REMOVE work it can positively prove is unnecessary. Every
+# ambiguous case — not a git repo, no origin/main, a changed path that is
+# neither workspace-scoped nor known-inert — falls back to running both. The
+# full pre-PR gate (no --fast) is never scoped, so the last gate before a PR
+# still runs everything.
+#
+# Override: ZMRNG_VERIFY_NO_SCOPE=1
+NEED_SERVER=1
+NEED_WEB=1
+SCOPE_NOTE=""
+
+changed_paths() {
+    git rev-parse --git-dir >/dev/null 2>&1 || return 1
+    local base
+    base="$(git merge-base HEAD origin/main 2>/dev/null)" || return 1
+    [[ -n "$base" ]] || return 1
+    {
+        git diff --name-only "$base" HEAD 2>/dev/null
+        git status --porcelain 2>/dev/null | sed 's/^.\{3\}//' | tr -d '"'
+    } | sed '/^$/d' | sort -u
+}
+
+scope_steps() {
+    local paths
+    paths="$(changed_paths)" || { SCOPE_NOTE="not a git repo / no origin-main — running both"; return; }
+    [[ -n "$paths" ]] || { SCOPE_NOTE="no changes detected — running both"; return; }
+
+    local server=0 web=0 unknown=0 p
+    while IFS= read -r p; do
+        case "$p" in
+            packages/server/*) server=1 ;;
+            packages/web/*) web=1 ;;
+            # Inert: never affects either suite.
+            .agents/*|docs/*|*.md) ;;
+            *) unknown=1 ;;
+        esac
+    done <<< "$paths"
+
+    if [[ $unknown -eq 1 ]]; then
+        SCOPE_NOTE="changes outside both workspaces — running both"
+        return
+    fi
+    NEED_SERVER=$server
+    NEED_WEB=$web
+    SCOPE_NOTE="scoped to changed workspaces (server=$server web=$web)"
+}
+
+if [[ $FAST -eq 1 && "${ZMRNG_VERIFY_NO_SCOPE:-0}" != "1" ]]; then
+    scope_steps
+fi
+
 HEAD_LINES=40
 TAIL_LINES=20
 FAILED=0
@@ -51,6 +109,11 @@ run_step() {
 rule() { echo "───────────────────────────────────────────────"; }
 
 for step in "${STEPS[@]}"; do
+    if [[ "$step" == "test:server" && $NEED_SERVER -eq 0 ]] \
+    || [[ "$step" == "test:web" && $NEED_WEB -eq 0 ]]; then
+        RESULTS+=("SKIP  $step (workspace unchanged)")
+        continue
+    fi
     out="$(run_step "$step")"
     if [[ $? -eq 0 ]]; then
         RESULTS+=("PASS  $step")
@@ -74,6 +137,7 @@ done
 
 echo "=============== verify summary ================"
 for r in "${RESULTS[@]}"; do echo "  $r"; done
+[[ -n "$SCOPE_NOTE" ]] && echo "  — $SCOPE_NOTE"
 echo "==============================================="
 
 exit $FAILED
