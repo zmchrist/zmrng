@@ -25,6 +25,24 @@ describe('ActivityRail', () => {
     expect(container.textContent).not.toContain('🗨')
   })
 
+  it('draws Workspace, KB and Settings as shared outline svgs, not text glyphs', () => {
+    const { container } = render(
+      <ActivityRail mode="workspace" teamUnread={false} onSelect={noop} onSettings={noop} />,
+    )
+    const expected: Array<[string, string]> = [
+      ['Workspace', 'workspace'],
+      ['Team', 'team'],
+      ['KB', 'kb'],
+      ['Settings', 'settings'],
+    ]
+    for (const [name, icon] of expected) {
+      const svg = screen.getByRole('button', { name }).querySelector('svg')
+      expect(svg?.getAttribute('data-icon')).toBe(icon)
+      expect(svg?.getAttribute('stroke-width')).toBe('1.6')
+    }
+    expect(container.textContent).not.toMatch(/[≣❏⚙]/)
+  })
+
   it('hides the unread orb by default', () => {
     render(<ActivityRail mode="workspace" teamUnread={false} onSelect={noop} onSettings={noop} />)
     expect(screen.queryByTestId('team-unread-orb')).toBeNull()
