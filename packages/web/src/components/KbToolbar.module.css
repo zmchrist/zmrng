@@ -1,0 +1,155 @@
+/* Formatting bar above the KB page editor. Chrome is design tokens ONLY —
+   the literal hexes in this feature live in `kbEdits.ts`'s palettes, because
+   those are document content rather than theme. */
+
+.toolbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.group + .group {
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.btn:focus-visible {
+  outline: none;
+  border-color: var(--accent-line);
+  color: var(--text);
+}
+
+.btn[aria-expanded='true'] {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.glyph {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* ---- popovers (hand-rolled: a native dropdown cannot open without focus) ---- */
+
+.menuWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  backdrop-filter: blur(var(--blur));
+  box-shadow: var(--shadow);
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.menuItem:hover {
+  background: var(--surface-hover);
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 2px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.swatch:hover,
+.swatch:focus-visible {
+  outline: none;
+  border-color: var(--accent-line);
+  transform: scale(1.1);
+}
+
+/* ---- phone: scroll the bar sideways, keep 44px touch targets ---- */
+
+@media (max-width: 768px) {
+  .toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .btn {
+    min-width: 44px;
+    height: 44px;
+    flex: none;
+  }
+  .menuItem {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .swatch {
+    width: 36px;
+    height: 36px;
+  }
+}

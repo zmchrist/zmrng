@@ -165,3 +165,144 @@ describe('toggleChecklistLine', () => {
     expect(toggleChecklistLine(body, 0)).toBe(body)
   })
 })
+
+describe('renderPageMarkdown — extended inline conventions', () => {
+  it('renders ~~strike~~ as <del>', () => {
+    expect(renderPageMarkdown('a ~~b~~ c')).toBe('<p>a <del>b</del> c</p>')
+  })
+
+  it('renders ==highlight== as <mark>', () => {
+    expect(renderPageMarkdown('a ==b== c')).toBe('<p>a <mark>b</mark> c</p>')
+  })
+
+  it('renders the allow-listed <u> tag as a real element', () => {
+    expect(renderPageMarkdown('a <u>b</u> c')).toBe('<p>a <u>b</u> c</p>')
+  })
+
+  it('renders an allow-listed colored span, preserving the hex', () => {
+    expect(renderPageMarkdown('<span style="color:#ff0000">red</span>')).toBe(
+      '<p><span style="color:#ff0000">red</span></p>',
+    )
+  })
+
+  it('renders an allow-listed colored mark, preserving the hex', () => {
+    expect(renderPageMarkdown('<mark style="background:#ffff00">hi</mark>')).toBe(
+      '<p><mark style="background:#ffff00">hi</mark></p>',
+    )
+  })
+
+  it('renders an explicit <mark> tag as a real element', () => {
+    expect(renderPageMarkdown('<mark>hi</mark>')).toBe('<p><mark>hi</mark></p>')
+  })
+})
+
+describe('renderPageMarkdown — ordered lists', () => {
+  it('groups a run of "1." lines into one <ol>, stripping the markers', () => {
+    expect(renderPageMarkdown('1. one\n2. two')).toBe('<ol><li>one</li><li>two</li></ol>')
+  })
+
+  it('accepts the "1)" marker style too', () => {
+    expect(renderPageMarkdown('1) one\n2) two')).toBe('<ol><li>one</li><li>two</li></ol>')
+  })
+
+  it('separates an ordered list from surrounding paragraphs', () => {
+    expect(renderPageMarkdown('before\n1. one\n2. two\nafter')).toBe(
+      '<p>before</p><ol><li>one</li><li>two</li></ol><p>after</p>',
+    )
+  })
+
+  it('leaves bullet and checklist detection untouched', () => {
+    expect(renderPageMarkdown('- one')).toBe('<ul><li>one</li></ul>')
+    expect(renderPageMarkdown('- [ ] one')).toContain('kb-checklist')
+  })
+
+  it('does not disturb paragraph grouping for a number that is not at line start', () => {
+    expect(renderPageMarkdown('costs 1. fifty\nand more')).toBe(
+      '<p>costs 1. fifty<br />and more</p>',
+    )
+  })
+
+  it('does not treat "1.5" (no space after the dot) as a list item', () => {
+    expect(renderPageMarkdown('1.5 million')).toBe('<p>1.5 million</p>')
+  })
+})
+
+describe('renderPageMarkdown — links', () => {
+  it('renders [text](https://…) as an anchor with rel="noopener noreferrer"', () => {
+    expect(renderPageMarkdown('[site](https://example.com)')).toBe(
+      '<p><a href="https://example.com" rel="noopener noreferrer">site</a></p>',
+    )
+  })
+
+  it('accepts http, mailto, a same-document anchor and a relative path', () => {
+    expect(renderPageMarkdown('[a](http://x.test)')).toContain('href="http://x.test"')
+    expect(renderPageMarkdown('[a](mailto:x@y.test)')).toContain('href="mailto:x@y.test"')
+    expect(renderPageMarkdown('[a](#anchor)')).toContain('href="#anchor"')
+    expect(renderPageMarkdown('[a](/local/page)')).toContain('href="/local/page"')
+  })
+
+  it('formats inline markup inside the link label', () => {
+    expect(renderPageMarkdown('[**bold**](https://x.test)')).toBe(
+      '<p><a href="https://x.test" rel="noopener noreferrer"><strong>bold</strong></a></p>',
+    )
+  })
+})
+
+describe('renderPageMarkdown — security: the allow-list must not widen', () => {
+  const literal = (body: string, needle: string): void => {
+    const html = renderPageMarkdown(body)
+    expect(html).toContain(needle)
+  }
+
+  it('keeps the pinned <script> case escaped', () => {
+    expect(renderPageMarkdown('<script>alert(1)</script>')).toBe(
+      '<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>',
+    )
+  })
+
+  it('rejects an extra attribute on an allow-listed tag', () => {
+    literal('<span onclick="x()">a</span>', '&lt;span onclick=')
+    literal('<u class="x">a</u>', '&lt;u class=')
+    literal('<mark id="x">a</mark>', '&lt;mark id=')
+  })
+
+  it('rejects a named color (only #RRGGBB is allowed)', () => {
+    literal('<span style="color:red">a</span>', '&lt;span style=&quot;color:red&quot;&gt;')
+  })
+
+  it('rejects a 3-digit hex', () => {
+    literal('<span style="color:#fff">a</span>', '&lt;span style=&quot;color:#fff&quot;&gt;')
+  })
+
+  it('rejects an extra CSS declaration smuggled after the hex', () => {
+    literal('<span style="color:#ff0000;position:fixed">a</span>', '&lt;span style=')
+  })
+
+  it('rejects a non-allow-listed tag', () => {
+    literal('<img src=x onerror=alert(1)>', '&lt;img src=x onerror=alert(1)&gt;')
+  })
+
+  it('leaves a javascript: link as literal text', () => {
+    expect(renderPageMarkdown('[x](javascript:alert(1))')).not.toContain('<a ')
+    expect(renderPageMarkdown('[x](javascript:alert(1))')).toContain('[x](javascript:alert(1')
+  })
+
+  it('leaves a data: link as literal text', () => {
+    expect(renderPageMarkdown('[x](data:text/html,<b>hi</b>)')).not.toContain('<a ')
+  })
+
+  it('rejects a scheme broken up by whitespace or control characters', () => {
+    expect(renderPageMarkdown('[x](java\tscript:alert(1))')).not.toContain('<a ')
+    expect(renderPageMarkdown('[x](  javascript:alert(1))')).not.toContain('<a ')
+  })
+
+  it('rejects a protocol-relative URL rather than treating it as a relative path', () => {
+    expect(renderPageMarkdown('[x](//evil.example.com)')).not.toContain('<a ')
+  })
+
+  it('escapes quotes inside an accepted href so it cannot break out of the attribute', () => {
+    expect(renderPageMarkdown('[x](https://a.test/"onmouseover="alert(1))')).not.toContain(
+      'onmouseover="alert',
+    )
+  })
+})
