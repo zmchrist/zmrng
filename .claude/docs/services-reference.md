@@ -114,7 +114,7 @@ The phase state machine and orchestration.
   `ZMRNG_READY` the clarify child is replaced by a planning child (always `opus`/`high`,
   seeded with the condensed clarify transcript); on `ZMRNG_PLAN_READY` it is replaced by
   an execute child on the plan's chosen model/effort, which runs through validate → PR.
-- **Execute lanes:** cap = `config.maxLanes` (`ZMRNG_MAX_LANES`, default 2). A task takes
+- **Execute lanes:** cap = `config.maxLanes` (`ZMRNG_MAX_LANES`, default 4). A task takes
   a lane at `ZMRNG_READY`; extra READY tasks park in `planning` with `queued=true` in
   `executeQueue`; `freeLane` (on PR/done/cancel/fail) promotes the next via
   `beginPhaseForFlow` — normally `beginPlan`/`beginDirect`, but a queued **restart**
@@ -229,7 +229,7 @@ PR (ADR-0001). The task **stays in `validating`** throughout — there is delibe
   `mergeSecurityPolicy(config.security, repoOverride)`; if `enabled === false` →
   `openPrKickoff` + `securityStatus:'skipped'`, no scan row (the only silent skip). (2)
   **D3:** `freeLane(task.id)` *before* awaiting the scan, so the deterministic machine
-  work never idles one of the 2 lanes. (3) preflight the binaries; missing/unprovisionable
+  work never idles one of the lanes. (3) preflight the binaries; missing/unprovisionable
   → `onBlocked`. (4) `await scanFactory({ worktree, baseRef: defaultBranch, policy, sast })`.
   (5) normalize + `evaluateThreshold`. (6) persist a `security_scans` row (round, verdict,
   findings JSON, tool versions), `patch(securityStatus)`, emit a `security` event. (7)

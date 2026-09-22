@@ -676,7 +676,14 @@ function buildConfig(): Config {
     repoWarnings: warnings,
     agents: resolveAgents({ configDir: CONFIG_DIR, env: process.env }),
     defaultModel: process.env.ZMRNG_MODEL ?? 'opus',
-    maxLanes: Number(process.env.ZMRNG_MAX_LANES ?? 2),
+    // 4, raised from 2. Profiling the fleet showed agents are nearly free —
+    // 3 concurrent `claude` workers burned 15.6% of one core between them,
+    // being I/O-bound on the API. The CPU cost was never the agents, it was the
+    // validation gate each one spawns per turn, which the lane cap does not
+    // bound. With the gate itself now cheaper (seeded-hook dedupe, vitest fork
+    // cap, workspace scoping) the old cap of 2 was throttling the cheap
+    // resource. See .agents/notes/resource-usage-analysis.md.
+    maxLanes: Number(process.env.ZMRNG_MAX_LANES ?? 4),
     repoRoot: REPO_ROOT,
     harnessDir: resolveHarnessDir(process.env, REPO_ROOT),
     dataDir: DATA_DIR,
