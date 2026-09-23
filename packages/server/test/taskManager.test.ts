@@ -47,6 +47,14 @@ class FakeRunner implements RunnerLike {
   result(text: string, isError = false): void {
     this.cb.onResult(text, isError, undefined)
   }
+  /** Simulate the worker delegating to a subagent (a `Task` tool use). */
+  subagent(type: string, summary = 'working'): void {
+    this.cb.onToolUse('Task', summary, true, type)
+  }
+  /** Simulate a subagent's terminal result line (the event carries no id). */
+  subagentResult(type: string, summary = 'finished', isError = false): void {
+    this.cb.onSubagentResult(type, summary, isError)
+  }
 }
 
 /**
@@ -881,5 +889,143 @@ describe('default model/effort resolution (D2/D4)', () => {
     expect(status(t.id)).toBe('executing')
     expect(latest().opts.model).toBe('opus')
     expect(latest().opts.effort).toBe('high')
+  })
+})
+
+describe('TaskManager.laneSnapshot (lane viewer rows)', () => {
+  it('reports the cap from config.maxLanes, the lane holders, and the queue in promotion order', async () => {
+    config.maxLanes = 1
+
+    const a = await startTask('task A')
+    expect(mgr.laneSnapshot().execute).toEqual({ cap: 1, holders: [], queued: [] })
+
+    latest().say('ZMRNG_READY') // A takes the only lane
+    expect(mgr.laneSnapshot().execute).toEqual({ cap: 1, holders: [a], queued: [] })
+
+    const b = await startTask('task B')
+    latest().say('ZMRNG_READY') // no lane → queued
+    const c = await startTask('task C')
+    latest().say('ZMRNG_READY') // no lane → queued behind B
+    expect(mgr.laneSnapshot().execute).toEqual({ cap: 1, holders: [a], queued: [b, c] })
+
+    // Freeing A's lane promotes B (FIFO), leaving C still queued.
+    const aPlan = created.find((r) => r.sent.some((m) => /PLAN PHASE/.test(m)))!
+    aPlan.say('ZMRNG_PLAN_READY model=sonnet effort=medium plan=p.md')
+    latest().say('https://github.com/zmchrist/zmrng/pull/1')
+    expect(status(a)).toBe('review')
+    expect(mgr.laneSnapshot().execute).toEqual({ cap: 1, holders: [b], queued: [c] })
+  })
+
+  it('carries the RESOLVED model/effort/style the child was actually spawned with', async () => {
+    const id = await startTask()
+    // Clarify forces sonnet regardless of the task row (whose model stays NULL).
+    expect(db.getTask(id)!.model).toBeNull()
+    const clarifyRow = mgr.laneSnapshot().workers[0]
+    expect(clarifyRow).toMatchObject({ taskId: id, model: 'sonnet', effort: 'high', style: 'normal' })
+    expect(clarifyRow.holdsLane).toBe(false) // clarify is uncapped — it holds no lane
+    expect(new Date(clarifyRow.startedAt).toISOString()).toBe(clarifyRow.startedAt)
+
+    // The plan phase always spawns opus/high, and it DOES hold a lane.
+    latest().say('ZMRNG_READY')
+    const planRow = mgr.laneSnapshot().workers[0]
+    expect(planRow).toMatchObject({ taskId: id, model: 'opus', effort: 'high', holdsLane: true })
+  })
+
+  it('adds a running subagent child row and flips it to done on the matching result', async () => {
+    await startTask()
+    const clarify = latest()
+    clarify.subagent('zmrng-qa', 'run the suite')
+    const running = mgr.laneSnapshot().workers[0].subagents
+    expect(running).toHaveLength(1)
+    expect(running[0]).toMatchObject({ type: 'zmrng-qa', status: 'running', description: 'run the suite' })
+    expect(running[0].id).toBeTruthy()
+
+    clarify.subagentResult('zmrng-qa', 'suite green')
+    const done = mgr.laneSnapshot().workers[0].subagents
+    expect(done).toHaveLength(1)
+    expect(done[0]).toMatchObject({ type: 'zmrng-qa', status: 'done', description: 'suite green' })
+    expect(done[0].id).toBe(running[0].id) // same row, flipped — not a second one
+  })
+
+  it('marks a subagent row error when its result is an error, and matches FIFO by type', async () => {
+    await startTask()
+    const clarify = latest()
+    clarify.subagent('zmrng-qa', 'first')
+    clarify.subagent('zmrng-qa', 'second')
+    clarify.subagent('code-reviewer', 'review')
+
+    // The events carry no id: the first qa result closes the OLDER qa row.
+    clarify.subagentResult('zmrng-qa', 'boom', true)
+    const rows = mgr.laneSnapshot().workers[0].subagents
+    expect(rows.map((r) => [r.type, r.status, r.description])).toEqual([
+      ['zmrng-qa', 'error', 'boom'],
+      ['zmrng-qa', 'running', 'second'],
+      ['code-reviewer', 'running', 'review'],
+    ])
+  })
+
+  it('ignores a subagent result with no matching running row (never throws)', async () => {
+    await startTask()
+    expect(() => latest().subagentResult('zmrng-qa', 'orphan result')).not.toThrow()
+    expect(mgr.laneSnapshot().workers[0].subagents).toEqual([])
+  })
+
+  it('a phase handoff resets the subagent list (the fresh spawn starts empty)', async () => {
+    await startTask()
+    const clarify = latest()
+    clarify.subagent('zmrng-qa', 'clarify-era subagent')
+    expect(mgr.laneSnapshot().workers[0].subagents).toHaveLength(1)
+
+    clarify.say('ZMRNG_READY') // replaceChild → fresh planning spawn
+    expect(mgr.laneSnapshot().workers[0].subagents).toEqual([])
+  })
+
+  it('bounds the retained rows: every running row survives, oldest COMPLETED dropped first', async () => {
+    await startTask()
+    const r = latest()
+    // One long-lived running row, then far more completed rows than the cap.
+    r.subagent('pinned', 'still going')
+    for (let i = 0; i < 60; i++) {
+      r.subagent('worker', `job ${i}`)
+      r.subagentResult('worker', `job ${i} done`)
+    }
+    const rows = mgr.laneSnapshot().workers[0].subagents
+    expect(rows.length).toBeLessThanOrEqual(50)
+    // The running row is never evicted...
+    expect(rows.some((x) => x.type === 'pinned' && x.status === 'running')).toBe(true)
+    // ...and the newest completed rows are what is kept.
+    expect(rows[rows.length - 1].description).toBe('job 59 done')
+    expect(rows.some((x) => x.description === 'job 0 done')).toBe(false)
+  })
+
+  it('drops the worker row once the task reaches review (no live runner, no stale row)', async () => {
+    const id = await startTask('to review', 'direct')
+    latest().say('ZMRNG_READY')
+    expect(mgr.laneSnapshot().workers.map((w) => w.taskId)).toEqual([id])
+    latest().say('https://github.com/zmchrist/zmrng/pull/9')
+    expect(status(id)).toBe('review')
+    expect(mgr.laneSnapshot().workers).toEqual([])
+    expect(mgr.laneSnapshot().execute.holders).toEqual([])
+  })
+})
+
+describe('TaskManager onLanesChange (lane emitter notify seam)', () => {
+  it('fires on spawn, on subagent activity, on lane acquire and on exit', async () => {
+    let calls = 0
+    const m = new TaskManager(db, (e) => events.push(e), factory, scan.factory, () => {
+      calls++
+    })
+    const task = m.createTask('notify me', 'do it', undefined, undefined, 'normal', 'sandbox', 'direct')
+    await m.start(task.id)
+    const afterStart = calls
+    expect(afterStart).toBeGreaterThan(0)
+
+    latest().subagent('zmrng-qa')
+    expect(calls).toBeGreaterThan(afterStart)
+    const afterSub = calls
+
+    latest().say('ZMRNG_READY') // handoff: lane acquired + fresh spawn
+    expect(calls).toBeGreaterThan(afterSub)
+    m.shutdown()
   })
 })

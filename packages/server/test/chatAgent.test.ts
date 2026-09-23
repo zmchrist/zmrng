@@ -405,3 +405,109 @@ describe('voiceSystemPrompt', () => {
     expect(prompt).not.toMatch(/pull request/i)
   })
 })
+
+// A deterministic id seam for the session rows (mirrors TerminalManager's).
+let chatSeq: number
+const chatIds = (): (() => string) => {
+  chatSeq = 0
+  return () => `chat-${++chatSeq}`
+}
+
+/** One usage delta, shaped like the `ResultUsage` a `result` line carries. */
+const usage = (n: number): import('../src/types.js').TaskUsage => ({
+  tokensIn: n,
+  tokensOut: n * 2,
+  tokensCache: n * 3,
+  costUsd: n / 100,
+  turns: 1,
+})
+
+describe('ChatManager.snapshot (lane viewer rows)', () => {
+  it('reports one row per live session with its id/model/effort/style/repoId/voice', () => {
+    const mgr = new ChatManager(factory, chatIds())
+    mgr.create({ model: 'opus', effort: 'high', style: 'caveman-full', repoId: 'repo-a' }, noopCallbacks())
+    mgr.create({ model: 'sonnet', effort: 'low', style: 'normal', voice: true }, noopCallbacks())
+    const rows = mgr.snapshot()
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({
+      id: 'chat-1',
+      model: 'opus',
+      effort: 'high',
+      style: 'caveman-full',
+      repoId: 'repo-a',
+      voice: false,
+    })
+    expect(rows[1]).toMatchObject({ id: 'chat-2', model: 'sonnet', repoId: null, voice: true })
+    expect(new Date(rows[0].startedAt).toISOString()).toBe(rows[0].startedAt)
+    expect(rows[0].usage).toEqual({ tokensIn: 0, tokensOut: 0, tokensCache: 0, costUsd: 0, turns: 0 })
+  })
+
+  it('reports repoId null for both an omitted and an unresolvable repo id (Projects root)', () => {
+    const mgr = new ChatManager(factory, chatIds())
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal', repoId: 'nope' }, noopCallbacks())
+    expect(mgr.snapshot().map((r) => r.repoId)).toEqual([null, null])
+  })
+
+  it('accumulates usage across results while passing the callback through unchanged', () => {
+    const mgr = new ChatManager(factory, chatIds())
+    const seen: Array<[string, boolean, unknown]> = []
+    mgr.create(
+      { model: 'sonnet', effort: 'medium', style: 'normal' },
+      noopCallbacks({ onResult: (t, e, u) => seen.push([t, e, u]) }),
+    )
+    created[0].cb.onResult('first', false, usage(10))
+    created[0].cb.onResult('second', true, usage(5))
+    const acc = mgr.snapshot()[0].usage
+    expect(acc).toMatchObject({ tokensIn: 15, tokensOut: 30, tokensCache: 45, turns: 2 })
+    // Float summation — compare the cost within tolerance, not bit-for-bit.
+    expect(acc.costUsd).toBeCloseTo(0.15, 10)
+    // Pass-through contract: same args, always called, in order.
+    expect(seen).toEqual([
+      ['first', false, usage(10)],
+      ['second', true, usage(5)],
+    ])
+  })
+
+  it('tolerates a result with no usage (nothing to fold in)', () => {
+    const mgr = new ChatManager(factory, chatIds())
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
+    created[0].cb.onResult('no usage', false, undefined)
+    expect(mgr.snapshot()[0].usage.turns).toBe(0)
+  })
+
+  it('drops an exited session row and clears every row on killAll', () => {
+    const mgr = new ChatManager(factory, chatIds())
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
+    created[0].cb.onExit(0, null)
+    expect(mgr.snapshot().map((r) => r.id)).toEqual(['chat-2'])
+    mgr.killAll()
+    expect(mgr.snapshot()).toEqual([])
+  })
+})
+
+describe('ChatManager onChange (lane emitter notify seam)', () => {
+  it('fires on create, on a usage-carrying result, on exit and on killAll', () => {
+    let calls = 0
+    const mgr = new ChatManager(factory, chatIds(), () => {
+      calls++
+    })
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
+    expect(calls).toBe(1)
+    created[0].cb.onResult('done', false, usage(1))
+    expect(calls).toBe(2)
+    created[0].cb.onExit(0, null)
+    expect(calls).toBe(3)
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
+    mgr.killAll()
+    expect(calls).toBe(5)
+  })
+
+  it('defaults both new params so existing one-arg constructions are unchanged', () => {
+    const mgr = new ChatManager(factory)
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
+    expect(mgr.snapshot()).toHaveLength(1)
+    expect(mgr.snapshot()[0].id).toMatch(/^[0-9a-f-]{36}$/)
+  })
+})

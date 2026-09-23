@@ -37,6 +37,9 @@ import {
   type CaveStyle,
   type FlowMode,
   type Attachment,
+  type LaneOccupancy,
+  type LaneSubagent,
+  type LaneWorker,
 } from './types.js'
 
 // ---- detection ----
@@ -520,8 +523,49 @@ export function resumeKickoff(
   return preamble + transcriptBlock + executeKickoff(branch, defaultBranch, task.planPath)
 }
 
+/**
+ * Per-task cap on retained subagent rows in the lane snapshot. A long execute
+ * phase can delegate dozens of times, and the whole frame is re-sent on every
+ * change — so completed rows are trimmed oldest-first past this bound. Running
+ * rows are NEVER dropped: an in-flight subagent is exactly what the panel is
+ * there to show.
+ */
+const MAX_SUBAGENT_ROWS = 50
+
+/**
+ * Enforce `MAX_SUBAGENT_ROWS` in place: drop COMPLETED rows oldest-first until
+ * the list fits. A list of nothing but running rows is left untouched (over the
+ * bound is preferable to hiding live work).
+ */
+function trimSubagents(rows: LaneSubagent[]): void {
+  while (rows.length > MAX_SUBAGENT_ROWS) {
+    const oldestDone = rows.findIndex((r) => r.status !== 'running')
+    if (oldestDone === -1) return
+    rows.splice(oldestDone, 1)
+  }
+}
+
+/**
+ * What the manager remembers about one live task worker for the lane viewer:
+ * the values its child was ACTUALLY spawned with (the task row's model/effort
+ * stay NULL until a phase resolves them) plus its subagent child rows. Written
+ * fresh in `spawn()`, so a phase handoff naturally clears the previous phase's
+ * subagents; deleted alongside the runner, so it never outlives its child.
+ */
+interface WorkerMeta {
+  model: string
+  effort: EffortLevel
+  style: CaveStyle
+  startedAt: string
+  subagents: LaneSubagent[]
+}
+
 export class TaskManager {
   private runners = new Map<string, RunnerLike>()
+  /** Lane-viewer metadata for each live runner, keyed by task id. */
+  private workerMeta = new Map<string, WorkerMeta>()
+  /** Monotonic counter behind the server-assigned subagent row ids. */
+  private subagentSeq = 0
   /** Tasks holding an autonomous lane (held from planning through to the PR). */
   private executeLanes = new Set<string>()
   private executeQueue: string[] = []
@@ -575,12 +619,17 @@ export class TaskManager {
    *   real semgrep/osv-scanner runner; tests inject a `FakeScanRunner` returning
    *   fixture JSON so the gate state machine never spawns real scanners, hits the
    *   network, or needs the binaries installed.
+   * @param onLanesChange fired whenever live lane/worker state changes (spawn,
+   *   exit, subagent activity, lane acquire/release, any task patch) so the lane
+   *   emitter can coalesce a rebuild. Optional and trailing: existing
+   *   four-argument constructions are unaffected.
    */
   constructor(
     private db: Db,
     private broadcast: (e: WsEvent) => void,
     private runnerFactory: RunnerFactory = defaultRunnerFactory,
     private scanFactory: ScanRunnerFactory = defaultScanRunnerFactory,
+    private onLanesChange: () => void = () => {},
   ) {}
 
   // ---- helpers ----
@@ -593,6 +642,7 @@ export class TaskManager {
   private patch(taskId: string, patch: TaskPatch): Task | undefined {
     const task = this.db.updateTask(taskId, patch, now())
     if (task) this.broadcast({ type: 'task', task })
+    this.onLanesChange()
     return task
   }
 
@@ -607,6 +657,7 @@ export class TaskManager {
     this.emitEvent(taskId, 'error', { sub: 'error', text: note })
     this.runners.get(taskId)?.kill()
     this.runners.delete(taskId)
+    this.workerMeta.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
     this.resuming.delete(taskId)
@@ -620,6 +671,7 @@ export class TaskManager {
   /** Release an autonomous lane (idempotent) and promote the next queued task. */
   private freeLane(taskId: string): void {
     if (!this.executeLanes.delete(taskId)) return
+    this.onLanesChange()
     const next = this.executeQueue.shift()
     if (!next) return
     const task = this.db.getTask(next)
@@ -632,9 +684,21 @@ export class TaskManager {
         task.status === 'executing' ||
         task.status === 'validating')
     ) {
-      this.executeLanes.add(task.id)
+      this.takeLane(task.id)
       this.beginPhaseForFlow(task)
     }
+  }
+
+  /** Take an execute lane for a task, notifying the lane viewer. */
+  private takeLane(taskId: string): void {
+    this.executeLanes.add(taskId)
+    this.onLanesChange()
+  }
+
+  /** Park a task at the back of the execute queue, notifying the lane viewer. */
+  private queueLane(taskId: string): void {
+    this.executeQueue.push(taskId)
+    this.onLanesChange()
   }
 
   /** Intentionally kill a task's current child for a phase handoff (no crash-fail). */
@@ -644,6 +708,7 @@ export class TaskManager {
     this.replacing.add(taskId)
     runner.kill()
     this.runners.delete(taskId)
+    this.workerMeta.delete(taskId)
   }
 
   // ---- spawn / event wiring ----
@@ -658,6 +723,19 @@ export class TaskManager {
     repoPath: string,
     defaultBranch: string,
   ): void {
+    // Written (not merged) per spawn: a phase handoff (`replaceChild` → a fresh
+    // `spawn`) therefore starts with an empty subagent list, and the row always
+    // reports the model/effort/style this child was ACTUALLY given. Captured in
+    // the callback closures below so a late line from a replaced child writes
+    // into its own orphaned meta instead of polluting the new phase's rows.
+    const meta: WorkerMeta = {
+      model,
+      effort,
+      style,
+      startedAt: new Date().toISOString(),
+      subagents: [],
+    }
+    this.workerMeta.set(task.id, meta)
     const runner = this.runnerFactory(
       {
         cwd,
@@ -673,22 +751,26 @@ export class TaskManager {
         onAssistantText: (text) => this.onAssistant(task.id, text),
         onPartial: (text) => this.broadcast({ type: 'partial', taskId: task.id, text }),
         onResult: (text, isError, usage) => this.onResult(task.id, text, isError, usage),
-        onToolUse: (name, summary, isSubagent, subagentType) =>
+        onToolUse: (name, summary, isSubagent, subagentType) => {
           this.emitEvent(task.id, 'claude', {
             sub: isSubagent ? 'subagent' : 'tool',
             tool: name,
             summary,
             subagentType,
             actor: isSubagent ? (subagentType ?? 'subagent') : 'main',
-          }),
-        onSubagentResult: (subagentType, summary, isError) =>
+          })
+          if (isSubagent) this.startSubagent(meta, subagentType ?? 'subagent', summary)
+        },
+        onSubagentResult: (subagentType, summary, isError) => {
           this.emitEvent(task.id, 'claude', {
             sub: 'subagent_result',
             subagentType,
             actor: subagentType,
             summary,
             isError,
-          }),
+          })
+          this.finishSubagent(meta, subagentType, summary, isError)
+        },
         onExit: (code) => this.onExit(task.id, code),
         onSpawnError: (err) => {
           this.fail(task.id, `failed to spawn claude: ${err.message}`)
@@ -696,6 +778,76 @@ export class TaskManager {
       },
     )
     this.runners.set(task.id, runner)
+    this.onLanesChange()
+  }
+
+  /** Append a `running` subagent row for this worker (bounded, oldest completed
+   *  rows evicted first). */
+  private startSubagent(meta: WorkerMeta, type: string, description: string): void {
+    meta.subagents.push({
+      id: `sa-${++this.subagentSeq}`,
+      type,
+      status: 'running',
+      description,
+      startedAt: new Date().toISOString(),
+    })
+    trimSubagents(meta.subagents)
+    this.onLanesChange()
+  }
+
+  /**
+   * Close the OLDEST still-`running` row of the same type. The stream-json
+   * events carry no subagent id — `onToolUse(..., isSubagent, subagentType)`
+   * starts one and `onSubagentResult(subagentType, ...)` ends one — so matching
+   * is necessarily FIFO by type. With two concurrent subagents of the same type
+   * the first result closes the older row; that is the honest limit of the event
+   * stream, not something a downstream fix can recover. A result with no open
+   * row of that type is simply ignored.
+   */
+  private finishSubagent(
+    meta: WorkerMeta,
+    type: string,
+    description: string,
+    isError: boolean,
+  ): void {
+    const row = meta.subagents.find((r) => r.type === type && r.status === 'running')
+    if (!row) return
+    row.status = isError ? 'error' : 'done'
+    row.description = description
+    trimSubagents(meta.subagents)
+    this.onLanesChange()
+  }
+
+  /**
+   * The live lane/worker half of the lane snapshot. Worker rows are keyed off
+   * `this.runners`, so a dead runner can never render a stale row (including a
+   * boot-time orphan: a fresh `TaskManager` has an empty `runners` map and
+   * contributes nothing).
+   */
+  laneSnapshot(): { execute: LaneOccupancy; workers: LaneWorker[] } {
+    const workers: LaneWorker[] = []
+    for (const taskId of this.runners.keys()) {
+      const meta = this.workerMeta.get(taskId)
+      if (!meta) continue
+      workers.push({
+        taskId,
+        model: meta.model,
+        effort: meta.effort,
+        style: meta.style,
+        startedAt: meta.startedAt,
+        holdsLane: this.executeLanes.has(taskId),
+        // Copied out so a later append/flip can't mutate an already-emitted frame.
+        subagents: meta.subagents.map((r) => ({ ...r })),
+      })
+    }
+    return {
+      execute: {
+        cap: config.maxLanes,
+        holders: [...this.executeLanes],
+        queued: [...this.executeQueue],
+      },
+      workers,
+    }
   }
 
   private onAssistant(taskId: string, text: string): void {
@@ -802,12 +954,12 @@ export class TaskManager {
     const parked: TaskStatus = task.flow === 'plan' ? 'planning' : 'executing'
     this.transition(task.id, parked)
     if (this.executeLanes.size < config.maxLanes) {
-      this.executeLanes.add(task.id)
+      this.takeLane(task.id)
       const fresh = this.db.getTask(task.id)
       if (fresh) this.beginPhaseForFlow(fresh)
     } else {
       this.patch(task.id, { queued: true })
-      this.executeQueue.push(task.id)
+      this.queueLane(task.id)
       this.emitEvent(task.id, 'status', {
         sub: 'status',
         note: `queued — ${this.executeLanes.size}/${config.maxLanes} lanes busy`,
@@ -1079,13 +1231,13 @@ export class TaskManager {
       task.flow === 'direct',
     )
     if (this.executeLanes.size < config.maxLanes) {
-      this.executeLanes.add(task.id)
+      this.takeLane(task.id)
       this.emitEvent(task.id, 'status', { sub: 'status', note: 'security fix round — lane acquired' })
       this.runners.get(task.id)?.send(fixText)
     } else {
       this.securityFixPending.set(task.id, fixText)
       this.patch(task.id, { queued: true })
-      this.executeQueue.push(task.id)
+      this.queueLane(task.id)
       this.emitEvent(task.id, 'status', {
         sub: 'status',
         note: `security fix round queued — ${this.executeLanes.size}/${config.maxLanes} lanes busy`,
@@ -1121,12 +1273,16 @@ export class TaskManager {
     // Autonomous work is done; stop the process but keep the worktree for review.
     this.runners.get(task.id)?.kill()
     this.runners.delete(task.id)
+    this.workerMeta.delete(task.id)
+    this.onLanesChange()
   }
 
   private onExit(taskId: string, code: number | null): void {
     // An intentional handoff kill is not a crash.
     if (this.replacing.delete(taskId)) return
     this.runners.delete(taskId)
+    this.workerMeta.delete(taskId)
+    this.onLanesChange()
     const task = this.db.getTask(taskId)
     if (!task) return
     this.freeLane(taskId)
@@ -1239,12 +1395,12 @@ export class TaskManager {
     }
     // planning / executing / validating hold an execute lane.
     if (this.executeLanes.size < config.maxLanes) {
-      this.executeLanes.add(taskId)
+      this.takeLane(taskId)
       this.beginResume(task)
     } else {
       this.resuming.add(taskId)
       this.patch(taskId, { queued: true, stale: false })
-      this.executeQueue.push(taskId)
+      this.queueLane(taskId)
       this.emitEvent(taskId, 'status', {
         sub: 'status',
         note: `queued — ${this.executeLanes.size}/${config.maxLanes} lanes busy`,
@@ -1436,6 +1592,7 @@ export class TaskManager {
     if (!task) throw new Error('task not found')
     this.runners.get(taskId)?.kill()
     this.runners.delete(taskId)
+    this.workerMeta.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
     this.resuming.delete(taskId)
@@ -1475,6 +1632,7 @@ export class TaskManager {
     if (!task) throw new Error('task not found')
     this.runners.get(taskId)?.kill()
     this.runners.delete(taskId)
+    this.workerMeta.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
     this.resuming.delete(taskId)
@@ -1508,6 +1666,7 @@ export class TaskManager {
     }
     this.runners.get(taskId)?.kill()
     this.runners.delete(taskId)
+    this.workerMeta.delete(taskId)
     this.blockedFrom.delete(taskId)
     this.interrupting.delete(taskId)
     this.resuming.delete(taskId)
@@ -1539,6 +1698,8 @@ export class TaskManager {
   shutdown(): void {
     for (const runner of this.runners.values()) runner.kill()
     this.runners.clear()
+    this.workerMeta.clear()
+    this.onLanesChange()
   }
 
   /**
