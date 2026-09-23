@@ -3,8 +3,12 @@ import styles from './KbView.module.css'
 import type { KbPage, KbPageRevision, KbTreeNode, Space, WorkspaceMember } from '../types'
 import { MAX_DISPLAY_NAME_LEN, PROTECTED_SPACE_NAME } from '../types'
 import { FileTree } from './FileTree'
+import { KbToolbar } from './KbToolbar'
 import { api } from '../api'
-import { renderPageMarkdown, toggleChecklistLine } from '../kbMarkdown'
+import { renderPageMarkdown, safeLinkHref, toggleChecklistLine } from '../kbMarkdown'
+import { applyLink, toggleWrap } from '../kbEdits'
+import type { SelectionEdit } from '../kbEdits'
+import { openExternal } from '../openExternal'
 import { filterKbTree, pageBreadcrumb, parseKbNodePath } from '../kbTree'
 import { kbHandles } from '../kbHandles'
 import {
@@ -136,6 +140,11 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   // while editing (null when not editing).
   const [editing, setEditing] = useState(false)
   const [bodyDraft, setBodyDraft] = useState<string | null>(null)
+  // The textarea's live selection range, mirrored into state so `<KbToolbar>`
+  // can compute its edits from the same `(text, start, end)` triple the ⌘-key
+  // shortcuts use. Kept in sync from the textarea's own events (never from an
+  // effect — `react-hooks/set-state-in-effect`).
+  const [selection, setSelection] = useState({ start: 0, end: 0 })
   // The page-history panel (throttled revision snapshots — #6 "keep, throttled").
   const [historyOpen, setHistoryOpen] = useState(false)
   const [revisions, setRevisions] = useState<KbPageRevision[]>([])
@@ -496,35 +505,57 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     setEditing(false)
   }
 
+  /** Mirror the textarea's live selection into state so the toolbar sees it. */
+  const syncSelection = (): void => {
+    const el = textareaRef.current
+    if (!el) return
+    setSelection((cur) =>
+      cur.start === el.selectionStart && cur.end === el.selectionEnd
+        ? cur
+        : { start: el.selectionStart, end: el.selectionEnd },
+    )
+  }
+
   /**
-   * Wrap the textarea's current selection with markdown markers (⌘B/⌘I/⌘K),
-   * updating the draft and restoring the caret/selection after React re-renders.
+   * Write one pure `kbEdits.ts` transform back into the draft, then restore the
+   * selection it asks for once React has re-rendered. This is the SINGLE path
+   * shared by the formatting toolbar and the ⌘-key shortcuts — there is no
+   * second, divergent wrap implementation.
    */
-  const wrapSelection = (before: string, after: string): void => {
+  const applyEdit = (edit: SelectionEdit): void => {
     const el = textareaRef.current
     if (!el || openPageId === null) return
-    const { selectionStart: s, selectionEnd: e, value } = el
-    const next = value.slice(0, s) + before + value.slice(s, e) + after + value.slice(e)
-    onBodyChange(next)
+    onBodyChange(edit.text)
+    setSelection({ start: edit.selStart, end: edit.selEnd })
     requestAnimationFrame(() => {
-      el.selectionStart = s + before.length
-      el.selectionEnd = e + before.length
+      el.selectionStart = edit.selStart
+      el.selectionEnd = edit.selEnd
       el.focus()
     })
   }
 
-  /** Obsidian-style editor shortcuts: ⌘B/⌘I emphasis, ⌘K link, ⌘↵/blur save, Esc cancel. */
+  /** Run a transform over the textarea's CURRENT text + selection (read live). */
+  const runEdit = (fn: (text: string, s: number, e: number) => SelectionEdit): void => {
+    const el = textareaRef.current
+    if (!el) return
+    applyEdit(fn(el.value, el.selectionStart, el.selectionEnd))
+  }
+
+  /** Obsidian-style shortcuts: ⌘B/⌘I/⌘U marks, ⌘K link, ⌘↵/blur save, Esc cancel. */
   const onEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     const mod = e.metaKey || e.ctrlKey
     if (mod && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
       e.preventDefault()
-      wrapSelection('**', '**')
+      runEdit((t, s, sel) => toggleWrap(t, s, sel, '**', '**'))
     } else if (mod && !e.shiftKey && (e.key === 'i' || e.key === 'I')) {
       e.preventDefault()
-      wrapSelection('*', '*')
+      runEdit((t, s, sel) => toggleWrap(t, s, sel, '*', '*'))
+    } else if (mod && !e.shiftKey && (e.key === 'u' || e.key === 'U')) {
+      e.preventDefault()
+      runEdit((t, s, sel) => toggleWrap(t, s, sel, '<u>', '</u>'))
     } else if (mod && (e.key === 'k' || e.key === 'K')) {
       e.preventDefault()
-      wrapSelection('[', '](url)')
+      runEdit(applyLink)
     } else if (mod && e.key === 'Enter') {
       e.preventDefault()
       flushPending()
@@ -543,6 +574,20 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
    */
   const onBodyClick = (e: React.MouseEvent<HTMLDivElement>): void => {
     const target = e.target as HTMLElement
+    // A rendered link opens externally instead of dropping into the editor.
+    // `openExternal` (not target="_blank") — the Tauri webview silently
+    // swallows a plain blank-target navigation. Only an ABSOLUTE http(s)/mailto
+    // target is actionable: a relative or same-document href has nowhere to go
+    // in this router-less app, and resolving it would just re-open zmrng
+    // itself. Either way the click is swallowed rather than entering edit mode.
+    const anchor = target.closest?.('a')
+    if (anchor instanceof HTMLAnchorElement) {
+      e.preventDefault()
+      e.stopPropagation()
+      const href = safeLinkHref(anchor.getAttribute('href') ?? '')
+      if (href !== null && /^(?:https?|mailto):/i.test(href)) void openExternal(href)
+      return
+    }
     if (target instanceof HTMLInputElement && target.type === 'checkbox') {
       e.preventDefault()
       e.stopPropagation()
@@ -847,12 +892,25 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
             <div className={styles.bodyWrap}>
               {editing ? (
                 <div className={styles.bodyEditor}>
+                  <KbToolbar
+                    value={bodyDraft ?? ''}
+                    selection={selection}
+                    onApply={applyEdit}
+                    onRequestFocus={() => textareaRef.current?.focus()}
+                  />
                   <textarea
                     ref={textareaRef}
                     className={styles.bodyTextarea}
                     value={bodyDraft ?? ''}
-                    onChange={(e) => onBodyChange(e.target.value)}
+                    onChange={(e) => {
+                      onBodyChange(e.target.value)
+                      syncSelection()
+                    }}
                     onKeyDown={onEditorKeyDown}
+                    onKeyUp={syncSelection}
+                    onMouseUp={syncSelection}
+                    onSelect={syncSelection}
+                    onFocus={syncSelection}
                     onBlur={() => {
                       flushPending()
                       setEditing(false)
@@ -862,7 +920,8 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                     autoFocus
                   />
                   <div className={styles.editorHint}>
-                    # heading · - list · - [ ] checklist · ``` code · ⌘B bold · ⌘I italic · ⌘K link · esc done
+                    # heading · - list · 1. numbered · - [ ] checklist · ``` code · **bold** ·
+                    *italic* · ~~strike~~ · ==highlight== · [text](url) · esc done
                   </div>
                 </div>
               ) : !canEdit && detail.body.trim() === '' ? (

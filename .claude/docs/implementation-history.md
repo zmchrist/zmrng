@@ -298,3 +298,29 @@ teardown can't be handed `undefined` instead of a promise. Plan:
 
 ## Phone terminal — soft-keyboard key bar, pinch-resize, flick-scroll (2026-09-20)
 Frontend-only (`packages/web`, no server/types.ts change): phone-only `Terminal.tsx` additions — a two-row on-screen key bar (`terminalKeys.ts`, extended with `TerminalMod`/`altSeq`/`modSeq` + a collapsed `TERMINAL_KEYS_EXTRA` row of Home/End/PgUp/PgDn/F1–F12), a `--kb-inset` padding fix for iOS Safari's keyboard-overlay behavior (new `keyboardInset.ts`), a shared pinch-driven font-size store (new `terminalFont.ts`), and flick-scroll-with-momentum plus a long-press Paste/Copy menu (new `terminalTouch.ts`, DOM-free arithmetic). All gated on `useIsMobile()`/a phone media block; desktop untouched. Web suite went 494 → 546 tests.
+
+## KB page editor — persistent formatting toolbar (2026-09-22)
+Frontend-only (`packages/web`; server `types.ts` touched for a comment only, mirrored
+into the web copy). The Knowledge Base page editor gained a persistent, Google-Docs-style
+formatting bar above the body textarea with eleven controls: Bold, Italic, Underline,
+Strikethrough, a heading-style picker, bullet / numbered / checklist lists, Link, text
+color and highlight color. New `kbEdits.ts` holds the pure, React-free selection
+transforms (`toggleWrap`/`toggleLinePrefix`/`toggleOrderedList`/`applyHeading`/`applyLink`/
+`applyTextColor`/`applyHighlight` + the curated `KB_TEXT_COLORS`/`KB_HIGHLIGHT_COLORS`
+palettes); `KbView.tsx`'s old `wrapSelection` was replaced by `applyEdit`/`runEdit` over
+those same helpers, so the ⌘B/⌘I/⌘U/⌘K shortcuts and the buttons share ONE mechanism.
+Every toolbar control default-prevents its `mousedown` — KB edit mode is focus-scoped
+(the textarea's `onBlur` leaves it), so a focus-moving mousedown would unmount the editor
+and the bar before the click landed; that is also why the heading/color pickers are
+hand-rolled button popovers rather than a native `<select>`/`<input type="color">`.
+`kbMarkdown.ts` grew the rendering half: `~~strike~~` → `<del>`, `==highlight==` →
+`<mark>`, `1. `/`1) ` runs → `<ol>`, sanitized `[text](url)` → `<a>` (new exported
+`safeLinkHref()` rejecting `javascript:`/`data:`, whitespace- and control-character-
+obfuscated schemes, and protocol-relative `//host`), and a CLOSED allow-list un-escape
+pass admitting only `<u>`, `<mark>`, `<mark style="background:#RRGGBB">` and
+`<span style="color:#RRGGBB">` — everything else stays escaped literal text, with the
+near-miss cases pinned by tests. Rendered links now route through `openExternal()`
+instead of entering edit mode. Note the deliberate behaviour change to existing pages:
+a saved body containing `1. …` or `[text](url)` now renders as a list / link rather than
+literal text. Web suite went 571 → 642 tests. Plan:
+`.agents/plans/kb-formatting-toolbar.md`.
