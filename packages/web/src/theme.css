@@ -248,7 +248,12 @@ a:focus-visible {
 /* ---- phone ------------------------------------------------------------- *
  * Two global rules the whole phone layout depends on: a 16px minimum on text
  * inputs (below that, iOS Safari zooms the page on focus and the layout no
- * longer fits), and no horizontal overflow at the document level.            */
+ * longer fits), and no horizontal overflow at the document level. The
+ * !important is deliberate: every component's own CSS-module class (.input,
+ * .textarea, .select) sets a smaller unconditional font-size, and a class
+ * selector always outranks this bare element selector on specificity
+ * regardless of the media query, so without it this rule is silently
+ * defeated everywhere it's meant to apply.                                  */
 @media (max-width: 768px) {
   html,
   body {
@@ -258,6 +263,6 @@ a:focus-visible {
   input,
   textarea,
   select {
-    font-size: 16px;
+    font-size: 16px !important;
   }
 }
