@@ -298,3 +298,47 @@ teardown can't be handed `undefined` instead of a promise. Plan:
 
 ## Phone terminal — soft-keyboard key bar, pinch-resize, flick-scroll (2026-09-20)
 Frontend-only (`packages/web`, no server/types.ts change): phone-only `Terminal.tsx` additions — a two-row on-screen key bar (`terminalKeys.ts`, extended with `TerminalMod`/`altSeq`/`modSeq` + a collapsed `TERMINAL_KEYS_EXTRA` row of Home/End/PgUp/PgDn/F1–F12), a `--kb-inset` padding fix for iOS Safari's keyboard-overlay behavior (new `keyboardInset.ts`), a shared pinch-driven font-size store (new `terminalFont.ts`), and flick-scroll-with-momentum plus a long-press Paste/Copy menu (new `terminalTouch.ts`, DOM-free arithmetic). All gated on `useIsMobile()`/a phone media block; desktop untouched. Web suite went 494 → 546 tests.
+
+## Login — username/password gate for the Knowledge Base and Team Chat (2026-09-23)
+Gated the **KB** and **Team Chat** surfaces behind a username/password login; the
+Workspace task orchestrator is deliberately left open (a login wall in front of the
+operator's own tooling buys nothing). New server modules: `password.ts` (`node:crypto`
+**scrypt**, N=32768/r=8/p=1, versioned `scrypt$N$r$p$salt$key` — chosen over the
+originally-planned argon2id because argon2 is a node-gyp addon the Tauri sidecar bundler
+hand-vendors, and the prefix keeps a later swap to one file), `session.ts` (pure token
+primitives; only a sha256 of a token is ever stored), `auth.ts` (`AuthService`,
+`LoginThrottle` at 5 failures per `(username, IP)` per 15 min, the cookie builders, and
+`isProtectedPath` — the single gated-prefix list), `authRoutes.ts` (the `onRequest` gate +
+`/api/auth/{login,logout,me}`), `kbRoutes.ts` (the KB REST surface lifted out of
+`index.ts`), and `cli/createUser.ts` (`npm run create-user` — the only way an account is
+created; re-running it resets a password, which is the whole recovery story). Sessions are
+**server-side rows**, not JWTs: revocation and expiry would need a server-side list
+anyway. **One token, two transports** (D2): an `HttpOnly; SameSite=Strict` cookie
+same-origin, an `Authorization: Bearer` header for the desktop app's cross-origin Team
+connection to the VPS, which no cookie can reach without TLS; `Secure` is conditional on
+HTTPS or `ZMRNG_SECURE_COOKIES=1`, never unconditional, because browsers silently DROP a
+`Secure` cookie on the VPS's plain-http origin. Because the cross-origin path is a header,
+`access-control-allow-credentials` is never sent and the reflected-origin CORS policy
+stays safe — the only CORS change was allowing `authorization` through preflight. The web
+client keeps an **origin-keyed** session store and submits one credential pair to every
+gated origin in parallel, so the operator types their password once (D1) — but the servers
+do not trust each other, so `create-user` runs on each host; that is one LOGIN, not one
+ACCOUNT. Identity left the wire entirely: `hello` no longer carries a display name, and
+`message`/`react`/`page.edit` frames that still assert an `author`/`handle` are REJECTED
+so an outdated client fails loudly instead of posting under a server-chosen name — which
+also closes the old spoofing hole where any client could post as any name. An
+unauthenticated socket is sent `{type:'unauthorized'}` and closed before it learns even
+the roster. Additive-only schema: `users`, `sessions` and a dedicated `kb_changelog`
+(page create/rename/move/body-save/delete, outliving the page it describes — reusing
+`page_revisions` was rejected because it only ever sees body saves and dies with its
+page), plus `members.user_id`; `page_revisions.user_id` was deliberately NOT added, since
+a revision snapshots the prior body whose author is a free-text string with no user id
+behind it. `db.test.ts` carries an explicit data-loss guard proving a pre-auth database
+migrates with every existing row untouched — the VPS redeploys in place. `authRoutes.ts`
+and `kbRoutes.ts` are plain functions on the app instance rather than `fastify-plugin`
+plugins (an encapsulated plugin's hook would not cover the parent's routes), which is what
+makes the gate and the "a client-supplied `author` is ignored" claim provable with
+`app.inject()` against a bare `Fastify()`. Frontend: `auth.ts` (the origin-keyed store) +
+`LoginPane`; `kbHandles.ts` deleted; KbView gained a per-space changelog panel and both
+gated views re-gate on a 401 or an `unauthorized` frame. Server suite 501 → 643 tests, web
+571 → 605. Plan: `.agents/plans/zmrng-login-auth.md`.

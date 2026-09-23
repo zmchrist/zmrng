@@ -1,0 +1,178 @@
+/* Login form rendered in place of a gated surface (Knowledge Base / Team Chat).
+   Frosted-glass panel centered in whatever pane hosts it. Every color, blur and
+   radius comes from a theme token — no raw values. */
+
+.wrap {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.panel {
+  width: min(360px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  box-shadow: var(--shadow), var(--hairline);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text);
+}
+
+.sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.input {
+  width: 100%;
+  /* 16px is deliberate: anything smaller makes iOS Safari zoom the page on
+     focus. The 44px min-height keeps the touch target at the phone minimum. */
+  min-height: 44px;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--well);
+  color: var(--text);
+  font-size: 16px;
+  font-family: inherit;
+  line-height: 1.5;
+  transition: border-color var(--transition), box-shadow var(--transition),
+    background var(--transition);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  background: var(--well-strong);
+  box-shadow: var(--focus-ring);
+}
+.input::placeholder {
+  color: var(--text-faint);
+}
+.input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.submit {
+  min-height: 44px;
+  padding: 11px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: var(--accent-grad);
+  color: var(--accent-ink);
+  box-shadow: var(--glow-accent);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  letter-spacing: var(--tracking-tight);
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition),
+    opacity var(--transition);
+}
+.submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--glow-accent-strong);
+}
+.submit:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.error {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border-strong);
+  border-left: 2px solid var(--status-failed);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  color: var(--status-failed);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Partial success: one origin authenticated, another did not. The surface it
+   serves stays gated, so name it rather than silently half-logging-in. */
+.gated {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--status-blocked);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.gatedList {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gatedItem {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--status-blocked);
+  word-break: break-all;
+}
+
+.hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}

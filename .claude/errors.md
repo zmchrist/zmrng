@@ -395,3 +395,27 @@ non-obvious root cause, or is likely to recur. Template in
 - **Files:** N/A (environment/install step, not a source file) — affects any fresh
   `npm install` in a worktree nested under the main repo.
 - **Date Found:** 2026-09-22
+
+### `scryptSync` throws "memory limit exceeded" at the OWASP-recommended parameters
+- **Error:** `Error: Invalid scrypt params: error:030000AC:digital envelope
+  routines::memory limit exceeded`, thrown by `crypto.scryptSync(password, salt, 64,
+  { N: 32768, r: 8, p: 1 })` — i.e. by the *recommended* parameters, on the very first
+  call, with nothing obviously wrong in the code.
+- **Cause:** `scryptSync`/`scrypt` default `maxmem` to **32 MiB**, and the memory scrypt
+  needs is `128 · N · r` = `128 · 32768 · 8` = **exactly 32 MiB** — plus overhead, so the
+  default is a hair too small for the parameters everyone recommends. Node rejects the
+  call rather than allocating. The failure is a parameter-validation error, not an OOM,
+  so it reproduces identically on a machine with gigabytes free.
+- **Solution:** pass an explicit `maxmem` computed from the same N/r rather than a magic
+  number, so it tracks any future parameter change:
+  ```ts
+  const maxmem = 128 * N * r * 2
+  scryptSync(password, salt, KEY_BYTES, { N, r, p, maxmem })
+  ```
+  The verify path must compute `maxmem` from the N/r **parsed out of the stored hash**,
+  not from the current constants, or verifying an old-parameter hash reintroduces the
+  throw. `packages/server/src/password.ts` does this via a `maxmemFor(n, r)` helper, and
+  also refuses a parsed `128·N·r` over 1 GiB so a corrupted DB row cannot ask for an
+  unbounded allocation.
+- **Files:** `packages/server/src/password.ts`
+- **Date Found:** 2026-09-23

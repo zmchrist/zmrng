@@ -24,7 +24,11 @@ import type {
   KbPage,
   KbPageFromMessageInput,
   KbPageRevision,
+  KbChangeEntry,
+  LoginResponse,
+  AuthState,
 } from './types'
+import { authHeaders, clearSession } from './auth'
 
 /** Pull a text delta out of one parsed SSE `data:` payload (OpenAI-compatible + plain shapes). */
 function extractDelta(obj: unknown): string {
@@ -59,42 +63,129 @@ function textFromDataPayload(payload: string): string {
   }
 }
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Thrown when a gated route answers 401 — the caller has no live session on
+ * that origin, or the one it had has expired. Carries the `origin` so a UI
+ * showing two gated surfaces (the local Knowledge Base and the VPS Team chat)
+ * knows WHICH one needs a login again.
+ *
+ * This IS the whole session-expiry story: on a 401 the client drops that
+ * origin's stored session and re-prompts. There is deliberately no silent
+ * token-refresh machinery — refresh tokens would need their own revocation
+ * story, and a week-long sliding session renewed server-side on activity makes
+ * a genuine expiry rare (`.agents/plans/zmrng-login-auth.md`).
+ */
+export class AuthError extends Error {
+  readonly origin: string
+  constructor(origin: string, message = 'your session has expired — please log in again') {
+    super(message)
+    this.name = 'AuthError'
+    this.origin = origin
+  }
+}
+
+/**
+ * True for the "session expired / not logged in" failure, so a component can
+ * re-show the login pane instead of rendering a raw HTTP message at the
+ * operator. Falls back to the `name` check because `instanceof` is unreliable
+ * across module realms (a duplicated bundle, a test double).
+ */
+export function isAuthError(err: unknown): err is AuthError {
+  return err instanceof AuthError || (err instanceof Error && err.name === 'AuthError')
+}
+
+/**
+ * Is `origin` this page's own origin? `''` (the same-origin default every
+ * non-Team call uses) always is. Decides the credential mode below.
+ */
+function isSameOrigin(origin: string): boolean {
+  const target = origin.trim().replace(/\/+$/, '')
+  if (target === '') return true
+  if (typeof location === 'undefined') return false
+  try {
+    return new URL(target, location.href).origin === location.origin
+  } catch {
+    return false
+  }
+}
+
+/** Best-effort error text from a failed response body (`{ error }`), else the status. */
+async function errorDetail(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: string }
+    if (body.error) return body.error
+  } catch {
+    // non-JSON / empty error body
+  }
+  return res.statusText
+}
+
+/**
+ * The one auth-aware `fetch` every call below goes through. Resolves with an
+ * ok `Response`; throws on anything else.
+ *
+ * Both session transports of decision D2 are wired here:
+ * - **Same-origin** rides the `HttpOnly; SameSite=Strict` `zmrng_session`
+ *   cookie, which needs `credentials: 'include'` so it is sent even on a
+ *   request the browser would otherwise treat as credential-less.
+ * - **Cross-origin** (the desktop app's Team calls to the VPS) rides the
+ *   `Authorization: Bearer` header from `authHeaders(origin)`, because a
+ *   `SameSite=Strict` cookie can never make that trip. That path deliberately
+ *   does NOT send credentials: the server reflects arbitrary origins in
+ *   `access-control-allow-origin` and therefore must never send
+ *   `access-control-allow-credentials` — asking for `include` there would make
+ *   the browser reject the response before this code ever saw it, and the
+ *   cookie could not travel anyway.
+ *
+ * A 401 clears that origin's stored session and raises `AuthError`, so the UI
+ * can re-prompt. `authError: false` opts out for the login route itself, where
+ * a 401 means "wrong password", not "expired session".
+ */
+async function send(
+  origin: string,
+  path: string,
+  init?: RequestInit,
+  opts?: { authError?: boolean },
+): Promise<Response> {
   // Only declare a JSON content-type when we actually send a body. Fastify
   // rejects an empty body when content-type is application/json
   // (FST_ERR_CTP_EMPTY_JSON_BODY) — which 400s the bodyless POSTs
   // (start/done/cancel).
-  const headers = init?.body ? { 'content-type': 'application/json' } : undefined
-  const res = await fetch(path, {
+  const contentType = init?.body ? { 'content-type': 'application/json' } : undefined
+  const res = await fetch(`${origin}${path}`, {
     ...init,
-    headers: { ...headers, ...init?.headers },
+    credentials: isSameOrigin(origin) ? 'include' : 'omit',
+    headers: { ...contentType, ...authHeaders(origin), ...init?.headers },
   })
   if (!res.ok) {
-    let detail = res.statusText
-    try {
-      const body = (await res.json()) as { error?: string }
-      if (body.error) detail = body.error
-    } catch {
-      // non-JSON error body
+    if (res.status === 401 && opts?.authError !== false) {
+      clearSession(origin)
+      throw new AuthError(origin)
     }
-    throw new Error(detail)
+    throw new Error(await errorDetail(res))
   }
+  return res
+}
+
+/** JSON call against an explicit origin (the Team routes live on the VPS). */
+async function reqAt<T>(
+  origin: string,
+  path: string,
+  init?: RequestInit,
+  opts?: { authError?: boolean },
+): Promise<T> {
+  const res = await send(origin, path, init, opts)
   return (await res.json()) as T
+}
+
+/** JSON call against this page's own origin — the default for everything but Team. */
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  return reqAt<T>('', path, init)
 }
 
 /** Like `req` but for endpoints that answer 204 No Content (e.g. KB deletes). */
 async function reqNoContent(path: string, init?: RequestInit): Promise<void> {
-  const res = await fetch(path, init)
-  if (!res.ok) {
-    let detail = res.statusText
-    try {
-      const body = (await res.json()) as { error?: string }
-      if (body.error) detail = body.error
-    } catch {
-      // non-JSON / empty error body
-    }
-    throw new Error(detail)
-  }
+  await send('', path, init)
 }
 
 export const api = {
@@ -236,13 +327,53 @@ export const api = {
   deleteTask: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}`, { method: 'DELETE' }),
   restart: () => req<{ ok: true; restarted: boolean }>('/api/restart', { method: 'POST' }),
+
+  // ---- auth (the login gating the KB + Team surfaces) ----
+  // Every one of these takes an explicit `origin`, because a session belongs to
+  // the server that issued it: the desktop app holds one for its local sidecar
+  // (Knowledge Base) and one for the VPS (Team chat). See `auth.ts` for the
+  // origin-keyed store and `loginToOrigins`, which submits ONE set of
+  // credentials to every gated origin from a single form submission (D1).
+
+  /**
+   * Exchange credentials for a session on ONE origin. The response carries the
+   * token in its body AND arrives as a `Set-Cookie`; which of the two is usable
+   * depends on the transport (D2), so both are kept.
+   *
+   * This deliberately does NOT store anything — `loginToOrigins` in `auth.ts`
+   * owns the session store and calls this once per gated origin. A 401 here
+   * means "wrong username or password", not an expired session, so the server's
+   * generic message surfaces as a plain `Error` rather than an `AuthError`.
+   */
+  login: (origin: string, username: string, password: string) =>
+    reqAt<LoginResponse>(
+      origin,
+      '/api/auth/login',
+      { method: 'POST', body: JSON.stringify({ username, password }) },
+      { authError: false },
+    ),
+
+  /**
+   * Revoke this client's session on one origin: the server deletes the row and
+   * expires the cookie, and the stored session is dropped locally on success.
+   * A 401 (the session was already dead) also clears it, via the shared 401
+   * path — either way the caller ends up logged out on that origin.
+   */
+  logout: async (origin: string): Promise<{ ok: true }> => {
+    const res = await reqAt<{ ok: true }>(origin, '/api/auth/logout', { method: 'POST' })
+    clearSession(origin)
+    return res
+  },
+
+  /** Who this client is on ONE origin, per that origin's own session. */
+  me: (origin: string) => reqAt<AuthState>(origin, '/api/auth/me'),
   /**
    * Team-workspace channel list (box 2). Channel data lives on the VPS server,
    * so `origin` (the VPS http origin from `workspaceHttpOrigin`) MUST be passed
    * to target it — a blank origin falls back to the local server (wrong for the
    * team feature, kept only for back-compat/tests).
    */
-  listChannels: (origin = '') => req<Channel[]>(`${origin}/api/channels`),
+  listChannels: (origin = '') => reqAt<Channel[]>(origin, '/api/channels'),
   /**
    * Create a channel (T3). Pass a `repoId` to repo-scope it (a free-text
    * suggestion tag for the "Send to my zmrng" handoff); omit/null for an
@@ -251,7 +382,7 @@ export const api = {
    * VPS (see listChannels).
    */
   createChannel: (name: string, repoId?: string | null, origin = '') =>
-    req<Channel>(`${origin}/api/channels`, {
+    reqAt<Channel>(origin, '/api/channels', {
       method: 'POST',
       body: JSON.stringify({ name, repoId: repoId ?? null }),
     }),
@@ -270,7 +401,7 @@ export const api = {
     if (opts?.before !== undefined) params.set('before', String(opts.before))
     if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
     const qs = params.toString()
-    return req<Message[]>(`${origin}/api/channels/${channelId}/messages${qs ? `?${qs}` : ''}`)
+    return reqAt<Message[]>(origin, `/api/channels/${channelId}/messages${qs ? `?${qs}` : ''}`)
   },
   getUiState: () => req<UiState>('/api/ui-state'),
   putUiState: (state: UiState) =>
@@ -279,7 +410,16 @@ export const api = {
       body: JSON.stringify(state),
     }),
 
-  /** Durable server-side Team prefs (the display-name handle). */
+  /**
+   * Durable server-side Team prefs. Its only field, `teamHandle`, was the
+   * self-asserted display name the Team and KB surfaces ran on before login —
+   * so these two methods currently have NO caller. They are kept, rather than
+   * deleted, because the `settings` row and the `GET`/`PUT /api/settings`
+   * routes still exist (migrations are additive-only, so the column was not
+   * dropped) and this is the client for them; the same "orphaned but retained"
+   * treatment `terminalDock.ts` gets. Identity now comes from the authenticated
+   * session — do NOT reach for `teamHandle` as a name.
+   */
   getSettings: () => req<WorkspaceSettings>('/api/settings'),
   /** PATCH-style: send only the keys to change; returns the full settings. */
   putSettings: (patch: Partial<WorkspaceSettings>) =>
@@ -323,11 +463,15 @@ export const api = {
   deleteFolder: (id: number) =>
     reqNoContent(`/api/folders/${id}`, { method: 'DELETE' }),
 
-  /** Create a page in a space (null folderId = space root). */
-  createPage: (spaceId: number, title: string, author: string, folderId: number | null = null) =>
+  /**
+   * Create a page in a space (null folderId = space root). The author is the
+   * AUTHENTICATED user, derived server-side from the session — there is no
+   * author argument any more, and a client-supplied one is ignored.
+   */
+  createPage: (spaceId: number, title: string, folderId: number | null = null) =>
     req<KbPage>(`/api/spaces/${spaceId}/pages`, {
       method: 'POST',
-      body: JSON.stringify({ title, author, folderId }),
+      body: JSON.stringify({ title, folderId }),
     }),
   /**
    * Promote a team-channel message into a durable KB page (T4, #154). The server
@@ -356,10 +500,23 @@ export const api = {
 
   /** Every revision of a page, oldest first — backs the History panel. */
   getPageRevisions: (pageId: number) => req<KbPageRevision[]>(`/api/pages/${pageId}/revisions`),
-  /** Restore a revision back onto its page (itself recording a revision). */
-  restorePageRevision: (revisionId: number, author: string) =>
-    req<KbPage>(`/api/page-revisions/${revisionId}/restore`, {
-      method: 'POST',
-      body: JSON.stringify({ author }),
-    }),
+  /**
+   * Restore a revision back onto its page (itself recording a revision). The
+   * restorer is the AUTHENTICATED user, derived server-side from the session.
+   */
+  restorePageRevision: (revisionId: number) =>
+    req<KbPage>(`/api/page-revisions/${revisionId}/restore`, { method: 'POST' }),
+
+  /**
+   * A space's per-edit changelog, newest first. Unlike `getPageRevisions`
+   * (restorable body snapshots, deleted with their page) this covers the whole
+   * page lifecycle — create, rename, move, body-save and delete — and outlives
+   * the page it describes. `limit` is clamped server-side to `MAX_CHANGELOG_PAGE`;
+   * omit it for the server's default page size. Same-origin, like every other
+   * KB call.
+   */
+  getChangelog: (spaceId: number, limit?: number) =>
+    req<KbChangeEntry[]>(
+      `/api/spaces/${spaceId}/changelog${limit !== undefined ? `?limit=${limit}` : ''}`,
+    ),
 }

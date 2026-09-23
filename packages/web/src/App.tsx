@@ -13,7 +13,6 @@ import type {
   FlowMode,
   RepoTarget,
   WorkspaceMode,
-  WorkspaceSettings,
   Attachment,
   SecurityScan,
 } from './types'
@@ -22,6 +21,8 @@ import { AuthBanner } from './components/AuthBanner'
 import { TeamView } from './components/TeamView'
 import { ActivityRail } from './components/ActivityRail'
 import { KbView } from './components/KbView'
+import { LoginPane } from './components/LoginPane'
+import { loadSession, type StoredSession } from './auth'
 import { UpdateBanner } from './components/UpdateBanner'
 import { SettingsModal } from './components/SettingsModal'
 import { updateAvailable } from './updateGate'
@@ -62,6 +63,27 @@ const MAX_LIVE_CHARS = 200_000
 // happened" hint, not a live feed.
 const UNREAD_POLL_MS = 30_000
 
+// ---- the two gated origins (decision D1 of the login plan) ---------------
+// A session is issued by ONE server, so each gated surface holds its own: the
+// Knowledge Base is served by THIS server (same-origin, ''), while Team Chat
+// talks to the fixed VPS. The operator must still only type their password
+// once, so BOTH panes submit against the same list below and one submit
+// authenticates every origin in it — then each surface gates on its own
+// origin's session.
+//
+// That means the password is POSTed to each origin in this list, which is
+// exactly why it is a fixed code constant: never a value a page, a redirect or
+// any other untrusted input can influence.
+//
+// The dedupe collapses the list whenever the two entries are literally the same
+// string. A teammate browsing the VPS directly is the one case where they name
+// the SAME server without being the same string (`''` vs the absolute URL):
+// that submit simply authenticates against it twice, which is harmless — same
+// credentials, same server, and each surface still gates on its own key.
+const KB_ORIGIN = ''
+const TEAM_ORIGIN = workspaceHttpOrigin(WORKSPACE_URL)
+const GATED_ORIGINS: readonly string[] = Array.from(new Set([KB_ORIGIN, TEAM_ORIGIN]))
+
 export default function App() {
   const [tasks, setTasks] = useState<Record<string, Task>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -70,22 +92,29 @@ export default function App() {
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
   const [repos, setRepos] = useState<RepoTarget[]>([])
-  // Durable server-side Team prefs (the display-name handle),
-  // persisted in zmrng.db so they survive a refresh/app-reopen/rebuild/reboot —
-  // browser localStorage proved unreliable for these in the desktop shell.
-  const [settings, setSettings] = useState<WorkspaceSettings>({ teamHandle: '' })
+  // ---- login sessions, one per gated origin --------------------------------
+  // Seeded from localStorage in a useState INITIALISER (never a setState inside
+  // an effect — ESLint's react-hooks/set-state-in-effect), so a returning
+  // operator lands straight in the gated surface with no login flash.
+  // `loadSession` evicts an expired session itself, so null here means "gated".
+  const [kbSession, setKbSession] = useState<StoredSession | null>(() => loadSession(KB_ORIGIN))
+  const [teamSession, setTeamSession] = useState<StoredSession | null>(() =>
+    loadSession(TEAM_ORIGIN),
+  )
+  // Re-read BOTH stores. Fired by a successful login (one submit can establish
+  // both) and by either surface logging out or hitting a 401 — the surfaces
+  // gate on the store, not on "onAuthed fired", so a partial login leaves the
+  // unreachable origin correctly still gated.
+  const refreshSessions = useCallback(() => {
+    setKbSession(loadSession(KB_ORIGIN))
+    setTeamSession(loadSession(TEAM_ORIGIN))
+  }, [])
   const ui = useUiState()
   // Workspace is the default home; migrate the retired `'tasks'`/`'board'` modes to it.
   const storedMode = ui.state.global.mode ?? 'workspace'
   const mode: WorkspaceMode =
     storedMode === 'tasks' || storedMode === 'board' ? 'workspace' : storedMode
   const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
-  // Optimistically update settings state, persist to the server, then reconcile
-  // with the server's echoed full document (blank values normalize identically).
-  const saveSettings = useCallback((patch: Partial<WorkspaceSettings>) => {
-    setSettings((prev) => ({ ...prev, ...patch }))
-    api.putSettings(patch).then(setSettings).catch(() => undefined)
-  }, [])
   // ---- Team unread orb (in-memory only, resets on relaunch) --------------
   // The workspace socket is gated on the Team tab being active (#149), so while
   // the operator is elsewhere there is no live feed to listen to. Instead poll a
@@ -96,20 +125,22 @@ export default function App() {
   const onChannelRead = useCallback((channelId: number, messageId: number) => {
     setUnread((prev) => markRead(prev, channelId, messageId))
   }, [])
+  // Who the operator is on the Team server — their own posts never count as
+  // unread. Derived from the session rather than any self-asserted handle, and
+  // null while that origin is gated (nothing to poll for, and the poll would
+  // 401 anyway).
+  const teamName = teamSession?.user.displayName ?? null
   useEffect(() => {
-    // The Team VPS is fixed in code (teamConfig.WORKSPACE_URL) — no per-user
-    // setting, no env default, nothing to configure.
-    const origin = workspaceHttpOrigin(WORKSPACE_URL)
     // Only poll while OFF the Team tab: on it, TeamView owns the live socket and
     // the orb is hidden anyway.
-    if (mode === 'team' || !origin || !settings.teamHandle) return
+    if (mode === 'team' || teamName === null) return
     let cancelled = false
     const poll = async (): Promise<void> => {
       try {
-        const channels = await api.listChannels(origin)
+        const channels = await api.listChannels(TEAM_ORIGIN)
         const tips = await Promise.all(
           channels.map(async (c): Promise<ChannelTip | null> => {
-            const [newest] = await api.getChannelMessages(c.id, { limit: 1 }, origin)
+            const [newest] = await api.getChannelMessages(c.id, { limit: 1 }, TEAM_ORIGIN)
             return newest
               ? { channelId: c.id, messageId: newest.id, author: newest.author }
               : null
@@ -117,7 +148,7 @@ export default function App() {
         )
         if (cancelled) return
         const seen = tips.filter((t): t is ChannelTip => t !== null)
-        setUnread((prev) => observeTips(prev, seen, settings.teamHandle))
+        setUnread((prev) => observeTips(prev, seen, teamName))
       } catch {
         // The VPS workspace is optional and may be unreachable — stay quiet and
         // retry on the next tick.
@@ -129,7 +160,7 @@ export default function App() {
       cancelled = true
       clearInterval(timer)
     }
-  }, [mode, settings.teamHandle])
+  }, [mode, teamName])
 
   // ---- phone shell -------------------------------------------------------
   // Below the phone breakpoint the Workspace split collapses to ONE full-screen
@@ -273,7 +304,6 @@ export default function App() {
 
   useEffect(() => {
     api.getConfig().then(setCfg).catch(() => undefined)
-    api.getSettings().then(setSettings).catch(() => undefined)
     api.listRepos().then(setRepos).catch(() => undefined)
     api
       .listTasks()
@@ -341,10 +371,6 @@ export default function App() {
     [setMode],
   )
   const onPrefillConsumed = useCallback(() => setHandoffPrefill(null), [])
-  // Stable handle-change callback: passing a fresh arrow each render would
-  // defeat the React.memo on TeamView/KbView, re-rendering those hidden
-  // subtrees on every live token.
-  const onTeamHandleChange = useCallback((h: string) => saveSettings({ teamHandle: h }), [saveSettings])
 
   // Team tab "Send to KB": switch to the KB tab and open the promoted page.
   const onOpenKbPage = useCallback(
@@ -464,29 +490,45 @@ export default function App() {
             className={styles.modeContent}
             style={{ display: mode === 'team' ? 'flex' : 'none' }}
           >
-            <TeamView
-              teamHandle={settings.teamHandle}
-              botHandle={cfg?.botHandle ?? '@agent'}
-              repos={repos}
-              onHandleChange={onTeamHandleChange}
-              onSendToZmrng={onSendToZmrng}
-              onOpenKbPage={onOpenKbPage}
-              onNewVersion={onNewVersion}
-              onChannelRead={onChannelRead}
-              active={mode === 'team'}
-            />
+            {teamSession ? (
+              <TeamView
+                user={teamSession.user}
+                onLogout={refreshSessions}
+                botHandle={cfg?.botHandle ?? '@agent'}
+                repos={repos}
+                onSendToZmrng={onSendToZmrng}
+                onOpenKbPage={onOpenKbPage}
+                onNewVersion={onNewVersion}
+                onChannelRead={onChannelRead}
+                active={mode === 'team'}
+              />
+            ) : (
+              <LoginPane
+                origins={GATED_ORIGINS}
+                label="Team Chat"
+                onAuthed={refreshSessions}
+              />
+            )}
           </div>
 
           <div
             className={styles.modeContent}
             style={{ display: mode === 'kb' ? 'flex' : 'none' }}
           >
-            <KbView
-              teamHandle={settings.teamHandle}
-              onHandleChange={onTeamHandleChange}
-              openTarget={kbTarget}
-              active={mode === 'kb'}
-            />
+            {kbSession ? (
+              <KbView
+                user={kbSession.user}
+                onLogout={refreshSessions}
+                openTarget={kbTarget}
+                active={mode === 'kb'}
+              />
+            ) : (
+              <LoginPane
+                origins={GATED_ORIGINS}
+                label="Knowledge Base"
+                onAuthed={refreshSessions}
+              />
+            )}
           </div>
         </div>
 

@@ -125,6 +125,44 @@ messages, PR titles/bodies, and plan files stay normal, professional English.** 
 *you* (Claude Code helping build zmrng) work in this repo, write normal English unless
 asked otherwise.
 
+### Login — the KB and Team surfaces are gated, Workspace is not
+The **Knowledge Base** and **Team Chat** surfaces sit behind a username/password
+login; the **Workspace** task orchestrator deliberately does not (a login wall in
+front of the operator's own tooling buys nothing). Accounts are provisioned by CLI
+only — no self-serve signup, no password-reset flow:
+```bash
+npm run create-user -- --username zc --display-name "zc"   # re-run to RESET a password
+```
+Passwords are hashed with `node:crypto` **scrypt** (`password.ts`, versioned
+`scrypt$N$r$p$salt$key` so a later move to argon2id is a one-file change). Sessions are
+**server-side rows**, not JWTs — logout and expiry are a row delete. Only the sha256 of a
+token is stored. `auth.ts` owns the service + the gated-prefix list; `authRoutes.ts` is a
+plain function (not a `fastify-plugin` — an encapsulated plugin's `onRequest` hook would
+not cover the parent's routes) registering the gate and `/api/auth/{login,logout,me}`.
+`kbRoutes.ts` exists for the same reason: both are attachable to a bare `Fastify()` in a
+test and driven with `app.inject()`.
+
+**One session token, two transports (D2).** Login sets an
+`HttpOnly; SameSite=Strict` `zmrng_session` cookie **and** returns the same token in the
+body. `Secure` is added only over HTTPS or with `ZMRNG_SECURE_COOKIES=1` — never
+unconditionally, because browsers silently DROP a `Secure` cookie on the VPS's plain
+`http://` tailnet origin. Same-origin browsing rides the cookie; the desktop app's
+**cross-origin** Team connection to the VPS cannot send a cookie at all and uses an
+`Authorization: Bearer` header from `localStorage`. That is why the permissive
+reflected-origin CORS policy stays safe: `access-control-allow-credentials` is never
+sent, so a reflected hostile origin can not ride the operator's session.
+
+**One login, but NOT one account (D1).** A session is issued by the server that minted
+it, and the desktop app talks to two (local sidecar for the KB, VPS for Team). The login
+pane submits one set of credentials to every gated origin in parallel, so the operator
+types their password once — but the servers do not trust each other, and **`create-user`
+must be run on each host**. There is no cryptographic SSO here, by decision.
+
+Identity is no longer self-asserted anywhere: `hello` carries no display name, and
+`message`/`react`/`page.edit` frames that still assert an `author`/`handle` are
+**rejected**. `settings.teamHandle` survives in the schema (migrations are
+additive-only) but nothing reads it.
+
 ### Per-task controls
 Each task records `model` (opus/sonnet), `effort` (low/medium/high/xhigh/max),
 `style` (caveman levels — non-`normal` makes the worker invoke the `caveman` skill at
@@ -200,6 +238,11 @@ npm test                 # Vitest run, both workspaces
 npm run test:watch       # Vitest watch, both workspaces
 npm start                # serve API + built UI
 
+# Provision an application account (KB + Team login). Re-running for an existing
+# username RESETS that password — the documented recovery path, since there is no
+# password-reset flow. Run it on EVERY server the person logs into (D1).
+npm run create-user -- --username <u> --display-name "<name>"      # prompts for the password
+
 # Desktop app (Tauri) — native macOS .app wrapping the server as a sidecar
 npm run desktop:dev      # native window running the bundled sidecar (needs Rust)
 npm run bundle:sidecar   # esbuild server + vendor better-sqlite3/node + copy web/dist
@@ -250,13 +293,15 @@ messaging, emoji reactions on messages, repo-scoped channels with a "Send to my 
 handoff, and one shared `@agent` that plans but never executes. Architecture detail is in
 `.claude/docs/codemap.md`; the deploy runbook is `docs/team-workspace-deploy.md`.
 
-> **POC exposure precondition (Tailscale is the perimeter):** the VPS
+> **POC exposure precondition (Tailscale is still the perimeter):** the VPS
 > workspace port MUST be reachable **only over Tailscale** — firewall it to the
 > tailnet interface, or bind the server to the Tailscale IP. **Never expose it
-> publicly.** Because the handle is self-asserted with no verification, the
-> tailnet membership *is* the access control. This is an operational
-> precondition documented here **only** — there is deliberately **no app-code
-> gate, no server bind change, and no auth** in the T1 scope.
+> publicly.** The Team surface now requires a login, so tailnet membership is no
+> longer the *only* access control — but it remains the perimeter, and the
+> requirement is unchanged. The traffic is plain HTTP: credentials cross the
+> tailnet relying on the tailnet's own encryption, so exposing this port publicly
+> would put passwords on the open internet. TLS is the correct long-term fix and
+> is out of scope. There is still no server bind change in app code.
 
 ## Resolved decisions
 Settled calls that should not be re-litigated live in
