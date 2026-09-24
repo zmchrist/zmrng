@@ -7,16 +7,17 @@ import type { NavIconName } from './components/NavIcon'
  * from a hamburger drawer. This module is the pure, DOM-free reducer behind
  * that drawer — `MobileNav.tsx` only renders it.
  */
-export type MobileView = 'tasks' | 'files' | 'terminal' | 'chat' | 'team' | 'kb'
+export type MobileView = 'tasks' | 'files' | 'terminal' | 'chat' | 'lanes' | 'team' | 'kb'
 
 /** The subset of views served by `WorkspaceView` (the rest are App-level modes). */
-export type MobileWorkspaceView = 'tasks' | 'files' | 'terminal' | 'chat'
+export type MobileWorkspaceView = 'tasks' | 'files' | 'terminal' | 'chat' | 'lanes'
 
 export const MOBILE_VIEWS: ReadonlyArray<{ id: MobileView; label: string; icon: NavIconName }> = [
   { id: 'tasks', label: 'Tasks / Worker', icon: 'workspace' },
   { id: 'files', label: 'Files', icon: 'files' },
   { id: 'terminal', label: 'Terminal', icon: 'terminal' },
   { id: 'chat', label: 'Chat', icon: 'chat' },
+  { id: 'lanes', label: 'Lanes', icon: 'lanes' },
   { id: 'team', label: 'Team chat', icon: 'team' },
   { id: 'kb', label: 'KB', icon: 'kb' },
 ]

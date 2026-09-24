@@ -3,7 +3,16 @@ import { render } from '@testing-library/react'
 import { NavIcon, type NavIconName } from '../src/components/NavIcon'
 import { MOBILE_VIEWS } from '../src/mobileNav'
 
-const NAMES: NavIconName[] = ['workspace', 'team', 'kb', 'settings', 'files', 'terminal', 'chat']
+const NAMES: NavIconName[] = [
+  'workspace',
+  'team',
+  'kb',
+  'settings',
+  'files',
+  'terminal',
+  'chat',
+  'lanes',
+]
 
 describe('<NavIcon>', () => {
   it.each(NAMES)('%s is a single-stroke currentColor outline with drawn content', (name) => {

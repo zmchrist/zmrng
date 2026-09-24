@@ -53,6 +53,7 @@ function renderView(mobileView?: MobileWorkspaceView) {
       securityScans={[]}
       live=""
       tasks={[TASK]}
+      lanes={null}
       repos={[{ id: 'zmrng', label: 'zmrng', path: '/x', defaultBranch: 'main' }]}
       config={null}
       selectedId="t1"
@@ -110,6 +111,14 @@ describe('<WorkspaceView> phone shell', () => {
     await screen.findAllByText('Task One')
     expect(document.querySelector('aside')).toHaveAttribute('aria-hidden', 'true')
     expect(visiblePanels()).toHaveLength(1)
+  })
+
+  it('shows the Lanes panel alone for the lanes view', async () => {
+    renderView('lanes')
+    await screen.findAllByText('Task One')
+    const panels = visiblePanels()
+    expect(panels).toHaveLength(1)
+    expect(panels[0]).toContainElement(screen.getByLabelText('Lanes'))
   })
 })
 

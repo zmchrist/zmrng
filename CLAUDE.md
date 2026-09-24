@@ -169,7 +169,7 @@ string interpolation, never `console.log` in server code.
 ## Key services
 Full method signatures, callbacks, wire types, and per-service behavior live in
 **`.claude/docs/services-reference.md`** (server: runner, phases, terminal, chatAgent,
-db, config, worktree, ws, index; frontend: `packages/web/src/`; team workspace).
+lanes, db, config, worktree, ws, index; frontend: `packages/web/src/`; team workspace).
 Read that file when touching a service — it is the reference, not this file.
 
 ## Commands

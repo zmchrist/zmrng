@@ -249,6 +249,33 @@ PR (ADR-0001). The task **stays in `validating`** throughout — there is delibe
 - **Web:** `SecurityPanel` (read-only) renders `securityStatus` + round count + latest
   blocking findings, fed by the route and the live `security` ws event.
 
+### Lane-viewer feed (`workerMeta`, `laneSnapshot()`)
+`TaskManager` also feeds the Lanes panel (see the `LaneEmitter` section below):
+- **`workerMeta: Map<taskId, WorkerMeta>`** (private) — one entry per LIVE runner, keyed off
+  `this.runners`; written fresh in `spawn()` (`{model, effort, style, startedAt, subagents:
+  []}` — the values the child was ACTUALLY spawned with, not the task row's own fields,
+  which stay null until a phase resolves them) and `delete`d everywhere a runner is removed
+  (`fail`, `replaceChild`, `onPr`, `onExit`, `cancel`, `done`, `deleteTask`, `shutdown`) —
+  a `WorkerMeta` never outlives its runner. A phase handoff (`replaceChild` → a fresh
+  `spawn`) therefore starts the new child with an empty subagent list.
+- **`startSubagent`/`finishSubagent`** (private) — append a `running` `LaneSubagent` row
+  from `onToolUse(..., isSubagent, subagentType)`, close it from `onSubagentResult`. Events
+  carry no subagent id, so `finishSubagent` matches the OLDEST still-`running` row of the
+  same `type` (FIFO) — two concurrent subagents of the same type have their first result
+  close the older row; that is the event stream's honest limit, not a bug. Both call
+  `trimSubagents` (bounded at `MAX_SUBAGENT_ROWS = 50`, dropping COMPLETED rows oldest-first;
+  a list of nothing but running rows is left over-bound rather than hiding live work).
+- **`laneSnapshot(): { execute: LaneOccupancy; workers: LaneWorker[] }`** — the task half of
+  the lane snapshot. `execute` is `{cap: config.maxLanes, holders: [...executeLanes], queued:
+  [...executeQueue]}`; `workers` is one `LaneWorker` per live runner (dead runners can never
+  render a stale row — including a boot-time orphan, since a fresh `TaskManager` has an empty
+  `runners` map), each `holdsLane` mirroring `executeLanes.has(taskId)` and `subagents` a
+  defensive copy so a later append can't mutate an already-emitted frame.
+- **`onLanesChange: () => void`** — optional trailing 5th constructor param (default no-op);
+  fired from `patch()`, every lane acquire/release (`takeLane`/`queueLane`/`freeLane`,
+  replacing direct `executeLanes.add`/`executeQueue.push`), `spawn()`, subagent start/finish,
+  and every runner-removal site above. `index.ts` wires it to `() => emitter.notify()`.
+
 ## Terminal — `packages/server/src/terminal.ts`
 
 Owns the PTY sessions backing the Workspace Terminal card (`GET /ws/terminal`). Sessions
@@ -271,11 +298,14 @@ factory-seam pattern so tests never spawn a real shell.
   string, cols:number, rows:number}`, `{type:'input', data:string}`, and
   `{type:'resize', cols:number, rows:number}`.
 - **`TerminalManager`** — tracks live sessions in a `Map<sessionId, TermSession>` (each
-  `TermSession` wraps the `PtySession` + a bounded byte-capped ring buffer of recent
-  output + a pending grace-timer handle). Two extra injectable seams alongside
-  `PtyFactory`: a `TimerFns` (`setTimeout`/`clearTimeout`, default the real globals) and
-  an id factory (default `randomUUID`) — both swappable so tests can fast-forward grace
-  expiry without real timers.
+  `TermSession` wraps the `PtySession` + `shell`/`cwd`/`startedAt` recorded at spawn time +
+  a bounded byte-capped ring buffer of recent output + a pending grace-timer handle). Three
+  extra injectable seams alongside `PtyFactory`: a `TimerFns` (`setTimeout`/`clearTimeout`,
+  default the real globals), an id factory (default `randomUUID`), and an optional trailing
+  `onChange: () => void` (default no-op) — both timer/id seams swappable so tests can
+  fast-forward grace expiry without real timers; `onChange` fires on spawn, attach-to-
+  existing (an `attached` flip), detach, grace reap, exit, and `killAll()`, wired by
+  `index.ts` to `() => emitter.notify()`.
   - **`attach(sessionId: string | undefined, cb: PtyCallbacks): { sessionId: string;
     replay: string }`** — resolve-or-spawn. A known, still-live id cancels its pending
     grace timer, swaps in the new socket's callbacks, and returns its ring-buffered
@@ -291,6 +321,10 @@ factory-seam pattern so tests never spawn a real shell.
   - **`killAll(): void`** — best-effort `kill()` (try/catch) on every tracked session,
     clears all pending grace timers, then clears the map. Called from `index.ts`'s
     `shutdown()` alongside `manager.shutdown()`.
+  - **`snapshot(): LaneTerminal[]`** — one read-only row per LIVE session, for the lane
+    viewer: `{id, shell, cwd, startedAt, attached}`, `attached` DERIVED from `cb !== null`
+    so a shell kept alive inside its detach grace window reports `attached: false` rather
+    than looking like an open terminal.
 
 ## ChatManager — `packages/server/src/chatAgent.ts`
 
@@ -317,19 +351,68 @@ distinct from the existing per-task `/api/tasks/:id/chat` REST chat (`chat.ts`,
   array is empty.
 - **`ChatConfig`** — `{ model: string; effort: EffortLevel; style: CaveStyle }`, the
   per-tab controls chosen for one session.
-- **`ChatManager`** — tracks live sessions in a `Set<RunnerLike>`; constructed with the
-  same `RunnerFactory` seam `TaskManager` uses (`defaultRunnerFactory` by default) so
-  tests never spawn a real `claude`.
+- **`ChatManager`** — tracks live sessions in a `Map<RunnerLike, ChatSessionMeta>` (the
+  runner handle is the identity the route holds; `ChatSessionMeta` carries the controls the
+  session was spawned with, its resolved `repoId`/`null`, `voice`, `startedAt`, and a running
+  `TaskUsage` accumulator). Constructed with the same `RunnerFactory` seam `TaskManager`
+  uses (`defaultRunnerFactory` by default) so tests never spawn a real `claude`, plus two
+  optional trailing seams: an `idFactory` (default `randomUUID`, mirrors `TerminalManager`'s)
+  assigning each session's `LaneChat.id`, and an `onChange: () => void` (default no-op)
+  firing on create/exit/`killAll()` and on every `onResult` usage fold-in — wired by
+  `index.ts` to `() => emitter.notify()`.
   - **`create(cfg: ChatConfig, cb: RunnerCallbacks): RunnerLike`** — spawns one
     conversational `claude` rooted at `config.projectsDir` with `chatSystemPrompt(cfg.style,
-    config.projectsDir)` as its system prompt, wraps `onExit` to self-remove the session
-    from the tracked set *before* notifying the caller (so a later `killAll()` never
+    config.projectsDir)` as its system prompt, wraps `onResult` to fold the turn's `usage`
+    delta into the session's accumulator BEFORE calling through (so a caller reacting to
+    `onResult` already sees the updated snapshot) and `onExit` to self-remove the session
+    from the tracked map *before* notifying the caller (so a later `killAll()` never
     double-kills an already-exited session), and tracks the result. The OAuth env-strip
     already lives inside `Runner`'s constructor, so (unlike `TerminalManager`) this
     manager does not repeat it.
   - **`killAll(): void`** — best-effort `kill()` (try/catch) on every tracked session, then
-    clears the set. Called from `index.ts`'s `shutdown()` alongside `manager.shutdown()`
+    clears the map. Called from `index.ts`'s `shutdown()` alongside `manager.shutdown()`
     and `terminals.killAll()`.
+  - **`snapshot(): LaneChat[]`** — one read-only row per LIVE session, for the lane viewer
+    (`{id, model, effort, style, repoId, voice, startedAt, usage}`); `usage` is copied so a
+    later fold-in can't mutate an already-emitted frame.
+
+## Lanes — `packages/server/src/lanes.ts`
+
+Assembles the read-only, in-memory "everything zmrng is running right now" snapshot behind
+the Lanes panel (`GET /api/lanes` + the `lanes` WS frame). zmrng has exactly **one** capped
+lane pool (`config.maxLanes`, held planning → executing → validating plus security fix
+rounds); `clarify` holds no lane and is uncapped — the snapshot reports that truth (an
+uncapped clarify group) rather than inventing a second pool. Nothing here is persisted; the
+whole snapshot is rebuilt from the three live-session managers on every push.
+
+- **`LaneSources`** — the three managers reduced to the read-only accessors
+  `buildLaneSnapshot` actually needs: `tasks(): { execute: LaneOccupancy; workers:
+  LaneWorker[] }` (→ `TaskManager.laneSnapshot()`), `chats(): LaneChat[]` (→
+  `ChatManager.snapshot()`), `terminals(): LaneTerminal[]` (→ `TerminalManager.snapshot()`).
+  Injecting the accessors rather than the managers is what keeps `buildLaneSnapshot` pure
+  and hermetic — it only ever type-imports `terminal.ts` (for `TimerFns`), never imports
+  `node-pty` at runtime, so the lanes module stays unit-testable without it.
+- **`buildLaneSnapshot(sources: LaneSources, at: string): LaneSnapshot`** — pure. Reads each
+  source exactly once and returns `{at, execute, workers, chats, terminals}` — the exact
+  payload both `GET /api/lanes` and the `lanes` WS frame carry.
+- **`LaneEmitter`** — coalescing broadcaster. A single subagent tool event can fire several
+  `onChange`/`onLanesChange` notifications in a row, and a busy instance fires them from all
+  three managers at once, so rebuilding + re-serializing per event would be wasteful.
+  - **`notify(): void`** — requests a push; absorbed into an already-pending one (trailing,
+    not leading — a burst inside the coalescing window collapses to one send at the end of
+    it). The pending timer is cleared *before* the send so a `notify()` raised from inside
+    the send path re-arms the window instead of being swallowed.
+  - **`snapshot(): LaneSnapshot`** — builds immediately, without scheduling or sending;
+    used by both `GET /api/lanes` and the `/ws` connect frame (mirrors `snapshot: tasks`
+    seeding the board over `/ws`).
+  - Constructor: `(sources, send: (snapshot) => void, timers: TimerFns = realTimers, delayMs
+    = 150, clock: () => string = () => new Date().toISOString())` — `timers`/`delayMs`/
+    `clock` are injectable so tests drive the coalescing window synchronously and pin the
+    `at` instant, mirroring `TerminalManager`'s `TimerFns` seam.
+- **Wiring (`index.ts`)** — `terminals`/`chats`/`manager` are each constructed with a
+  trailing `onChange`/`onLanesChange` arrow deferring to `emitter.notify()`, and `emitter`
+  itself is constructed afterward (reading the three managers via closures, so the
+  construction-order cycle resolves through the arrow indirection, not a forward reference).
 
 ## Db — `packages/server/src/db.ts`
 
@@ -454,6 +537,10 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `manager.message()`; each route's title/text is now required *or* an attachment is
   present (image/PDF-only turns are valid — `POST /api/tasks` still always requires a
   title, `POST /api/tasks/:id/message` requires text or an attachment).
+  **`GET /api/lanes`** (→ `emitter.snapshot()`) — everything zmrng is running right now
+  (Lanes panel); read-only and in-memory, built on demand from the three live-session
+  managers, never persisted. Serves the client's initial load; the same payload streams
+  live as the `lanes` WS frame (see WS below).
   `GET`/`PUT /api/settings` returns/patches the durable per-user `WorkspaceSettings`
   (`{ teamHandle }`) persisted in `zmrng.db` (the `settings` kv table) — the Team
   display-name handle moved here from browser `localStorage`, which was unreliable
@@ -471,7 +558,11 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `PUT` additionally rejecting image/PDF paths) — that already exist in `index.ts`; a
   fuller pass is owed here, tracked as a doc-sync gap rather than documented speculatively
   in this change.)
-- **WS:** `GET /ws` — adds the socket to the hub, sends a `snapshot`. `GET /ws/terminal` —
+- **WS:** `GET /ws` — adds the socket to the hub, sends a `snapshot`, then seeds the Lanes
+  panel with a `{type:'lanes', snapshot: emitter.snapshot()}` frame (exactly as `snapshot`
+  seeds the board) — live updates thereafter arrive as further `lanes` frames broadcast by
+  the `LaneEmitter` (see `lanes.ts` above) whenever a worker/chat/terminal session changes.
+  `GET /ws/terminal` —
   the socket ATTACHES to a server-owned session rather than owning the shell outright.
   The first client frame is `attach` (carrying the stored `sessionId` if the client has
   one); the server resolves-or-spawns via `TerminalManager.attach()`, replies with a
@@ -533,11 +624,16 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `attachments?: Attachment[]`, sent as-is in the JSON body for the server's
   `sanitizeAttachments()` to re-validate. `restartAgent(id)` → bodyless
   `POST /api/tasks/:id/restart`, distinct from the self-update `POST /api/restart`.
+  `getLanes()` → `GET /api/lanes` (`LaneSnapshot`) — the Lanes panel's boot load; live
+  updates thereafter arrive as `lanes` frames over the `/ws` hub, not repeated polling.
 - **types.ts** — MANUAL mirror of `packages/server/src/types.ts`. `EventSub` includes
   `'tool' | 'subagent' | 'subagent_result'`; `EventPayload` includes `tool?`, `actor?`,
   `subagentType?`, `summary?`. `Task.stale?: boolean` — true when the task is in a live
   phase but its worker session was lost (the app was restarted); set only at boot
-  reconciliation, cleared when a fresh agent is (re)spawned.
+  reconciliation, cleared when a fresh agent is (re)spawned. `LaneSubagent` /
+  `LaneWorker` / `LaneChat` / `LaneTerminal` / `LaneOccupancy` / `LaneSnapshot` — the Lanes
+  panel's wire types, mirrored verbatim from the server (see the `lanes.ts` section above
+  for field-by-field detail). `WsEvent` gained `{type:'lanes'; snapshot: LaneSnapshot}`.
 - **status.ts** — `statusColor(status)` backed by `--status-*` tokens; `actorColor(actor)`
   backed by `--actor-*` tokens (`main`, `frontend-specialist`, `backend-specialist`, `qa`,
   `code-reviewer`, `doc-updater`, `general-purpose`, with `--actor-default` fallback).
@@ -677,6 +773,40 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   (tasks awaiting review). Unit-tested in `packages/web/test/dashboardData.test.ts`.
 - **cardMeta.ts** — `CARD_TITLES` + `CARD_ACCENTS` (per-card `var(--*)` accent token)
   `Record<GridCardId, string>` maps, shared by `WorkspaceGrid` and `BottomNav`.
+- **laneRows.ts** (current as of 2026-09-23) — pure, React-free join feeding the Lanes tab.
+  The server's `LaneSnapshot` deliberately carries only what the client cannot know
+  (subagents, chat sessions, PTYs, lane occupancy); this module joins it against the
+  `Task[]`/`RepoTarget[]` the client already holds over the `/ws` hub — same
+  no-duplication pattern as `dashboardData.ts`. **`laneRows(snapshot, tasks, repos):
+  LaneRows`** — `{execute: {used, cap, queued}, lanes, clarify, chats, terminals}`; a
+  worker or queued entry whose task id isn't in `tasks` is dropped (no title/status to
+  show, so no row). **`repoLabel(repoId, repos)`** — a chat session's repo label; `null`
+  or an unresolvable id both read `PROJECTS_ROOT_LABEL` ("Projects root"). **`taskRepoLabel
+  (repoId, repos)`** — a task's repo label; unlike a chat, a task always targets a
+  registered repo, so an id missing from the registry falls back to the raw id (mirrors
+  `TaskList`'s convention), never to the Projects root. **`formatElapsed(startedAt, now)`**
+  — `45s` / `2m 05s` / `2h 03m`; clock skew clamps to `0s`, an unparseable timestamp reads
+  as `—`. **`formatTokens(n)`** — thousands-grouped integer, matching the task list's usage
+  formatting. Unit-tested in `packages/web/test/laneRows.test.ts`.
+- **components/LanesPanel.tsx** (current as of 2026-09-23) — the read-only Lanes tab,
+  rendered inside `WorkspaceView`'s fixed pane-tab strip (`PaneTab` gained `'lanes'`
+  alongside `worker`/`files`/`terminal`/`chat`; `MobileWorkspaceView`/`MobileView` in
+  `mobileNav.ts` gained the matching `'lanes'` entry for the phone drawer, and
+  `NavIconName` gained a `'lanes'` glyph — three stacked lanes of decreasing length).
+  Purely presentational: every row comes from `laneRows()`, so the component owns nothing
+  but a 1s elapsed-time tick that runs ONLY while its tab is the active one (`active` prop)
+  — going inactive or unmounting clears the interval, and the immediate first tick on
+  re-activation catches the clock up rather than showing a stale elapsed until the next
+  interval fires. Renders four groups in order: **Execute lanes** (the single capped pool
+  — lane-holding workers, then a "Queued (n)" sub-list in promotion order), **Clarify**
+  (uncapped, only rendered when non-empty — the deliberate second, un-pooled group rather
+  than a second invented lane pool), **Chat sessions**, **Terminals**; an empty snapshot
+  across all four renders "Nothing running right now." A worker row lists its subagent
+  child rows indented beneath it, color-accented via the existing `actorColor(type)`;
+  status pills reuse `statusColor(status)`. Not unit-tested itself (its logic is the pure
+  `laneRows.ts` module); `WorkspaceView` passes it `lanes` (the `App.tsx`-owned
+  `laneSnapshot` state, fetched once via `api.getLanes()` on boot and kept current by the
+  `lanes` case in `App.tsx`'s `onWs` switch), `tasks`, `repos`, and `active`.
 
 ---
 

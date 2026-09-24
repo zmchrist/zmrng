@@ -16,6 +16,7 @@ export type NavIconName =
   | 'files'
   | 'terminal'
   | 'chat'
+  | 'lanes'
 
 const SHAPES: Record<NavIconName, ReactNode> = {
   // Simple outline speech bubble with a tail.
@@ -56,6 +57,14 @@ const SHAPES: Record<NavIconName, ReactNode> = {
       <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
       <path d="m7.5 10 3 2.5-3 2.5" />
       <path d="M13 15h3.5" />
+    </>
+  ),
+  // Three stacked lanes of decreasing length (the execute-lane pool).
+  lanes: (
+    <>
+      <path d="M4 7h16" />
+      <path d="M4 12h11" />
+      <path d="M4 17h6" />
     </>
   ),
   // Four-point sparkle.
