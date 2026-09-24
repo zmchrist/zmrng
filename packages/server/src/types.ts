@@ -846,7 +846,12 @@ export interface KbFolder {
  * sits at the space root. `body` is the page's ENTIRE content — one continuous
  * plaintext/markdown field (no per-block model): the editor is a single field
  * you click into and type, rendered Obsidian-style (live markdown, interactive
- * checklists) across the whole body. `author` is the page's original creator;
+ * checklists) across the whole body. Rendering is CLIENT-ONLY — the supported
+ * inline conventions (emphasis, code, `~~strike~~`, `==highlight==`, `<u>`,
+ * `<span style="color:#RRGGBB">`, `<mark style="background:#RRGGBB">`, links,
+ * bullet/ordered/checklist lines) live in the web workspace's `kbMarkdown.ts`
+ * and its formatting toolbar's `kbEdits.ts`; the server stores the body
+ * verbatim and parses none of it. `author` is the page's original creator;
  * `updatedBy` is the self-asserted handle of whoever last saved the body
  * (concurrency is last-write-wins — the server always accepts the latest save).
  */

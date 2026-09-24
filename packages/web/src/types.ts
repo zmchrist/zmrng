@@ -819,7 +819,11 @@ export interface KbFolder {
  * One KB page. `folderId` places the page inside a folder; null means the page
  * sits at the space root. `body` is the page's ENTIRE content — one continuous
  * plaintext/markdown field (no per-block model), rendered Obsidian-style (live
- * markdown, interactive checklists). `author` is the original creator;
+ * markdown, interactive checklists). Rendering is client-only: the supported
+ * inline conventions (emphasis, code, `~~strike~~`, `==highlight==`, `<u>`,
+ * `<span style="color:#RRGGBB">`, `<mark style="background:#RRGGBB">`, links,
+ * bullet/ordered/checklist lines) live in `kbMarkdown.ts` and the formatting
+ * toolbar's `kbEdits.ts`. `author` is the original creator;
  * `updatedBy` is the self-asserted handle of whoever last saved the body
  * (concurrency is last-write-wins).
  */
