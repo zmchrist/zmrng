@@ -183,3 +183,32 @@
   color: var(--text-dim);
   word-break: break-word;
 }
+
+/* Every row is a button that jumps to its worker / chat / terminal. Reset the
+   native button chrome so it still reads as a row, then add a hover + focus
+   state from the same tokens as the rest of the panel. */
+.rowMain,
+.subRow {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.rowMain:hover,
+.subRow:hover {
+  background: var(--surface-hover);
+}
+
+.rowMain:focus-visible,
+.subRow:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}

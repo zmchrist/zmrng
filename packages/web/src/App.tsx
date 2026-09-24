@@ -448,6 +448,7 @@ export default function App() {
               selectedId={selectedId}
               tasksCollapsed={tasksCollapsed}
               mobileView={isMobile ? (workspaceViewFor(nav.view) ?? 'tasks') : undefined}
+              onMobileViewChange={onSelectMobileView}
               chatTabs={chatTabs}
               onChatTabsChange={setChatTabs}
               terminalTabs={terminalTabs}

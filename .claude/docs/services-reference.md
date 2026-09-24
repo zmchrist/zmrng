@@ -372,6 +372,9 @@ distinct from the existing per-task `/api/tasks/:id/chat` REST chat (`chat.ts`,
   - **`killAll(): void`** — best-effort `kill()` (try/catch) on every tracked session, then
     clears the map. Called from `index.ts`'s `shutdown()` alongside `manager.shutdown()`
     and `terminals.killAll()`.
+  - **`laneId(session): string | undefined`** — the id a live session is listed under in
+    `snapshot()`, or `undefined` once it has exited; the `/ws/chat` route sends it as the
+    `lane` frame.
   - **`snapshot(): LaneChat[]`** — one read-only row per LIVE session, for the lane viewer
     (`{id, model, effort, style, repoId, voice, startedAt, usage}`); `usage` is copied so a
     later fold-in can't mutate an already-emitted frame.
@@ -600,6 +603,9 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   drop/paste attachments) | `{type:'interrupt'}` (cuts the in-flight turn without killing
   the session).
 - **`ChatServerMsg`** (server→client) — `{type:'ready'; sessionId: string}` |
+  `{type:'lane'; laneId: string}` (the session's Lanes row id, `LaneChat.id`, sent right
+  after every (re)spawn via `ChatManager.laneId(session)`; `ChatCard` stores it on the tab
+  as `ChatTabMeta.laneId` so a Lanes chat-row click can focus that tab) |
   `{type:'partial'; text: string}` | `{type:'assistant'; text: string}` |
   `{type:'tool'; name: string; summary: string; actor: string; isSubagent: boolean}` |
   `{type:'result'; isError: boolean}` | `{type:'exit'; code: number | null}` |
@@ -788,7 +794,13 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   — `45s` / `2m 05s` / `2h 03m`; clock skew clamps to `0s`, an unparseable timestamp reads
   as `—`. **`formatTokens(n)`** — thousands-grouped integer, matching the task list's usage
   formatting. Unit-tested in `packages/web/test/laneRows.test.ts`.
-- **components/LanesPanel.tsx** (current as of 2026-09-23) — the read-only Lanes tab,
+- **components/LanesPanel.tsx** (current as of 2026-09-24) — the Lanes tab. Every row is a
+  native `<button>` reporting a `LaneTarget` (`laneRows.ts`) through `onOpen`: worker,
+  queued, clarify and subagent rows → `{kind:'task'}` (a subagent opens its parent task);
+  chat rows → `{kind:'chat', laneId}`; terminal rows → `{kind:'terminal', sessionId}`.
+  `WorkspaceView.openLane` selects the task + Worker tab, or focuses the exact owning tab
+  via `windowTabs.ts`'s `focusChatLane`/`focusTerminalSession` (a no-op when no tab here
+  owns the session), and on the phone shell also calls `onMobileViewChange`. It is
   rendered inside `WorkspaceView`'s fixed pane-tab strip (`PaneTab` gained `'lanes'`
   alongside `worker`/`files`/`terminal`/`chat`; `MobileWorkspaceView`/`MobileView` in
   `mobileNav.ts` gained the matching `'lanes'` entry for the phone drawer, and

@@ -391,6 +391,12 @@ export interface ChatTabMeta {
    *  `'none'`. A persisted tab lacking the field hydrates as `'none'`. */
   workflow?: WorkflowPreset
   launched: boolean
+  /**
+   * Lanes row id (`LaneChat.id`) of the live session this tab last spawned, so
+   * a Lanes chat-row click can focus this tab. Transient: overwritten on every
+   * (re)spawn; absent until the session starts.
+   */
+  laneId?: string
 }
 
 // ---- workspace tab-pane layout (Zed-style collapsible tabs) ----
@@ -682,6 +688,8 @@ export type ChatClientMsg =
 /** server -> client chat frames — one per meaningful Runner callback. */
 export type ChatServerMsg =
   | { type: 'ready'; sessionId: string }
+  /** The session's Lanes row id (`LaneChat.id`), sent on every (re)spawn. */
+  | { type: 'lane'; laneId: string }
   | { type: 'partial'; text: string }
   | { type: 'assistant'; text: string }
   | { type: 'tool'; name: string; summary: string; actor: string; isSubagent: boolean }

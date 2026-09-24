@@ -1239,6 +1239,10 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
           },
         },
       )
+      // Tell the client which Lanes row this session is, so clicking that row
+      // can focus the owning chat tab. Sent on every (re)spawn.
+      const laneId = chats.laneId(session)
+      if (laneId) send({ type: 'lane', laneId })
     } catch (err) {
       app.log.error({ err }, 'chat spawn failed')
       send({ type: 'error', text: errMsg(err) })

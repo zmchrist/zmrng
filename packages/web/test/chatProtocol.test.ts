@@ -138,6 +138,15 @@ describe('parseChatServerMsg', () => {
     })
   })
 
+  it('decodes the lane frame carrying the session\'s Lanes row id', () => {
+    expect(parseChatServerMsg(JSON.stringify({ type: 'lane', laneId: 'l1' }))).toEqual({
+      type: 'lane',
+      laneId: 'l1',
+    })
+    expect(parseChatServerMsg(JSON.stringify({ type: 'lane' }))).toBeUndefined()
+    expect(parseChatServerMsg(JSON.stringify({ type: 'lane', laneId: 7 }))).toBeUndefined()
+  })
+
   it('returns undefined for near-miss cases and never throws', () => {
     expect(parseChatServerMsg('{not json')).toBeUndefined()
     expect(parseChatServerMsg(JSON.stringify({ type: 'nope' }))).toBeUndefined()
