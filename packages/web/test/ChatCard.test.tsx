@@ -37,3 +37,48 @@ describe('ChatCard close', () => {
     expect(screen.queryByText('Chat 1')).toBeNull()
   })
 })
+
+describe('ChatCard launch settings menu', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  const fresh = () => hydrateChatTabs({
+    tabs: [{ id: 'chat-1', label: 'Chat 1', model: 'sonnet', effort: 'medium', style: 'caveman-full', repoId: '', launched: false }],
+    activeId: 'chat-1',
+  })
+
+  it('hides the pickers until the hamburger is opened, and toggles closed', () => {
+    render(<Harness initial={fresh()} />)
+    expect(screen.queryByLabelText('Model')).toBeNull()
+    const btn = screen.getByRole('button', { name: 'Chat settings' })
+    fireEvent.click(btn)
+    for (const l of ['Model', 'Effort', 'Style', 'Workflow', 'Repo']) expect(screen.getByLabelText(l)).toBeTruthy()
+    fireEvent.click(btn)
+    expect(screen.queryByLabelText('Model')).toBeNull()
+  })
+
+  it('closes on outside tap but not on a tap inside the popover', () => {
+    render(<Harness initial={fresh()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Chat settings' }))
+    fireEvent.mouseDown(screen.getByLabelText('Model'))
+    expect(screen.getByLabelText('Model')).toBeTruthy()
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByLabelText('Model')).toBeNull()
+  })
+
+  it('closes on Launch', () => {
+    render(<Harness initial={fresh()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Chat settings' }))
+    // Launch mounts ChatPane (opens a socket) — stub WebSocket for this test.
+    const orig = globalThis.WebSocket
+    globalThis.WebSocket = class { close() {} addEventListener() {} send() {} } as unknown as typeof WebSocket
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
+    } finally {
+      globalThis.WebSocket = orig
+    }
+    // The live ChatPane has its own Model select, so assert on the popover itself.
+    expect(screen.queryByRole('group', { name: 'Chat settings' })).toBeNull()
+  })
+})
