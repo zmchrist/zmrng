@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import { NavIcon } from './NavIcon'
 import styles from './WorkerLog.module.css'
 import type { TaskEvent } from '../types'
 import { actorColor } from '../status'
@@ -61,7 +62,7 @@ function renderEvent(ev: TaskEvent) {
     return (
       <div className={styles.tool} style={{ borderLeftColor: color }} key={ev.id}>
         <span className={styles.toolName} style={{ color }}>
-          ⚙ {payload.tool}
+          <NavIcon name="tool" /> {payload.tool}
         </span>
         {payload.summary ? `: ${payload.summary}` : ''}
       </div>
@@ -72,7 +73,7 @@ function renderEvent(ev: TaskEvent) {
     return (
       <div className={styles.subagent} style={{ borderLeftColor: color }} key={ev.id}>
         <span className={styles.subagentName} style={{ color }}>
-          ▸ {payload.subagentType}
+          <NavIcon name="chevron-right" /> {payload.subagentType}
         </span>
         {payload.summary ? ` — ${payload.summary}` : ''}
       </div>
@@ -143,7 +144,7 @@ export function WorkerLog({ events, live, thinking }: Props) {
       </div>
       {hasNew && (
         <button type="button" className={styles.newMsgPill} onClick={scrollToBottom}>
-          ↓ New message
+          <NavIcon name="arrow-down" /> New message
         </button>
       )}
     </div>

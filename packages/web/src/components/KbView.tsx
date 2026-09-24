@@ -710,7 +710,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                 disabled={busy}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                  <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                 </svg>
               </button>
             )}
@@ -744,7 +744,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                     disabled={busy}
                   >
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
-                      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                     </svg>
                   </button>
                 )}
@@ -816,11 +816,11 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                     <path
                       d="M4 1.5h4.5L13 6v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"
                       stroke="currentColor"
-                      strokeWidth="1.2"
+                      strokeWidth="1.6"
                       strokeLinejoin="round"
                     />
-                    <path d="M8.25 1.75V6H12.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-                    <path d="M8 8.5v4M6 10.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                    <path d="M8.25 1.75V6H12.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                    <path d="M8 8.5v4M6 10.5h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                   </svg>
                 </button>
                 <button
@@ -835,10 +835,10 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                     <path
                       d="M1.5 4a1 1 0 0 1 1-1h3l1.5 1.5H13.5a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4Z"
                       stroke="currentColor"
-                      strokeWidth="1.2"
+                      strokeWidth="1.6"
                       strokeLinejoin="round"
                     />
-                    <path d="M8 7v3.5M6.25 8.75h3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                    <path d="M8 7v3.5M6.25 8.75h3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                   </svg>
                 </button>
               </>

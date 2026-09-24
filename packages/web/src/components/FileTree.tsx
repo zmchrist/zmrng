@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { NavIcon } from './NavIcon'
 import styles from './FileTree.module.css'
 import type { WorktreeFileNode } from '../types'
 
@@ -102,7 +103,7 @@ function TreeNode({ node, depth, onOpen, selectedPath, dnd }: NodeProps) {
         {...dropProps}
       >
         <span className={`${styles.caret} ${open ? styles.caretOpen : ''}`} aria-hidden>
-          ▸
+          <NavIcon name="chevron-right" />
         </span>
         <span className={styles.label}>{node.name}</span>
       </button>

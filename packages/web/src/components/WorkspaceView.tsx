@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { NavIcon } from './NavIcon'
 import styles from './WorkspaceView.module.css'
 import type {
   Attachment,
@@ -340,7 +341,7 @@ export function WorkspaceView({
                     aria-label="Refresh file tree"
                     title="Refresh file tree"
                   >
-                    ↻
+                    <NavIcon name="refresh" />
                   </button>
                 </div>
                 <div className={styles.fileTreeScroll}>
@@ -422,7 +423,7 @@ export function WorkspaceView({
                 title="Close"
                 onClick={() => setNewTaskOpen(false)}
               >
-                ×
+                <NavIcon name="close" />
               </button>
             </div>
             <NewTaskForm

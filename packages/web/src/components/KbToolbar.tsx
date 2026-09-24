@@ -224,7 +224,7 @@ function Chevron() {
 function BulletIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M6 4h8M6 8h8M6 12h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M6 4h8M6 8h8M6 12h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
       <circle cx="3" cy="4" r="1" fill="currentColor" />
       <circle cx="3" cy="8" r="1" fill="currentColor" />
       <circle cx="3" cy="12" r="1" fill="currentColor" />
@@ -235,11 +235,11 @@ function BulletIcon() {
 function OrderedIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M6 4h8M6 8h8M6 12h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M6 4h8M6 8h8M6 12h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
       <path
         d="M2 2.5h1V6M1.6 9.2c.2-.5.7-.8 1.2-.6.6.2.7.9.3 1.3L1.7 11.5H3.2"
         stroke="currentColor"
-        strokeWidth="1"
+        strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -250,11 +250,11 @@ function OrderedIcon() {
 function ChecklistIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M7 4h8M7 11h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M7 4h8M7 11h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
       <path
         d="M1.5 4l1.2 1.2L5 2.8M1.5 11l1.2 1.2L5 9.8"
         stroke="currentColor"
-        strokeWidth="1.2"
+        strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -268,13 +268,13 @@ function LinkIcon() {
       <path
         d="M6.5 9.5a2.5 2.5 0 0 1 0-3.5l2-2a2.5 2.5 0 0 1 3.5 3.5l-1 1"
         stroke="currentColor"
-        strokeWidth="1.2"
+        strokeWidth="1.6"
         strokeLinecap="round"
       />
       <path
         d="M9.5 6.5a2.5 2.5 0 0 1 0 3.5l-2 2A2.5 2.5 0 0 1 4 8.5l1-1"
         stroke="currentColor"
-        strokeWidth="1.2"
+        strokeWidth="1.6"
         strokeLinecap="round"
       />
     </svg>
@@ -287,7 +287,7 @@ function HighlightIcon() {
       <path
         d="M9.5 2.5l4 4-5 5H5l-1.5-1.5 6-7.5Z"
         stroke="currentColor"
-        strokeWidth="1.2"
+        strokeWidth="1.6"
         strokeLinejoin="round"
       />
       <path d="M2 14h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

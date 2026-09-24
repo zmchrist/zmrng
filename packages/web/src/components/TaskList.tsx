@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { NavIcon } from './NavIcon'
 import styles from './TaskList.module.css'
 import ctrl from './TaskActions.module.css'
 import type { RepoTarget, ServerConfig, Task } from '../types'
@@ -220,7 +221,7 @@ export function TaskList({
                     aria-expanded={detailsOpen}
                     onClick={() => setDetailsOpen((v) => !v)}
                   >
-                    <span aria-hidden="true">{detailsOpen ? '▾' : '▸'}</span> Details
+                    <span aria-hidden="true">{detailsOpen ? <NavIcon name="chevron-down" /> : <NavIcon name="chevron-right" />}</span> Details
                   </button>
 
                   {detailsOpen && (

@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { NavIcon } from './NavIcon'
 import styles from './TeamView.module.css'
 import type { Channel, Message, RepoTarget, WorkspaceMember, Space } from '../types'
 import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from '../types'
@@ -674,7 +675,7 @@ function TeamViewComponent({
               }}
               title={creating ? 'Cancel' : 'New channel'}
             >
-              {creating ? '×' : '+ new'}
+              {creating ? <NavIcon name="close" /> : <><NavIcon name="plus" /> new</>}
             </button>
           </div>
           {creating && (
@@ -870,7 +871,7 @@ function TeamViewComponent({
                           title="Add reaction"
                           aria-label="Add reaction"
                         >
-                          ☺
+                          <NavIcon name="smile" />
                         </button>
                         {pickerFor === m.id && (
                           <div
