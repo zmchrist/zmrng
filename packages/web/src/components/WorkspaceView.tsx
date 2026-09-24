@@ -5,6 +5,7 @@ import type {
   CaveStyle,
   EffortLevel,
   FlowMode,
+  LaneSnapshot,
   ModelAlias,
   RepoTarget,
   ServerConfig,
@@ -22,6 +23,7 @@ import { ChatCard } from './ChatCard'
 import { TerminalCard } from './TerminalCard'
 import { WorkerLogPanel } from './WorkerLogPanel'
 import { SecurityPanel } from './SecurityPanel'
+import { LanesPanel } from './LanesPanel'
 import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
 import type { HandoffPrefill } from '../teamHandoff'
 import type { SecurityScan } from '../types'
@@ -35,12 +37,13 @@ import {
 } from '../mobileTaskPanel'
 
 /** Worker-pane tabs — the fixed Cosmos IDE tab set (replaces the draggable grid). */
-type PaneTab = 'worker' | 'files' | 'terminal' | 'chat'
+type PaneTab = 'worker' | 'files' | 'terminal' | 'chat' | 'lanes'
 const PANE_TABS: ReadonlyArray<{ id: PaneTab; label: string }> = [
   { id: 'worker', label: 'Worker' },
   { id: 'files', label: 'Files' },
   { id: 'terminal', label: 'Terminal' },
   { id: 'chat', label: 'Chat' },
+  { id: 'lanes', label: 'Lanes' },
 ]
 
 interface Props {
@@ -50,6 +53,9 @@ interface Props {
   securityScans: SecurityScan[]
   live: string
   tasks: Task[]
+  /** Live snapshot of everything zmrng is running (Lanes tab); `null` until the
+   *  first `lanes` frame / boot fetch lands. */
+  lanes: LaneSnapshot | null
   repos: RepoTarget[]
   config: ServerConfig | null
   selectedId: string | null
@@ -112,6 +118,7 @@ export function WorkspaceView({
   securityScans,
   live,
   tasks,
+  lanes,
   repos,
   config,
   selectedId,
@@ -376,6 +383,22 @@ export function WorkspaceView({
             role="tabpanel"
           >
             <ChatCard tabs={chatTabs} onTabsChange={onChatTabsChange} repos={repos} />
+          </div>
+
+          {/* Lanes — read-only view of every live worker/chat/PTY. Kept mounted
+              like its neighbours, but told when it is hidden so its 1s elapsed
+              tick stops costing anything. */}
+          <div
+            className={styles.tabPanel}
+            style={{ display: activeTab === 'lanes' ? 'flex' : 'none' }}
+            role="tabpanel"
+          >
+            <LanesPanel
+              snapshot={lanes}
+              tasks={tasks}
+              repos={repos}
+              active={activeTab === 'lanes'}
+            />
           </div>
         </div>
       </section>

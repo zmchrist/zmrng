@@ -16,6 +16,7 @@ import type {
   WorkspaceSettings,
   Attachment,
   SecurityScan,
+  LaneSnapshot,
 } from './types'
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
@@ -69,6 +70,9 @@ export default function App() {
   const [securityScans, setSecurityScans] = useState<SecurityScan[]>([])
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
+  // Everything zmrng is running right now (Lanes tab). Server-assembled and
+  // in-memory only: fetched once on boot, then pushed as `lanes` frames.
+  const [laneSnapshot, setLaneSnapshot] = useState<LaneSnapshot | null>(null)
   const [repos, setRepos] = useState<RepoTarget[]>([])
   // Durable server-side Team prefs (the display-name handle),
   // persisted in zmrng.db so they survive a refresh/app-reopen/rebuild/reboot —
@@ -251,6 +255,9 @@ export default function App() {
         liveBufRef.current += e.text
         if (rafRef.current === null) rafRef.current = requestAnimationFrame(flushLive)
         break
+      case 'lanes':
+        setLaneSnapshot(e.snapshot)
+        break
       case 'task-removed':
         setTasks((prev) => {
           const next = { ...prev }
@@ -275,6 +282,7 @@ export default function App() {
     api.getConfig().then(setCfg).catch(() => undefined)
     api.getSettings().then(setSettings).catch(() => undefined)
     api.listRepos().then(setRepos).catch(() => undefined)
+    api.getLanes().then(setLaneSnapshot).catch(() => undefined)
     api
       .listTasks()
       .then((list) => {
@@ -434,6 +442,7 @@ export default function App() {
               securityScans={securityScans}
               live={live}
               tasks={sorted}
+              lanes={laneSnapshot}
               repos={repos}
               config={cfg}
               selectedId={selectedId}

@@ -47,7 +47,9 @@ describe('<MobileNav>', () => {
         expect(b.querySelector('svg')?.getAttribute('data-icon')).toBe(MOBILE_VIEWS[i].icon)
       })
 
-    fireEvent.click(within(nav).getAllByRole('button')[4])
+    // Index looked up from the model, so adding a view never breaks this.
+    const teamIndex = MOBILE_VIEWS.findIndex((v) => v.id === 'team')
+    fireEvent.click(within(nav).getAllByRole('button')[teamIndex])
     expect(props.onSelect).toHaveBeenCalledWith('team')
   })
 
