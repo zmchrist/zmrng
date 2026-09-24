@@ -529,6 +529,95 @@ export interface TaskEvent {
   payload: EventPayload
 }
 
+// ---- lane viewer (live in-memory snapshot of everything zmrng is running) ----
+
+/**
+ * One subagent spawned by a task worker, as far as the stream-json events can
+ * tell. Subagent events carry NO id of their own — `onToolUse(..., isSubagent,
+ * subagentType)` starts one and `onSubagentResult(subagentType, ...)` ends one —
+ * so rows are matched FIFO by `type`. With two concurrent subagents of the same
+ * type the first result closes the older row; that is the honest limit of the
+ * event stream, not a bug to fix downstream.
+ */
+export interface LaneSubagent {
+  /** Server-assigned row id (the events carry none). */
+  id: string
+  /** The subagent type, e.g. `zmrng-qa` (the `actor` slug in the event stream). */
+  type: string
+  status: 'running' | 'done' | 'error'
+  /** The one-line activity summary from the tool-use / result event. */
+  description: string
+  startedAt: string
+}
+
+/**
+ * One live task worker: the values its child was ACTUALLY spawned with (not the
+ * task row's `model`/`effort`, which stay NULL until a phase resolves them), plus
+ * its subagent child rows. Title/status/usage are deliberately absent — the client
+ * already holds the `Task` and joins on `taskId` (same pattern as `dashboardData`).
+ */
+export interface LaneWorker {
+  taskId: string
+  model: string
+  effort: EffortLevel
+  style: CaveStyle
+  startedAt: string
+  /** Mirrors membership in `LaneOccupancy.holders`, carried per-row so the panel
+   *  can group lane holders from unlaned (clarify) workers without a lookup. */
+  holdsLane: boolean
+  subagents: LaneSubagent[]
+}
+
+/** One live standalone chat session (`GET /ws/chat`), with its accumulated usage. */
+export interface LaneChat {
+  id: string
+  model: string
+  effort: EffortLevel
+  style: CaveStyle
+  /** The registered repo the session is rooted at; `null` = the Projects root. */
+  repoId: string | null
+  /** True for a Local Voice Chat session (spoken register, `style` ignored). */
+  voice: boolean
+  startedAt: string
+  usage: TaskUsage
+}
+
+/** One live PTY session (`GET /ws/terminal`). `attached` is false for a shell
+ *  kept alive inside its detach grace window — alive, but no socket on it. */
+export interface LaneTerminal {
+  id: string
+  shell: string
+  cwd: string
+  startedAt: string
+  attached: boolean
+}
+
+/**
+ * The single execute-lane pool. zmrng has exactly ONE capped pool (planning →
+ * executing → validating, plus security fix rounds); `clarify` holds no lane and
+ * is uncapped, so clarify workers appear as `holdsLane: false` rows instead of a
+ * second, invented pool.
+ */
+export interface LaneOccupancy {
+  /** `config.maxLanes`. */
+  cap: number
+  /** Task ids currently holding a lane. */
+  holders: string[]
+  /** Task ids waiting for a lane, in promotion order. */
+  queued: string[]
+}
+
+/** Everything zmrng is running right now, assembled in memory from the three
+ *  live-session managers. Never persisted; rebuilt per push. */
+export interface LaneSnapshot {
+  /** ISO timestamp the snapshot was assembled at. */
+  at: string
+  execute: LaneOccupancy
+  workers: LaneWorker[]
+  chats: LaneChat[]
+  terminals: LaneTerminal[]
+}
+
 /** server -> client WebSocket messages */
 export type WsEvent =
   | { type: 'snapshot'; tasks: Task[] }
@@ -538,6 +627,8 @@ export type WsEvent =
   | { type: 'partial'; taskId: string; text: string }
   /** a task was hard-deleted — the client should drop it from local state */
   | { type: 'task-removed'; taskId: string }
+  /** live lane/session snapshot (Lanes panel); in-memory only, never persisted */
+  | { type: 'lanes'; snapshot: LaneSnapshot }
 
 // ---- terminal (bottom-dock PTY) --------------------------------------------
 

@@ -372,3 +372,87 @@ describe('parseClientMsg', () => {
     expect(parseClientMsg(JSON.stringify('input'))).toBeUndefined()
   })
 })
+
+describe('TerminalManager.snapshot (lane viewer rows)', () => {
+  it('lists every live session with its shell, cwd and startedAt', () => {
+    const mgr = makeManager()
+    const { sessionId } = mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    const rows = mgr.snapshot()
+    expect(rows.map((r) => r.id)).toEqual([sessionId, 'sess-2'])
+    expect(rows[0].shell).toBe('/bin/test-shell')
+    expect(rows[0].cwd).toBe('/tmp/zmrng-test-projects')
+    // An ISO instant, not a Date — the frame is JSON.
+    expect(new Date(rows[0].startedAt).toISOString()).toBe(rows[0].startedAt)
+  })
+
+  it('reports attached true while a socket is on it, false once detached, true again on reattach', () => {
+    const mgr = makeManager()
+    const { sessionId } = mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    expect(mgr.snapshot()[0].attached).toBe(true)
+    // Detached but still ALIVE inside the grace window — the row stays, the flag flips.
+    mgr.detach(sessionId)
+    expect(mgr.snapshot()).toHaveLength(1)
+    expect(mgr.snapshot()[0].attached).toBe(false)
+    mgr.attach(sessionId, { onData: () => {}, onExit: () => {} })
+    expect(mgr.snapshot()[0].attached).toBe(true)
+  })
+
+  it('drops a session that exits', () => {
+    const mgr = makeManager()
+    mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    created[0].emitExit(0)
+    expect(mgr.snapshot().map((r) => r.id)).toEqual(['sess-2'])
+  })
+
+  it('drops a session reaped by the grace timer', () => {
+    const mgr = makeManager()
+    const { sessionId } = mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    mgr.detach(sessionId)
+    expect(mgr.snapshot()).toHaveLength(1)
+    timers.fireAll()
+    expect(mgr.snapshot()).toEqual([])
+  })
+
+  it('killAll empties the snapshot', () => {
+    const mgr = makeManager()
+    mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    mgr.killAll()
+    expect(mgr.snapshot()).toEqual([])
+  })
+})
+
+describe('TerminalManager onChange (lane emitter notify seam)', () => {
+  it('fires on spawn, detach, reattach, grace reap, exit and killAll', () => {
+    let calls = 0
+    const mgr = new TerminalManager(factory, timers, idFactory, () => {
+      calls++
+    })
+
+    const { sessionId } = mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    expect(calls).toBe(1) // spawn
+    mgr.detach(sessionId)
+    expect(calls).toBe(2) // detach (attached flipped)
+    mgr.attach(sessionId, { onData: () => {}, onExit: () => {} })
+    expect(calls).toBe(3) // reattach
+    mgr.detach(sessionId)
+    timers.fireAll()
+    expect(calls).toBe(5) // detach + grace reap
+
+    const second = mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    expect(second.sessionId).toBe('sess-2')
+    created[1].emitExit(0)
+    expect(calls).toBe(7) // spawn + exit
+
+    mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    mgr.killAll()
+    expect(calls).toBe(9) // spawn + killAll
+  })
+
+  it('defaults to a no-op so existing three-arg constructions are unchanged', () => {
+    const mgr = new TerminalManager(factory, timers, idFactory)
+    expect(() => mgr.attach(undefined, { onData: () => {}, onExit: () => {} })).not.toThrow()
+  })
+})

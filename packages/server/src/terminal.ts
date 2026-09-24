@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
 import { config } from './config.js'
-import type { TermClientMsg } from './types.js'
+import type { LaneTerminal, TermClientMsg } from './types.js'
 
 /**
  * The surface a terminal WebSocket route depends on: write operator keystrokes,
@@ -117,6 +117,12 @@ const realTimers: TimerFns = {
  */
 interface TermSession {
   pty: PtySession
+  /** The shell binary the session was spawned with (`config.shell` at spawn time). */
+  shell: string
+  /** The cwd the shell was rooted at (`config.projectsDir` at spawn time). */
+  cwd: string
+  /** ISO instant the PTY was spawned — the lane panel renders uptime from it. */
+  startedAt: string
   /** Retained output chunks (oldest first) for replay on reattach. */
   buffer: string[]
   /** Total retained bytes across `buffer`, kept ≤ the byte cap. */
@@ -139,10 +145,17 @@ interface TermSession {
 export class TerminalManager {
   private sessions = new Map<string, TermSession>()
 
+  /**
+   * @param onChange fired whenever the live-session set or a session's `attached`
+   *   flag changes (spawn, detach, reattach, grace reap, exit, `killAll`), so the
+   *   lane emitter can coalesce a rebuild. Optional and trailing: existing
+   *   three-argument constructions are unaffected.
+   */
   constructor(
     private factory: PtyFactory = defaultPtyFactory,
     private timers: TimerFns = realTimers,
     private idFactory: () => string = () => randomUUID(),
+    private onChange: () => void = () => {},
   ) {}
 
   private get graceMs(): number {
@@ -173,6 +186,7 @@ export class TerminalManager {
           existing.graceTimer = null
         }
         existing.cb = cb
+        this.onChange()
         return { sessionId, replay: existing.buffer.join('') }
       }
     }
@@ -181,7 +195,16 @@ export class TerminalManager {
     const env = { ...process.env }
     if (config.authMode === 'oauth') delete env.ANTHROPIC_API_KEY
 
-    const session: TermSession = { pty: null as unknown as PtySession, buffer: [], bufferBytes: 0, cb, graceTimer: null }
+    const session: TermSession = {
+      pty: null as unknown as PtySession,
+      shell: config.shell,
+      cwd: config.projectsDir,
+      startedAt: new Date().toISOString(),
+      buffer: [],
+      bufferBytes: 0,
+      cb,
+      graceTimer: null,
+    }
     session.pty = this.factory(
       { cwd: config.projectsDir, shell: config.shell, env },
       {
@@ -194,11 +217,13 @@ export class TerminalManager {
           // touches an already-exited shell.
           this.sessions.delete(id)
           if (session.graceTimer) this.timers.clearTimeout(session.graceTimer)
+          this.onChange()
           session.cb?.onExit(code)
         },
       },
     )
     this.sessions.set(id, session)
+    this.onChange()
     return { sessionId: id, replay: '' }
   }
 
@@ -229,7 +254,10 @@ export class TerminalManager {
       } catch {
         // already exited
       }
+      this.onChange()
     }, this.graceMs)
+    // The row survives detach (the shell is still alive) but flips `attached`.
+    this.onChange()
   }
 
   /** Append output to the ring buffer, dropping oldest bytes past the cap. */
@@ -262,5 +290,22 @@ export class TerminalManager {
       }
     }
     this.sessions.clear()
+    this.onChange()
+  }
+
+  /**
+   * One read-only `LaneTerminal` row per LIVE session, for the lane viewer.
+   * `attached` is derived from `cb !== null`, so a shell kept alive inside its
+   * detach grace window reports `attached: false` rather than looking like an
+   * open terminal.
+   */
+  snapshot(): LaneTerminal[] {
+    return [...this.sessions.entries()].map(([id, s]) => ({
+      id,
+      shell: s.shell,
+      cwd: s.cwd,
+      startedAt: s.startedAt,
+      attached: s.cb !== null,
+    }))
   }
 }

@@ -18,6 +18,7 @@ describe('mobileNav', () => {
       'files',
       'terminal',
       'chat',
+      'lanes',
       'team',
       'kb',
     ])
@@ -41,7 +42,7 @@ describe('mobileNav', () => {
   it('maps views to their App-level mode', () => {
     expect(modeForView('team')).toBe('team')
     expect(modeForView('kb')).toBe('kb')
-    for (const v of ['tasks', 'files', 'terminal', 'chat'] as const) {
+    for (const v of ['tasks', 'files', 'terminal', 'chat', 'lanes'] as const) {
       expect(modeForView(v)).toBe('workspace')
     }
   })
@@ -49,6 +50,7 @@ describe('mobileNav', () => {
   it('maps only the workspace views to a WorkspaceView sub-view', () => {
     expect(workspaceViewFor('files')).toBe('files')
     expect(workspaceViewFor('tasks')).toBe('tasks')
+    expect(workspaceViewFor('lanes')).toBe('lanes')
     expect(workspaceViewFor('team')).toBeNull()
     expect(workspaceViewFor('kb')).toBeNull()
   })

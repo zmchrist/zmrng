@@ -65,6 +65,7 @@ function Harness() {
       securityScans={[]}
       live=""
       tasks={TASKS}
+      lanes={null}
       repos={[{ id: 'zmrng', label: 'zmrng', path: '/x', defaultBranch: 'main' }]}
       config={null}
       selectedId={selectedId}

@@ -324,3 +324,25 @@ instead of entering edit mode. Note the deliberate behaviour change to existing 
 a saved body containing `1. …` or `[text](url)` now renders as a list / link rather than
 literal text. Web suite went 571 → 642 tests. Plan:
 `.agents/plans/kb-formatting-toolbar.md`.
+
+## Lanes panel — live read-only view of everything zmrng is running (2026-09-23)
+New `packages/server/src/lanes.ts`: `LaneSources` (read-only accessors over
+`TaskManager`/`ChatManager`/`TerminalManager`), pure `buildLaneSnapshot(sources, at)`, and
+`LaneEmitter` (coalesces a burst of `notify()` calls into one trailing build+broadcast;
+`snapshot()` builds immediately for `GET /api/lanes` and the `/ws` connect frame). The three
+managers gained read-only `snapshot()`/`laneSnapshot()` methods and an optional trailing
+`onChange`/`onLanesChange` constructor arg wired to the emitter: `TaskManager` tracks a
+`workerMeta` map (model/effort/style actually spawned with, plus bounded FIFO-matched
+subagent child rows) written per `spawn()` and deleted alongside every runner removal;
+`ChatManager`'s session `Set` became a `Map<RunnerLike, ChatSessionMeta>` accumulating
+`TaskUsage` from each `onResult`; `TerminalManager` records `shell`/`cwd`/`startedAt` per
+PTY. New types `LaneSubagent`/`LaneWorker`/`LaneChat`/`LaneTerminal`/`LaneOccupancy`/
+`LaneSnapshot` + the `lanes` `WsEvent` variant (mirrored to the web side), in-memory only,
+never persisted. zmrng has exactly ONE capped execute-lane pool (`config.maxLanes`, held
+planning→executing→validating plus security fix rounds); `clarify` holds no lane and is
+uncapped, so the panel renders an uncapped Clarify group rather than inventing a second
+pool. Web: new pure join `laneRows.ts` (joins the snapshot against the client's own
+`Task[]`/`RepoTarget[]`, same no-duplication pattern as `dashboardData.ts`) and the
+presentational `LanesPanel` component, added as a new `'lanes'` tab in `WorkspaceView`'s
+`PaneTab` strip and a matching view in the phone drawer (`mobileNav.ts`, `NavIcon.tsx`).
+Plan: `.agents/plans/lane-viewer-panel.md`.
