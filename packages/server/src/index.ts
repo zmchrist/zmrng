@@ -1140,6 +1140,11 @@ app.get('/ws/terminal', { websocket: true }, (socket: WebSocket) => {
         terminals.write(sessionId, msg.data)
       } else if (sessionId && msg.type === 'resize') {
         terminals.resize(sessionId, msg.cols, msg.rows)
+      } else if (sessionId && msg.type === 'close') {
+        // Explicit tab close: kill now, no grace window.
+        terminals.close(sessionId)
+        sessionId = null
+        socket.close()
       }
     } catch (err) {
       app.log.error({ err }, 'terminal message handler failed')

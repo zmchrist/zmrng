@@ -18,6 +18,11 @@ export function encodeAttach(sessionId: string | undefined, cols: number, rows: 
     : JSON.stringify({ type: 'attach', cols, rows })
 }
 
+/** Client -> server: kill this tab's shell now (no grace window). */
+export function encodeClose(): string {
+  return JSON.stringify({ type: 'close' })
+}
+
 /** Encode a client `input` frame (raw keystrokes -> server). */
 export function encodeInput(data: string): string {
   return JSON.stringify({ type: 'input', data })
