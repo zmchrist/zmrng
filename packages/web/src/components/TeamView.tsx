@@ -28,6 +28,15 @@ import { buildHandoffPrefill, type HandoffPrefill } from '../teamHandoff'
 import { resolveDefaultSpace, deriveKbTitle } from '../kbFromMessage'
 import { collectFolders, type KbFolderOption } from '../kbTree'
 import { WORKSPACE_URL, workspaceSocketUrl, workspaceHttpOrigin } from '../teamConfig'
+import {
+  loadOpenChannelId,
+  saveOpenChannelId,
+  initialPane,
+  resolveOpenChannelId,
+  type RailTab,
+  type TeamPane,
+} from '../teamNav'
+import { useIsMobile } from '../useIsMobile'
 import { ThinkingDots } from './ThinkingDots'
 import { formatMessageTime } from '../teamTime'
 
@@ -118,7 +127,15 @@ function TeamViewComponent({
   const [roster, setRoster] = useState<WorkspaceMember[]>(emptyRoster)
   const [connected, setConnected] = useState(false)
   const [channels, setChannels] = useState<Channel[]>([])
-  const [openId, setOpenId] = useState<number | null>(null)
+  // The open channel is restored from localStorage so the Team tab reopens
+  // where it was left (both shells), and on the phone that also decides which
+  // pane we land on.
+  const [openId, setOpenId] = useState<number | null>(loadOpenChannelId)
+  // Which rail list is showing. Channels and roster are tabs now, not a stack.
+  const [railTab, setRailTab] = useState<RailTab>('channels')
+  // The phone shell's current full-screen pane. Ignored on desktop, where the
+  // rail and the thread sit side by side.
+  const [pane, setPane] = useState<TeamPane>(() => initialPane(loadOpenChannelId()))
   const [thread, setThread] = useState<Message[]>(emptyThread)
   const [composer, setComposer] = useState('')
   // Reaction UI: `pickerFor` is the message id whose emoji picker is open (null =
@@ -156,11 +173,13 @@ function TeamViewComponent({
   const [kbTitle, setKbTitle] = useState('')
   const [kbBusy, setKbBusy] = useState(false)
   const [kbError, setKbError] = useState<string | null>(null)
+  const isMobile = useIsMobile()
   const wsRef = useRef<WebSocket | null>(null)
   // Latest open-channel id, readable inside the stable socket onmessage closure.
   const openIdRef = useRef<number | null>(null)
   useEffect(() => {
     openIdRef.current = openId
+    saveOpenChannelId(openId)
   }, [openId])
   // Keep the latest `onNewVersion` readable inside the stable socket closure
   // (the socket effect only re-runs on handle/url change), mirroring openIdRef.
@@ -281,7 +300,7 @@ function TeamViewComponent({
       .then((list) => {
         if (cancelled) return
         setChannels(list)
-        setOpenId((cur) => (cur !== null ? cur : (list[0]?.id ?? null)))
+        setOpenId((cur) => resolveOpenChannelId(cur, list))
       })
       .catch(() => {
         // transient failure — the socket stays live; a reconnect retries this
@@ -313,8 +332,10 @@ function TeamViewComponent({
     }
   }, [connected, openId])
 
-  /** Switch the open channel, clearing the previous channel's thread. */
+  /** Switch the open channel, clearing the previous channel's thread. On the
+   *  phone this also navigates from the list pane into the thread pane. */
   const openChannelId = (id: number): void => {
+    setPane('thread')
     if (id === openId) return
     scrollToBottom()
     setThread(emptyThread())
@@ -335,6 +356,7 @@ function TeamViewComponent({
     onHandleChange('')
     setDraft('')
     setOpenId(null)
+    setPane('list')
     setThread(emptyThread())
     setAwaitingAgent(false)
   }
@@ -593,6 +615,12 @@ function TeamViewComponent({
 
   const onlineCount = roster.filter((m) => m.online).length
   const openChannel = channels.find((c) => c.id === openId) ?? null
+  // Phone shell: exactly ONE of the rail / thread panes is on screen at a time
+  // (a channel must be open for the thread pane to mean anything). Desktop is
+  // untouched — both are always rendered side by side.
+  const effectivePane: TeamPane = openChannel ? pane : 'list'
+  const showRail = !isMobile || effectivePane === 'list'
+  const showThread = !isMobile || effectivePane === 'thread'
 
   return (
     <div className={styles.team}>
@@ -610,7 +638,31 @@ function TeamViewComponent({
       </div>
 
       <div className={styles.body}>
+        {showRail && (
         <div className={styles.rail}>
+          <div className={styles.railTabs} role="tablist" aria-label="Channels and roster">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={railTab === 'channels'}
+              className={`${styles.railTab} ${railTab === 'channels' ? styles.railTabActive : ''}`}
+              onClick={() => setRailTab('channels')}
+            >
+              Channels
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={railTab === 'roster'}
+              className={`${styles.railTab} ${railTab === 'roster' ? styles.railTabActive : ''}`}
+              onClick={() => setRailTab('roster')}
+            >
+              Roster
+              <span className={styles.railTabCount}>{onlineCount}</span>
+            </button>
+          </div>
+          {railTab === 'channels' && (
+          <>
           <div className={styles.sectionHead}>
             <span className={styles.sectionTitle}>Channels</span>
             <button
@@ -673,7 +725,11 @@ function TeamViewComponent({
               </li>
             ))}
           </ul>
+          </>
+          )}
 
+          {railTab === 'roster' && (
+          <>
           <div className={styles.sectionHead}>
             <span className={styles.sectionTitle}>Roster</span>
             <span className={styles.rosterCount}>
@@ -692,12 +748,27 @@ function TeamViewComponent({
               </li>
             ))}
           </ul>
+          </>
+          )}
         </div>
+        )}
 
+        {showThread && (
         <div className={styles.channelPane}>
           {openChannel ? (
             <>
               <div className={styles.channelHead}>
+                {isMobile && (
+                  <button
+                    type="button"
+                    className={styles.backBtn}
+                    onClick={() => setPane('list')}
+                    aria-label="Back to channels"
+                    title="Back to channels"
+                  >
+                    ‹
+                  </button>
+                )}
                 <span className={styles.channelName}>{channelLabel(openChannel.name)}</span>
                 {openChannel.repoId && (
                   <span className={styles.channelRepo}>{openChannel.repoId}</span>
@@ -887,6 +958,7 @@ function TeamViewComponent({
             <div className={styles.threadEmpty}>Select a channel to start chatting.</div>
           )}
         </div>
+        )}
       </div>
 
       {kbFor && (
