@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import styles from './WindowTabs.module.css'
 import { TabStrip } from './TabStrip'
 import { ChatPane } from './ChatPane'
@@ -43,6 +43,58 @@ const NEW_TAB_DEFAULTS = {
   repoId: '',
   /** Named working mode; `'none'` appends no directive (the default). */
   workflow: 'none' as WorkflowPreset,
+}
+
+/**
+ * Launch button plus a ☰ toggle that reveals the tab's pickers stacked in a
+ * popover. Closes on outside tap, on ☰ again, and on Launch.
+ */
+function LaunchRow({ onLaunch, children }: { onLaunch: () => void; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: Event) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('touchstart', onDown)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('touchstart', onDown)
+    }
+  }, [open])
+
+  return (
+    <div className={styles.launchRow} ref={ref}>
+      <button
+        type="button"
+        className={styles.menuBtn}
+        aria-label="Chat settings"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        ☰
+      </button>
+      <button
+        type="button"
+        className={styles.launchBtn}
+        onClick={() => {
+          setOpen(false)
+          onLaunch()
+        }}
+      >
+        Launch
+      </button>
+      {open && (
+        <div className={styles.settingsPopover} role="group" aria-label="Chat settings">
+          {children}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -112,72 +164,84 @@ export function ChatCard({ tabs, onTabsChange, repos }: Props) {
             ) : (
               <div className={styles.launch}>
                 <span className={styles.launchLabel}>Configure this chat</span>
-                <div className={styles.launchRow}>
-                  <select
-                    className={styles.select}
-                    aria-label="Model"
-                    value={t.model}
-                    onChange={(e) => setConfig(t.id, { model: e.target.value as ModelAlias })}
-                  >
-                    {MODEL_OPTIONS.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className={styles.select}
-                    aria-label="Effort"
-                    value={t.effort}
-                    onChange={(e) => setConfig(t.id, { effort: e.target.value as EffortLevel })}
-                  >
-                    {EFFORT_OPTIONS.map((eff) => (
-                      <option key={eff} value={eff}>
-                        {eff}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className={styles.select}
-                    aria-label="Style"
-                    value={t.style}
-                    onChange={(e) => setConfig(t.id, { style: e.target.value as CaveStyle })}
-                  >
-                    {STYLE_OPTIONS.map((st) => (
-                      <option key={st} value={st}>
-                        {st}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className={styles.select}
-                    aria-label="Workflow"
-                    value={t.workflow ?? 'none'}
-                    onChange={(e) => setConfig(t.id, { workflow: e.target.value as WorkflowPreset })}
-                  >
-                    {WORKFLOW_OPTIONS.map((wf) => (
-                      <option key={wf} value={wf}>
-                        {wf}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className={styles.select}
-                    aria-label="Repo"
-                    value={t.repoId}
-                    onChange={(e) => setConfig(t.id, { repoId: e.target.value })}
-                  >
-                    <option value="">Projects root</option>
-                    {repos.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button type="button" className={styles.launchBtn} onClick={() => launch(t.id)}>
-                  Launch
-                </button>
+                <LaunchRow onLaunch={() => launch(t.id)}>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Model</span>
+                    <select
+                      className={styles.select}
+                      aria-label="Model"
+                      value={t.model}
+                      onChange={(e) => setConfig(t.id, { model: e.target.value as ModelAlias })}
+                    >
+                      {MODEL_OPTIONS.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Effort</span>
+                    <select
+                      className={styles.select}
+                      aria-label="Effort"
+                      value={t.effort}
+                      onChange={(e) => setConfig(t.id, { effort: e.target.value as EffortLevel })}
+                    >
+                      {EFFORT_OPTIONS.map((eff) => (
+                        <option key={eff} value={eff}>
+                          {eff}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Style</span>
+                    <select
+                      className={styles.select}
+                      aria-label="Style"
+                      value={t.style}
+                      onChange={(e) => setConfig(t.id, { style: e.target.value as CaveStyle })}
+                    >
+                      {STYLE_OPTIONS.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Workflow</span>
+                    <select
+                      className={styles.select}
+                      aria-label="Workflow"
+                      value={t.workflow ?? 'none'}
+                      onChange={(e) => setConfig(t.id, { workflow: e.target.value as WorkflowPreset })}
+                    >
+                      {WORKFLOW_OPTIONS.map((wf) => (
+                        <option key={wf} value={wf}>
+                          {wf}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>Repo</span>
+                    <select
+                      className={styles.select}
+                      aria-label="Repo"
+                      value={t.repoId}
+                      onChange={(e) => setConfig(t.id, { repoId: e.target.value })}
+                    >
+                      <option value="">Projects root</option>
+                      {repos.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </LaunchRow>
               </div>
             )}
           </div>
