@@ -4,17 +4,28 @@ import {
   addTerminalTab,
   closeTab,
   emptyTabs,
+  focusChatLane,
+  focusTerminalSession,
   hydrateChatTabs,
   hydrateTerminalTabs,
   launchChatTab,
   nextLabel,
   setActiveTab,
   setChatTabConfig,
+  setChatTabLane,
   setTerminalTabSession,
   type ChatTabState,
   type TabsState,
   type TerminalTabState,
 } from '../src/windowTabs'
+
+const DEFAULTS = {
+  model: 'sonnet',
+  effort: 'medium',
+  style: 'caveman-full',
+  repoId: '',
+  workflow: 'none',
+} as const
 
 function ids<T extends { id: string }>(state: TabsState<T>): string[] {
   return state.tabs.map((t) => t.id)
@@ -122,6 +133,50 @@ describe('setTerminalTabSession', () => {
   it('is a no-op for an unknown id', () => {
     const s = addTerminalTab(emptyTabs(), 'term-1', 'Terminal 1')
     expect(setTerminalTabSession(s, 'ghost', 'sess-x')).toEqual(s)
+  })
+})
+
+describe('setChatTabLane', () => {
+  it('records the lane id on the targeted tab only', () => {
+    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', DEFAULTS)
+    s = addChatTab(s, 'chat-2', 'Chat 2', DEFAULTS)
+    s = setChatTabLane(s, 'chat-2', 'lane-x')
+    expect(s.tabs.find((t) => t.id === 'chat-2')?.laneId).toBe('lane-x')
+    expect(s.tabs.find((t) => t.id === 'chat-1')?.laneId).toBeUndefined()
+  })
+
+  it('is a no-op for an unknown id', () => {
+    const s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', DEFAULTS)
+    expect(setChatTabLane(s, 'ghost', 'lane-x')).toBe(s)
+  })
+})
+
+describe('focusTerminalSession', () => {
+  it('focuses the tab attached to the given PTY session', () => {
+    let s = addTerminalTab(emptyTabs(), 'term-1', 'Terminal 1')
+    s = addTerminalTab(s, 'term-2', 'Terminal 2')
+    s = setTerminalTabSession(s, 'term-1', 'sess-a')
+    s = setTerminalTabSession(s, 'term-2', 'sess-b')
+    expect(focusTerminalSession(s, 'sess-a').activeId).toBe('term-1')
+  })
+
+  it('is a no-op when no tab owns the session (e.g. another window\'s PTY)', () => {
+    const s = setTerminalTabSession(addTerminalTab(emptyTabs(), 'term-1', 'Terminal 1'), 'term-1', 'sess-a')
+    expect(focusTerminalSession(s, 'sess-other')).toBe(s)
+  })
+})
+
+describe('focusChatLane', () => {
+  it('focuses the tab whose live session is the given lane row', () => {
+    let s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', DEFAULTS)
+    s = addChatTab(s, 'chat-2', 'Chat 2', DEFAULTS)
+    s = setChatTabLane(s, 'chat-1', 'lane-a')
+    expect(focusChatLane(s, 'lane-a').activeId).toBe('chat-1')
+  })
+
+  it('is a no-op when no tab owns the lane row', () => {
+    const s = addChatTab(emptyTabs(), 'chat-1', 'Chat 1', DEFAULTS)
+    expect(focusChatLane(s, 'lane-z')).toBe(s)
   })
 })
 

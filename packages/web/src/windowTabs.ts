@@ -90,6 +90,17 @@ export function setTerminalTabSession(
   return { ...state, tabs: state.tabs.map((t) => (t.id === id ? { ...t, sessionId } : t)) }
 }
 
+/** Focus the terminal tab attached to the given PTY session (a Lanes terminal
+ *  row's id). A no-op when no tab here owns it — e.g. a PTY opened from another
+ *  window, or one this tab has not attached to yet. */
+export function focusTerminalSession(
+  state: TabsState<TerminalTabState>,
+  sessionId: string,
+): TabsState<TerminalTabState> {
+  const tab = state.tabs.find((t) => t.sessionId === sessionId)
+  return tab ? setActiveTab(state, tab.id) : state
+}
+
 /** Append a chat tab, unlaunched, seeded with the given default config, and focus it. */
 export function addChatTab(
   state: TabsState<ChatTabState>,
@@ -118,6 +129,24 @@ export function setChatTabConfig(
   patch: Partial<Pick<ChatTabState, 'model' | 'effort' | 'style' | 'repoId' | 'workflow'>>,
 ): TabsState<ChatTabState> {
   return { ...state, tabs: state.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) }
+}
+
+/** Record the Lanes row id of a chat tab's live session (sent by the server on
+ *  every (re)spawn). A no-op for an absent id. */
+export function setChatTabLane(
+  state: TabsState<ChatTabState>,
+  id: string,
+  laneId: string,
+): TabsState<ChatTabState> {
+  if (!state.tabs.some((t) => t.id === id)) return state
+  return { ...state, tabs: state.tabs.map((t) => (t.id === id ? { ...t, laneId } : t)) }
+}
+
+/** Focus the chat tab whose live session is the given Lanes row. A no-op when
+ *  no tab here owns it (e.g. a session from another window). */
+export function focusChatLane(state: TabsState<ChatTabState>, laneId: string): TabsState<ChatTabState> {
+  const tab = state.tabs.find((t) => t.laneId === laneId)
+  return tab ? setActiveTab(state, tab.id) : state
 }
 
 /** Tolerant repair: a persisted `activeId` pointing at a missing tab falls back

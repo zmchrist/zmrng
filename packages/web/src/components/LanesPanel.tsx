@@ -6,6 +6,7 @@ import {
   formatTokens,
   laneRows,
   type ChatRow,
+  type LaneTarget,
   type WorkerRow,
 } from '../laneRows'
 import { actorColor, statusColor } from '../status'
@@ -21,6 +22,8 @@ interface Props {
   /** True while this tab is the visible one. A hidden panel must cost nothing,
    *  so the 1s elapsed-time tick only runs while it is. */
   active: boolean
+  /** A row was clicked (or activated from the keyboard): jump to what it is. */
+  onOpen?: (target: LaneTarget) => void
 }
 
 /** What a row reports as "tokens": the billed in+out totals, cache excluded. */
@@ -28,11 +31,15 @@ function tokens(usage: TaskUsage): string {
   return formatTokens(usage.tokensIn + usage.tokensOut)
 }
 
+type Open = (target: LaneTarget) => void
+const noop: Open = () => {}
+
 /** One task worker plus its subagent child rows, indented beneath it. */
-function Worker({ row, now }: { row: WorkerRow; now: number }) {
+function Worker({ row, now, onOpen }: { row: WorkerRow; now: number; onOpen: Open }) {
+  const open = (): void => onOpen({ kind: 'task', taskId: row.taskId })
   return (
     <li className={styles.row}>
-      <div className={styles.rowMain}>
+      <button type="button" className={styles.rowMain} onClick={open}>
         <span className={styles.title}>{row.title}</span>
         <span className={styles.pill} style={{ color: statusColor(row.status) }}>
           {row.statusLabel}
@@ -43,18 +50,20 @@ function Worker({ row, now }: { row: WorkerRow; now: number }) {
         <span className={styles.repo}>{row.repoLabel}</span>
         <span className={styles.tokens}>{tokens(row.usage)} tok</span>
         <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
-      </div>
+      </button>
       {row.subagents.length > 0 && (
         <ul className={styles.subagents}>
           {row.subagents.map((s) => (
-            <li key={s.id} className={styles.subRow}>
-              <span className={styles.subType} style={{ color: actorColor(s.type) }}>
-                {s.type}
-              </span>
-              <span className={styles.subStatus} data-state={s.status}>
-                {s.status}
-              </span>
-              <span className={styles.subDesc}>{s.description}</span>
+            <li key={s.id}>
+              <button type="button" className={styles.subRow} onClick={open}>
+                <span className={styles.subType} style={{ color: actorColor(s.type) }}>
+                  {s.type}
+                </span>
+                <span className={styles.subStatus} data-state={s.status}>
+                  {s.status}
+                </span>
+                <span className={styles.subDesc}>{s.description}</span>
+              </button>
             </li>
           ))}
         </ul>
@@ -65,10 +74,14 @@ function Worker({ row, now }: { row: WorkerRow; now: number }) {
 
 /** One standalone chat session. Labeled `chat` — it belongs to no task, so there
  *  is deliberately no title column to fill. */
-function Chat({ row, now }: { row: ChatRow; now: number }) {
+function Chat({ row, now, onOpen }: { row: ChatRow; now: number; onOpen: Open }) {
   return (
     <li className={styles.row}>
-      <div className={styles.rowMain}>
+      <button
+        type="button"
+        className={styles.rowMain}
+        onClick={() => onOpen({ kind: 'chat', laneId: row.id })}
+      >
         <span className={styles.kind}>chat</span>
         <span className={styles.meta}>
           {row.model} · {row.effort} · {row.style}
@@ -77,20 +90,21 @@ function Chat({ row, now }: { row: ChatRow; now: number }) {
         {row.voice && <span className={styles.note}>voice</span>}
         <span className={styles.tokens}>{tokens(row.usage)} tok</span>
         <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
-      </div>
+      </button>
     </li>
   )
 }
 
 /**
- * Read-only Lanes panel: everything zmrng is running on this machine right now
+ * Lanes panel: everything zmrng is running on this machine right now
  * — the single capped execute pool with its holders and ordered queue, the
  * uncapped clarify workers, the live chat sessions and the live PTYs. Purely
  * presentational: the snapshot arrives over the `/ws` hub and every row is
  * derived by the pure `laneRows()` join, so this component owns nothing but the
- * elapsed-time tick.
+ * elapsed-time tick. Every row is a button reporting a `LaneTarget` through
+ * `onOpen`; the caller decides where that lands.
  */
-export function LanesPanel({ snapshot, tasks, repos, active }: Props) {
+export function LanesPanel({ snapshot, tasks, repos, active, onOpen = noop }: Props) {
   const [now, setNow] = useState(() => Date.now())
 
   // Only a visible panel pays for the tick; going inactive clears it, as does
@@ -127,7 +141,7 @@ export function LanesPanel({ snapshot, tasks, repos, active }: Props) {
         {rows.lanes.length > 0 && (
           <ul className={styles.rows}>
             {rows.lanes.map((row) => (
-              <Worker key={row.taskId} row={row} now={now} />
+              <Worker key={row.taskId} row={row} now={now} onOpen={onOpen} />
             ))}
           </ul>
         )}
@@ -137,11 +151,15 @@ export function LanesPanel({ snapshot, tasks, repos, active }: Props) {
             <ul className={styles.rows}>
               {rows.execute.queued.map((q, i) => (
                 <li key={q.taskId} className={styles.row}>
-                  <div className={styles.rowMain}>
+                  <button
+                    type="button"
+                    className={styles.rowMain}
+                    onClick={() => onOpen({ kind: 'task', taskId: q.taskId })}
+                  >
                     <span className={styles.queuePos}>{i + 1}</span>
                     <span className={styles.title}>{q.title}</span>
                     <span className={styles.repo}>{q.repoLabel}</span>
-                  </div>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -157,7 +175,7 @@ export function LanesPanel({ snapshot, tasks, repos, active }: Props) {
           </div>
           <ul className={styles.rows}>
             {rows.clarify.map((row) => (
-              <Worker key={row.taskId} row={row} now={now} />
+              <Worker key={row.taskId} row={row} now={now} onOpen={onOpen} />
             ))}
           </ul>
         </div>
@@ -171,7 +189,7 @@ export function LanesPanel({ snapshot, tasks, repos, active }: Props) {
           </div>
           <ul className={styles.rows}>
             {rows.chats.map((row) => (
-              <Chat key={row.id} row={row} now={now} />
+              <Chat key={row.id} row={row} now={now} onOpen={onOpen} />
             ))}
           </ul>
         </div>
@@ -186,13 +204,17 @@ export function LanesPanel({ snapshot, tasks, repos, active }: Props) {
           <ul className={styles.rows}>
             {rows.terminals.map((row) => (
               <li key={row.id} className={styles.row}>
-                <div className={styles.rowMain}>
+                <button
+                  type="button"
+                  className={styles.rowMain}
+                  onClick={() => onOpen({ kind: 'terminal', sessionId: row.id })}
+                >
                   <span className={styles.kind}>term</span>
                   <span className={styles.mono}>{row.shell}</span>
                   <span className={styles.cwd}>{row.cwd}</span>
                   {!row.attached && <span className={styles.note}>detached</span>}
                   <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
-                </div>
+                </button>
               </li>
             ))}
           </ul>

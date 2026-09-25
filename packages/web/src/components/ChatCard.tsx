@@ -9,6 +9,7 @@ import {
   nextLabel,
   setActiveTab,
   setChatTabConfig,
+  setChatTabLane,
   type ChatTabState,
   type TabsState,
 } from '../windowTabs'
@@ -73,6 +74,10 @@ export function ChatCard({ tabs, onTabsChange, repos }: Props) {
   )
   const activate = useCallback((id: string) => onTabsChange(setActiveTab(tabs, id)), [tabs, onTabsChange])
   const launch = useCallback((id: string) => onTabsChange(launchChatTab(tabs, id)), [tabs, onTabsChange])
+  const rememberLane = useCallback(
+    (id: string, laneId: string) => onTabsChange(setChatTabLane(tabs, id, laneId)),
+    [tabs, onTabsChange],
+  )
   const setConfig = useCallback(
     (id: string, patch: Partial<Pick<ChatTabState, 'model' | 'effort' | 'style' | 'repoId' | 'workflow'>>) =>
       onTabsChange(setChatTabConfig(tabs, id, patch)),
@@ -102,6 +107,7 @@ export function ChatCard({ tabs, onTabsChange, repos }: Props) {
                 initialRepoId={t.repoId}
                 initialWorkflow={t.workflow ?? 'none'}
                 repos={repos}
+                onLane={(laneId) => rememberLane(t.id, laneId)}
               />
             ) : (
               <div className={styles.launch}>

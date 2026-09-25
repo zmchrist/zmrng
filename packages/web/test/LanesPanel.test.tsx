@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, fireEvent } from '@testing-library/react'
 import { LanesPanel } from '../src/components/LanesPanel'
 import type { LaneSnapshot, RepoTarget, Task, TaskUsage } from '../src/types'
 
@@ -272,5 +272,87 @@ describe('<LanesPanel>', () => {
       rerender(<LanesPanel snapshot={snapshot} tasks={[]} repos={REPOS} active />)
     })
     expect(screen.getByText('30s')).toBeInTheDocument()
+  })
+})
+
+describe('<LanesPanel> row clicks', () => {
+  const MIXED = makeSnapshot({
+    ...WORKER_SNAPSHOT,
+    workers: [
+      ...WORKER_SNAPSHOT.workers,
+      {
+        taskId: 't3',
+        model: 'sonnet',
+        effort: 'medium',
+        style: 'normal',
+        startedAt: '2026-09-23T11:58:00.000Z',
+        holdsLane: false,
+        subagents: [],
+      },
+    ],
+    chats: [
+      {
+        id: 'lane-c1',
+        model: 'opus',
+        effort: 'low',
+        style: 'normal',
+        repoId: null,
+        voice: false,
+        startedAt: '2026-09-23T11:55:00.000Z',
+        usage: USAGE,
+      },
+    ],
+    terminals: [
+      { id: 'pty-1', shell: '/bin/zsh', cwd: '/home/op', startedAt: '2026-09-23T11:50:00.000Z', attached: true },
+    ],
+  })
+  const TASKS3 = [...TASKS, makeTask({ id: 't3', title: 'Clarify Me', status: 'clarify' })]
+
+  function renderMixed() {
+    const onOpen = vi.fn()
+    render(<LanesPanel snapshot={MIXED} tasks={TASKS3} repos={REPOS} active onOpen={onOpen} />)
+    return onOpen
+  }
+  const rowButton = (text: string | RegExp) => screen.getByText(text).closest('button')!
+
+  it('opens the task for a lane-holding worker row', () => {
+    const onOpen = renderMixed()
+    fireEvent.click(rowButton('Task One'))
+    expect(onOpen).toHaveBeenCalledWith({ kind: 'task', taskId: 't1' })
+  })
+
+  it('opens the task for a queued row and a clarify row', () => {
+    const onOpen = renderMixed()
+    fireEvent.click(rowButton('Task Two'))
+    fireEvent.click(rowButton('Clarify Me'))
+    expect(onOpen.mock.calls).toEqual([
+      [{ kind: 'task', taskId: 't2' }],
+      [{ kind: 'task', taskId: 't3' }],
+    ])
+  })
+
+  it('opens the PARENT task for a subagent row', () => {
+    const onOpen = renderMixed()
+    fireEvent.click(rowButton('run the suite'))
+    expect(onOpen).toHaveBeenCalledWith({ kind: 'task', taskId: 't1' })
+  })
+
+  it('opens the chat by its lane id and the terminal by its PTY session id', () => {
+    const onOpen = renderMixed()
+    fireEvent.click(rowButton('chat'))
+    fireEvent.click(rowButton('/bin/zsh'))
+    expect(onOpen.mock.calls).toEqual([
+      [{ kind: 'chat', laneId: 'lane-c1' }],
+      [{ kind: 'terminal', sessionId: 'pty-1' }],
+    ])
+  })
+
+  it('makes every row a native button, so it is keyboard-focusable (Enter/Space)', () => {
+    renderMixed()
+    for (const text of ['Task One', 'Task Two', 'Clarify Me', 'run the suite', 'chat', '/bin/zsh']) {
+      const btn = rowButton(text)
+      expect(btn.tagName).toBe('BUTTON')
+      expect(btn).toHaveAttribute('type', 'button')
+    }
   })
 })
