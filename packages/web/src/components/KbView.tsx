@@ -11,6 +11,10 @@ import type { SelectionEdit } from '../kbEdits'
 import { openExternal } from '../openExternal'
 import { filterKbTree, pageBreadcrumb, parseKbNodePath } from '../kbTree'
 import { kbHandles } from '../kbHandles'
+import { useIsMobile } from '../useIsMobile'
+import { KB_PANEL_KEY } from '../mobileTaskPanel'
+import { usePanelSplit } from '../usePanelSplit'
+import { PanelHandle } from './PanelHandle'
 import {
   encodeHello,
   encodePing,
@@ -122,6 +126,9 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   // page saves. `canEdit` gates every write affordance — read-only viewing
   // works with no handle, but nothing is ever saved as `anon`.
   const { presenceHandle, editHandle, canEdit } = kbHandles(teamHandle)
+  // Phone only: the Spaces/Pages list vs open-page split, remembered per view.
+  const isMobile = useIsMobile()
+  const [panel, movePanel] = usePanelSplit(KB_PANEL_KEY)
 
   const [spaces, setSpaces] = useState<Space[]>([])
   const [spaceId, setSpaceId] = useState<number | null>(null)
@@ -695,8 +702,11 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   const spaceName = spaces.find((s) => s.id === spaceId)?.name ?? ''
 
   return (
-    <div className={styles.kb}>
-      <aside className={styles.sidebar}>
+    <div className={styles.kb} data-panel={isMobile ? panel.position : undefined}>
+      <aside
+        className={styles.sidebar}
+        aria-hidden={(isMobile && panel.position === 'detail') || undefined}
+      >
         <div className={styles.sectionHead}>
           <span className={styles.sectionTitle}>Spaces</span>
           <span className={styles.headRight}>
@@ -852,7 +862,14 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
         {error && <p className={styles.error}>{error}</p>}
       </aside>
 
-      <section className={styles.detail}>
+      {/* Phone only: swipe up toward a full-screen page, down toward a
+          full-screen Spaces/Pages list, tap to cycle (mobileTaskPanel.ts). */}
+      {isMobile && <PanelHandle label="Page list" position={panel.position} onMove={movePanel} />}
+
+      <section
+        className={styles.detail}
+        aria-hidden={(isMobile && panel.position === 'list') || undefined}
+      >
         {detail ? (
           <>
             <header className={styles.detailHead}>

@@ -418,33 +418,14 @@
   height: 0;
   border-bottom-color: transparent;
 }
-/* Swipe handle at the task panel's bottom edge — phone only. 44px tall so it
-   clears the touch-target minimum; `touch-action: none` keeps a vertical drag
-   on the handle from scrolling the page instead of resolving the gesture.     */
-.tasksHandle {
-  flex: none;
-  width: 100%;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  background: var(--surface);
-  border: none;
-  border-bottom: 1px solid var(--border);
-  touch-action: none;
-  transition: background var(--transition);
+/* Three-position split (mobileTaskPanel.ts): 'list' gives the task panel the
+   whole screen and hides the worker pane; 'detail' collapses the panel above. */
+.center[data-panel='list'] .tasksPanel {
+  flex: 1;
+  max-height: none;
 }
-.tasksHandle:active {
-  background: var(--surface-hover);
-}
-.tasksHandleBar {
-  width: 44px;
-  height: 4px;
-  border-radius: var(--radius-pill);
-  background: var(--border-strong);
-}
-.tasksHandle[aria-expanded='false'] .tasksHandleBar {
-  background: var(--accent);
+.center[data-panel='list'] .pane {
+  display: none;
 }
 
 .center[data-mobile] .filesSplit {

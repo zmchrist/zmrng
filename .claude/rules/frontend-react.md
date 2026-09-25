@@ -108,7 +108,7 @@ packages/web/src/
   attachments.ts  — pure image/PDF drop-paste helpers (mimeToKind/validateFile/fileToAttachment/filesFromPaste/filesFromDrop), mirroring the server's allow-list/size limits
   mobileNav.ts    — pure phone-navigation model (MOBILE_VIEWS / MobileNavState / toggleDrawer / closeDrawer / selectView / modeForView / workspaceViewFor / viewForMode). Below the 768px phone breakpoint the Workspace split collapses to ONE full-screen view at a time, picked from the hamburger drawer
   teamNav.ts      — pure Team-tab navigation model (RailTab 'channels'|'roster' / TeamPane 'list'|'thread' / loadOpenChannelId / saveOpenChannelId / initialPane / resolveOpenChannelId). The rail's channels and roster lists are TABS, one at a time, on desktop and phone alike; below 768px the rail and the thread are two full-screen panes. The open channel id persists to localStorage (zmrng-team-open-channel) on both shells
-  mobileTaskPanel.ts — pure phone-only helper behind the Tasks / Worker view's swipe-to-hide task panel (SWIPE_THRESHOLD_PX / beginSwipe / resolveSwipe / loadTasksCollapsed / saveTasksCollapsed). Swipe up on the handle collapses the task list, swipe down or tap restores it; the flag is one global setting persisted to localStorage (zmrng-mobile-tasks-collapsed)
+  mobileTaskPanel.ts — pure phone-only three-position list/detail split shared by the Tasks / Worker view and the KB view (SWIPE_THRESHOLD_PX / beginSwipe / resolveSwipe → up|down|tap / panelState / stepPanel / loadPanelPosition / savePanelPosition). Positions: 'list' (full-screen list), 'split' (default), 'detail' (full-screen worker/page); swipe up steps toward detail, down toward list, clamped; tap cycles list → split → detail → split → list. Each view persists under its own key (zmrng-mobile-tasks-panel / zmrng-mobile-kb-panel); the legacy zmrng-mobile-tasks-collapsed=true migrates to 'detail'. usePanelSplit.ts wraps it as a hook and components/PanelHandle.tsx is the shared 44px handle
   useIsMobile.ts  — useSyncExternalStore over matchMedia(MOBILE_QUERY = '(max-width: 768px)'); true while the viewport is phone-sized
   terminalKeys.ts — TERMINAL_KEYS (row 1: Esc/Tab/sticky Ctrl+Alt/arrows/shell symbols) + TERMINAL_KEYS_EXTRA (collapsed row 2: Home/End/PgUp/PgDn/F1-F12) + ctrlSeq()/altSeq()/modSeq() for the phone terminal's on-screen key bar
   keyboardInset.ts — the phone soft-keyboard inset: KEYBOARD_MIN_INSET, pure keyboardInset(m)/barOffset(inset, gapBelowPx), and useKeyboardInset() (useSyncExternalStore over visualViewport resize+scroll, same shape as useIsMobile.ts) — iOS overlays the keyboard instead of shrinking the layout viewport, so Terminal.tsx pads its wrap by this to keep the key bar and cursor line above it
@@ -182,11 +182,12 @@ no horizontal scrolling anywhere. Rules:
   two full-screen panes rather than a stacked column: tapping a channel opens
   its thread, the header's back arrow returns to the list. The open channel is
   persisted (`teamNav.ts`), so the tab reopens in the last channel's thread.
-- In the Tasks / Worker view a 44px handle bar sits at the task panel's bottom
-  edge: swipe up on it to collapse the panel (the worker log grows into the
-  space), swipe down or tap to restore it. The gesture is recognised on the
-  handle only, so list/log scrolling is untouched, and the state persists via
-  `mobileTaskPanel.ts`.
+- In the Tasks / Worker view and the KB view a 44px handle bar (`PanelHandle`)
+  sits between the list and its detail and steps a three-position split: swipe
+  down toward a full-screen list, up toward a full-screen worker/page, with
+  half-and-half as the default; tap cycles. The gesture is recognised on the
+  handle only, so list/log scrolling is untouched, and each view persists its
+  own position via `mobileTaskPanel.ts`.
 - The app is installable to the Home Screen (`public/manifest.webmanifest` +
   iOS/Android meta tags in `index.html`). There is deliberately **no service
   worker** — the UI is a live WebSocket client and useless offline.
