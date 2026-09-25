@@ -38,6 +38,9 @@ interface Props {
   /** Same repo registry as task creation (`GET /api/repos`), for the live
    *  Repo select. */
   repos: RepoTarget[]
+  /** Called with the session's Lanes row id on every (re)spawn, so the owning
+   *  card can map a Lanes chat-row click back to this tab. */
+  onLane?: (laneId: string) => void
 }
 
 /** Chat-tab defaults — independent of the task-level DEFAULT_* controls. */
@@ -68,6 +71,7 @@ export function ChatPane({
   initialRepoId = '',
   initialWorkflow = 'none',
   repos,
+  onLane,
 }: Props) {
   const [model, setModel] = useState<ModelAlias>(initialModel)
   const [effort, setEffort] = useState<EffortLevel>(initialEffort)
@@ -89,6 +93,11 @@ export function ChatPane({
   const [draft, setDraft] = useState('')
   const files = useAttachments()
   const wsRef = useRef<WebSocket | null>(null)
+  // Latest onLane without re-running the socket effect (which would respawn).
+  const onLaneRef = useRef(onLane)
+  useEffect(() => {
+    onLaneRef.current = onLane
+  })
   const { ref: threadRef, onScroll, scrollToBottom, notifyContentChanged, hasNew } =
     useAutoScroll<HTMLDivElement>()
 
@@ -114,6 +123,9 @@ export function ChatPane({
           break
         case 'tool':
           setThread((s) => pushToolNote(s, { name: msg.name, summary: msg.summary, actor: msg.actor }))
+          break
+        case 'lane':
+          onLaneRef.current?.(msg.laneId)
           break
         case 'result':
         case 'exit':

@@ -63,6 +63,8 @@ export function parseChatServerMsg(raw: string): ChatServerMsg | undefined {
   switch (obj.type) {
     case 'ready':
       return typeof obj.sessionId === 'string' ? { type: 'ready', sessionId: obj.sessionId } : undefined
+    case 'lane':
+      return typeof obj.laneId === 'string' ? { type: 'lane', laneId: obj.laneId } : undefined
     case 'partial':
       return typeof obj.text === 'string' ? { type: 'partial', text: obj.text } : undefined
     case 'assistant':

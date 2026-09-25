@@ -335,6 +335,13 @@ export class ChatManager {
     return session
   }
 
+  /** The id a live session is listed under in `snapshot()` (its Lanes row id),
+   *  or `undefined` once it has exited. The route sends it to the client so a
+   *  Lanes row click can focus the chat tab that owns the session. */
+  laneId(session: RunnerLike): string | undefined {
+    return this.sessions.get(session)?.id
+  }
+
   /** Kill and forget every tracked session (graceful shutdown). */
   killAll(): void {
     for (const session of this.sessions.keys()) {

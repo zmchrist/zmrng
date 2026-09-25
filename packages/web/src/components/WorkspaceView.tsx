@@ -24,7 +24,14 @@ import { TerminalCard } from './TerminalCard'
 import { WorkerLogPanel } from './WorkerLogPanel'
 import { SecurityPanel } from './SecurityPanel'
 import { LanesPanel } from './LanesPanel'
-import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
+import {
+  focusChatLane,
+  focusTerminalSession,
+  type ChatTabState,
+  type TabsState,
+  type TerminalTabState,
+} from '../windowTabs'
+import type { LaneTarget } from '../laneRows'
 import type { HandoffPrefill } from '../teamHandoff'
 import type { SecurityScan } from '../types'
 import type { MobileWorkspaceView } from '../mobileNav'
@@ -65,6 +72,9 @@ interface Props {
   /** Phone shell: which single view to fill the screen with. `undefined` on
    *  desktop, where the task panel + tab strip layout is used unchanged. */
   mobileView?: MobileWorkspaceView
+  /** Phone shell: switch the single full-screen view (a Lanes row click jumps
+   *  to the worker/chat/terminal view it points at). */
+  onMobileViewChange?: (view: MobileWorkspaceView) => void
   /** Per-tab state for the multi-tab Chat and Terminal panes + their
    *  persistence sinks (global UI state). Feed the tabbed ChatCard/TerminalCard
    *  dropped into the IDE's Chat/Terminal tabs. */
@@ -124,6 +134,7 @@ export function WorkspaceView({
   selectedId,
   tasksCollapsed,
   mobileView,
+  onMobileViewChange,
   chatTabs,
   onChatTabsChange,
   terminalTabs,
@@ -201,6 +212,29 @@ export function WorkspaceView({
       setTab('worker')
     },
     [onSelect],
+  )
+
+  // A Lanes row click jumps to what the row is: a task (worker, queued or
+  // subagent row) opens that task's Worker view; a chat / terminal row focuses
+  // the exact tab owning that live session. On the phone shell the single
+  // full-screen view switches too ('tasks' is where the worker log lives).
+  const openLane = useCallback(
+    (target: LaneTarget) => {
+      let next: PaneTab
+      if (target.kind === 'task') {
+        onSelect(target.taskId)
+        next = 'worker'
+      } else if (target.kind === 'chat') {
+        onChatTabsChange(focusChatLane(chatTabs, target.laneId))
+        next = 'chat'
+      } else {
+        onTerminalTabsChange(focusTerminalSession(terminalTabs, target.sessionId))
+        next = 'terminal'
+      }
+      setTab(next)
+      if (mobileView !== undefined) onMobileViewChange?.(next === 'worker' ? 'tasks' : next)
+    },
+    [onSelect, chatTabs, onChatTabsChange, terminalTabs, onTerminalTabsChange, mobileView, onMobileViewChange],
   )
 
   const status = task?.status ?? null
@@ -398,6 +432,7 @@ export function WorkspaceView({
               tasks={tasks}
               repos={repos}
               active={activeTab === 'lanes'}
+              onOpen={openLane}
             />
           </div>
         </div>
