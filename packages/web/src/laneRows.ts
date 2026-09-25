@@ -71,6 +71,14 @@ export interface ChatRow {
 /** One live PTY session. Carried through unchanged — there is nothing to join. */
 export type TerminalRow = LaneTerminal
 
+/** Where a Lanes row click leads: a task's Worker view (worker, queued and
+ *  subagent rows alike — a subagent opens its parent's), or the exact chat /
+ *  terminal tab that owns a live session, keyed by the row's id. */
+export type LaneTarget =
+  | { kind: 'task'; taskId: string }
+  | { kind: 'chat'; laneId: string }
+  | { kind: 'terminal'; sessionId: string }
+
 /** Everything the Lanes panel renders, grouped the way it is displayed. */
 export interface LaneRows {
   execute: ExecuteRows

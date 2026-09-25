@@ -294,6 +294,19 @@ describe('ChatManager.create (fake runner factory)', () => {
     mgr.killAll()
     expect(created.map((r) => r.killCount)).toEqual([1, 1])
   })
+
+  it('laneId() returns the id the session is listed under in the lane snapshot', () => {
+    let n = 0
+    const mgr = new ChatManager(factory, () => `lane-${++n}`)
+    const a = mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
+    const b = mgr.create({ model: 'opus', effort: 'high', style: 'normal' }, noopCallbacks())
+    expect(mgr.laneId(a)).toBe('lane-1')
+    expect(mgr.laneId(b)).toBe('lane-2')
+    expect(mgr.snapshot().map((c) => c.id)).toEqual(['lane-1', 'lane-2'])
+    // An exited session is no longer listed, so it has no lane id either.
+    created[0].cb.onExit(0, null)
+    expect(mgr.laneId(a)).toBeUndefined()
+  })
 })
 
 describe('chatSystemPrompt', () => {
