@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { encodeAttach, encodeInput, encodeResize, parseServerMsg } from '../src/terminalProtocol'
+import { encodeAttach, encodeClose, encodeInput, encodeResize, parseServerMsg } from '../src/terminalProtocol'
 
 describe('encodeAttach', () => {
   it('includes the session id when reattaching', () => {
@@ -92,5 +92,11 @@ describe('parseServerMsg', () => {
     expect(parseServerMsg('"data"')).toBeUndefined()
     expect(parseServerMsg('null')).toBeUndefined()
     expect(parseServerMsg('42')).toBeUndefined()
+  })
+})
+
+describe('encodeClose', () => {
+  it('produces the close frame the server parses', () => {
+    expect(JSON.parse(encodeClose())).toEqual({ type: 'close' })
   })
 })

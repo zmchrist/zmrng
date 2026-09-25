@@ -67,6 +67,7 @@ export function parseClientMsg(raw: string): TermClientMsg | undefined {
       ? { type: 'resize', cols: obj.cols, rows: obj.rows }
       : undefined
   }
+  if (obj.type === 'close') return { type: 'close' }
   return undefined
 }
 
@@ -257,6 +258,24 @@ export class TerminalManager {
       this.onChange()
     }, this.graceMs)
     // The row survives detach (the shell is still alive) but flips `attached`.
+    this.onChange()
+  }
+
+  /**
+   * Kill and forget one session immediately (the operator closed its tab) —
+   * no grace window, unlike `detach`. No-op if unknown.
+   */
+  close(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    this.sessions.delete(sessionId)
+    if (session.graceTimer) this.timers.clearTimeout(session.graceTimer)
+    session.cb = null
+    try {
+      session.pty.kill()
+    } catch {
+      // already exited
+    }
     this.onChange()
   }
 

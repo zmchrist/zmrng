@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import styles from './WindowTabs.module.css'
 import { TabStrip } from './TabStrip'
+import { closeTerminal } from '../terminalClose'
 import { Terminal } from './Terminal'
 import { addTerminalTab, closeTab, nextLabel, setActiveTab, setTerminalTabSession, type TabsState, type TerminalTabState } from '../windowTabs'
 
@@ -22,7 +23,13 @@ export function TerminalCard({ tabs, onTabsChange }: Props) {
     onTabsChange(addTerminalTab(tabs, id, nextLabel('Terminal', tabs)))
   }, [tabs, onTabsChange])
 
-  const closeThisTab = useCallback((id: string) => onTabsChange(closeTab(tabs, id)), [tabs, onTabsChange])
+  const closeThisTab = useCallback(
+    (id: string) => {
+      closeTerminal(id) // kill the PTY now; unmounting alone would only detach
+      onTabsChange(closeTab(tabs, id))
+    },
+    [tabs, onTabsChange],
+  )
   const activate = useCallback((id: string) => onTabsChange(setActiveTab(tabs, id)), [tabs, onTabsChange])
   const rememberSession = useCallback(
     (id: string, sessionId: string) => onTabsChange(setTerminalTabSession(tabs, id, sessionId)),
