@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { encodeAttach, encodeInput, encodeResize, parseServerMsg } from '../terminalProtocol'
+import { registerTerminalCloser } from '../terminalClose'
+import { encodeAttach, encodeClose, encodeInput, encodeResize, parseServerMsg } from '../terminalProtocol'
 import {
   TERMINAL_KEYS,
   TERMINAL_KEYS_EXTRA,
@@ -258,7 +259,18 @@ export function Terminal({ id, sessionId, onSession }: Props) {
 
     connect()
 
+    // Explicit tab close: tell the server to kill the shell now, and forget the id.
+    const unregisterCloser = registerTerminalCloser(id, () => {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(encodeClose())
+      try {
+        localStorage.removeItem(SESSION_KEY_PREFIX + id)
+      } catch {
+        // ignore
+      }
+    })
+
     return () => {
+      unregisterCloser()
       mounted = false
       if (reconnectTimer) clearTimeout(reconnectTimer)
       observer.disconnect()

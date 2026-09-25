@@ -616,6 +616,7 @@ export type TermClientMsg =
   | { type: 'attach'; sessionId?: string; cols: number; rows: number }
   | { type: 'input'; data: string }
   | { type: 'resize'; cols: number; rows: number }
+  | { type: 'close' }
 
 /** server -> client terminal frames. */
 export type TermServerMsg =
