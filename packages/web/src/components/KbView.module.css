@@ -728,6 +728,15 @@
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
+  /* Three-position split driven by the swipe handle (mobileTaskPanel.ts). */
+  .kb[data-panel='list'] .sidebar {
+    flex: 1;
+    max-height: none;
+  }
+  .kb[data-panel='list'] .detail,
+  .kb[data-panel='detail'] .sidebar {
+    display: none;
+  }
   .historyPanel {
     right: 8px;
     left: 8px;
