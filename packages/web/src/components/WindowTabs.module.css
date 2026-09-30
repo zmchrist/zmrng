@@ -79,6 +79,10 @@
   color: var(--text);
   background: var(--surface-hover);
 }
+/* .tabStrip scrolls sideways, so the global 2px outer ring is cut; draw it inset. */
+.tabAdd:focus-visible {
+  outline-offset: -2px;
+}
 
 .body {
   flex: 1;
@@ -222,9 +226,7 @@
   background-color: var(--surface-hover);
 }
 .select:focus {
-  outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
 }
 .select option {
   background: var(--well);

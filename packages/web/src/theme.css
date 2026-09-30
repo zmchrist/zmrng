@@ -94,7 +94,8 @@
   --glow-accent: 0 0 0 1px var(--accent-line);
   --glow-accent-strong: 0 0 0 1px var(--border-strong);
   --glow-operator: 0 0 0 1px var(--border);
-  --focus-ring: 0 0 0 2px var(--accent-line);
+  /* Solid --focus-color, not the 70% --accent-line (measured 2.24–2.39:1, under 3:1). */
+  --focus-ring: 0 0 0 2px var(--focus-color);
   /* Darker vermilion for the focus outline only: >=3.5:1 on paper, bg and wells
      (WCAG 1.4.11 / 2.4.13). Full #ff4d1a measured 2.91:1 on the tab-strip well. */
   --focus-color: #d93a0b;

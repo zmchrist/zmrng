@@ -190,9 +190,7 @@
   background-color: var(--surface-hover);
 }
 .themeSelect:focus {
-  outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
 }
 .themeSelect option {
   background: var(--well);
@@ -249,9 +247,6 @@
   background: var(--accent);
   border: 1px solid var(--accent-line);
   box-shadow: var(--hairline-soft);
-}
-.opacitySlider:focus {
-  outline: none;
 }
 .opacitySlider:focus::-webkit-slider-thumb {
   box-shadow: var(--focus-ring);

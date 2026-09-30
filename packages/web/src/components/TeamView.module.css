@@ -59,7 +59,6 @@
 }
 
 .input:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -300,7 +299,6 @@
 }
 
 .select:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -546,9 +544,7 @@
 
 .kbSelect:focus,
 .kbInput:focus {
-  outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
 }
 
 .kbError {
