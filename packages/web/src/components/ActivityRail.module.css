@@ -23,7 +23,7 @@
   color: var(--text-dim);
   background: transparent;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius);
   transition: color var(--transition), background var(--transition);
 }
 .arailBtn:hover {

@@ -68,8 +68,8 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
 }
 .menuRow {
   display: flex;
