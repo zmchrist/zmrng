@@ -120,7 +120,7 @@
   color: var(--text-dim);
   background: transparent;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius);
   transition: color var(--transition), background var(--transition);
 }
 .railBtn:hover {
@@ -338,9 +338,9 @@
   display: grid;
   place-items: center;
   padding: 32px;
-  background: rgba(2, 3, 8, 0.5);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(22, 19, 15, 0.45);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
 }
 .modalPanel {
   width: 520px;
@@ -350,10 +350,10 @@
   flex-direction: column;
   overflow: hidden;
   background: var(--surface-strong);
-  backdrop-filter: blur(26px) saturate(1.15);
-  -webkit-backdrop-filter: blur(26px) saturate(1.15);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
   border: 1px solid var(--border-strong);
-  border-radius: 14px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow);
   animation: modal-in var(--panel-duration) var(--panel-ease) both;
 }

@@ -1,51 +1,139 @@
 :root {
-  /* ---- base — "Cosmos": a deep space-navy field ------------------------- */
-  /* The cosmic radial-gradient atmosphere + starfield are painted on the
-     body backdrop layers (below), gated by [data-backdrop="cosmos"]; --bg is
-     the flat field colour underneath so non-cosmos themes still get a solid
-     field when they override it. */
-  --bg: #090b13;
+  /* ============================================================================
+     "Vermilion Press" — flat editorial Swiss, light mode (the default look).
+     3 colors, hard stop: paper / ink / vermilion. Vermilion is a WEAPON —
+     exactly one focal thing per region gets it. NO gradients, NO drop shadows,
+     NO backdrop-blur, NO glass, NO glow, near-ZERO radius. Structure comes from
+     1px ink hairlines + 2px solid borders + a strict grid, not from depth.
 
-  /* ---- surfaces — translucent glass panels over the cosmic field -------- */
-  /* --surface-opacity is a user-tunable multiplier (Settings → Window opacity):
-     1 = the authored alphas below, 0 = fully see-through glass. It scales only
-     the panel-background alphas, never text/icons/borders. Set at runtime on
-     the document root by opacity.ts. */
+     Every component reads these vars, so this one :root drives the whole app.
+     The old dark frosted-glass "Cosmos" look is preserved as an OPTIONAL theme:
+     its glass tokens are re-declared under html[data-backdrop='cosmos'] below,
+     and applyTheme() only sets that attribute when the Cosmos theme is active.
+     ============================================================================ */
+
+  /* ---- base field — flat paper ------------------------------------------- */
+  --bg: #f7f5f0;
+
+  /* --surface-opacity: user-tunable multiplier (Settings → Window opacity),
+     scaled into panel-background alphas by opacity.ts. On flat paper the
+     see-through slider is largely meaningless; the mechanism is left intact. */
   --surface-opacity: 1;
+  --surface: #fdfcf9; /* paper panel — differentiated by BORDERS, not fills */
+  --surface-strong: #ffffff;
+  --surface-hover: rgba(22, 19, 15, 0.04);
+  /* inset wells for fields / code */
+  --well: rgba(22, 19, 15, 0.05);
+  --well-strong: rgba(22, 19, 15, 0.09);
+
+  /* ---- kill the glass ----------------------------------------------------- */
+  --blur: 0;
+  --glass: none;
+
+  /* ---- edges — ink hairlines, no bevel ----------------------------------- */
+  --border: rgba(22, 19, 15, 0.18);
+  --border-strong: rgba(22, 19, 15, 0.42);
+  --hairline: none;
+  --hairline-soft: none;
+
+  /* ---- text --------------------------------------------------------------- */
+  --text: #16130f;
+  --text-dim: rgba(22, 19, 15, 0.55);
+  --text-faint: rgba(22, 19, 15, 0.4);
+
+  /* ---- accent — vermilion weapon (flat, no gradient, no 2nd hue) ---------- */
+  --accent: #ff4d1a;
+  --accent-2: #ff4d1a;
+  --accent-bright: #ff6a3d;
+  --accent-soft: rgba(255, 77, 26, 0.14);
+  --accent-line: rgba(255, 77, 26, 0.7);
+  --accent-grad: #ff4d1a; /* flat fill, not a gradient */
+  --accent-ink: #f7f5f0; /* paper reads on top of a vermilion fill */
+
+  /* ---- status hues — functional signposting on paper. Restrained ink/gray
+         ramp; vermilion reserved for the live/alert states. ----------------- */
+  --status-backlog: rgba(22, 19, 15, 0.45);
+  --status-clarify: #16130f;
+  --status-planning: #16130f;
+  --status-executing: #ff4d1a; /* the one "live" weapon */
+  --status-validating: #16130f;
+  --status-blocked: #ff4d1a; /* warning */
+  --status-review: #16130f;
+  --status-done: rgba(22, 19, 15, 0.65);
+  --status-failed: #ff4d1a;
+  --status-archived: rgba(22, 19, 15, 0.35);
+  --status-building: #16130f;
+
+  /* ---- actor hues — ink + vermilion(main) + a gray ramp. On strict 3-color
+         Swiss the per-subagent color-coding flattens to a value ramp. -------- */
+  --actor-main: var(--accent);
+  --actor-frontend-specialist: #16130f;
+  --actor-backend-specialist: rgba(22, 19, 15, 0.7);
+  --actor-qa: rgba(22, 19, 15, 0.55);
+  --actor-code-reviewer: rgba(22, 19, 15, 0.4);
+  --actor-doc-updater: rgba(22, 19, 15, 0.7);
+  --actor-general-purpose: rgba(22, 19, 15, 0.55);
+  --actor-default: rgba(22, 19, 15, 0.5);
+
+  /* ---- shape — hard Swiss edges ------------------------------------------ */
+  --radius: 0;
+  --radius-sm: 0;
+  --radius-pill: 0;
+
+  /* ---- motion ------------------------------------------------------------- */
+  --transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --spring: 460ms cubic-bezier(0.22, 1, 0.36, 1);
+  --panel-duration: 170ms;
+  --panel-ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ---- elevation — no soft depth; 1px rings instead of shadows/glows ------ */
+  --shadow: none;
+  --shadow-soft: none;
+  --glow-accent: 0 0 0 1px var(--accent-line);
+  --glow-accent-strong: 0 0 0 1px var(--border-strong);
+  --glow-operator: 0 0 0 1px var(--border);
+  --focus-ring: 0 0 0 2px var(--accent-line);
+
+  /* ---- controls ----------------------------------------------------------- */
+  --scrollbar-thumb: rgba(22, 19, 15, 0.28);
+  --scrollbar-thumb-hover: rgba(22, 19, 15, 0.42);
+
+  /* ---- typography — one grotesque family, many weights ------------------- */
+  --font: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-display: var(--font); /* Swiss = no decorative/script display face */
+  --font-brand: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --tracking-wide: 0.16em;
+  --tracking-tight: -0.03em;
+}
+
+/* ============================================================================
+   "Cosmos" — optional dark frosted-glass theme (deep space-navy field, warm
+   gold accent, nebula + starfield backdrop). Selected via the theme picker;
+   applyTheme() sets [data-backdrop='cosmos'] and pushes --bg + the accent
+   family as inline styles. Everything the flat base flattened (glass surfaces,
+   blur, soft borders, rounded corners, floating shadows, the cool status/actor
+   ramp) is restored here so Cosmos reads exactly as before. --bg and the
+   --accent* family come from themes.ts (buildThemeVars), so they're not set. */
+html[data-backdrop='cosmos'] {
   --surface: rgba(14, 18, 32, calc(0.5 * var(--surface-opacity)));
   --surface-strong: rgba(16, 20, 34, calc(0.62 * var(--surface-opacity)));
   --surface-hover: rgba(255, 255, 255, 0.06);
-  /* inset wells for fields / code */
   --well: rgba(0, 0, 0, calc(0.3 * var(--surface-opacity)));
   --well-strong: rgba(0, 0, 0, calc(0.46 * var(--surface-opacity)));
 
-  /* frosted glass is back: real backdrop blur on every panel */
   --blur: 20px;
   --glass: blur(20px) saturate(1.1);
 
-  /* ---- edges / hairlines — soft luminous glass rules -------------------- */
   --border: rgba(255, 255, 255, 0.09);
   --border-strong: rgba(255, 255, 255, 0.17);
-  /* subtle top-edge bevel so glass panels catch light */
   --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --hairline-soft: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
-  /* ---- text --------------------------------------------------------------*/
   --text: #e9e6dd;
   --text-dim: #9aa0b2;
   --text-faint: #5f6678;
 
-  /* ---- accent — warm cosmic gold ---------------------------------------- */
-  --accent: #f2ca8a;
-  --accent-2: #f0a86a;
-  --accent-bright: #f7d9a0;
-  --accent-soft: rgba(242, 202, 138, 0.16);
-  --accent-line: rgba(242, 202, 138, 0.7);
-  --accent-grad: linear-gradient(135deg, #f2ca8a 0%, #f0a86a 100%);
-  /* deep space-navy ink reads on top of the gold accent fill */
-  --accent-ink: #20170a;
-
-  /* ---- status hues — functional signal, tuned for the cosmos palette ---- */
   --status-backlog: #5f6678;
   --status-clarify: #f0c98a;
   --status-planning: #9fb4ff;
@@ -55,13 +143,9 @@
   --status-review: #c9a0f0;
   --status-done: #8fd0a4;
   --status-failed: #f09a8a;
-  /* manual terminal board state — shelved, dimmest of the terminal hues */
   --status-archived: #4a5063;
-  /* legacy single-phase status (old DB rows) */
   --status-building: #9fb4ff;
 
-  /* ---- actor hues — color-code worker + subagents ------------------------ */
-  --actor-main: var(--accent);
   --actor-frontend-specialist: #9fb4ff;
   --actor-backend-specialist: #7fb0ff;
   --actor-qa: #f0c98a;
@@ -70,40 +154,16 @@
   --actor-general-purpose: #9aa0b2;
   --actor-default: rgba(233, 230, 221, 0.7);
 
-  /* ---- shape — soft rounded glass corners -------------------------------- */
   --radius: 11px;
   --radius-sm: 8px;
   --radius-pill: 999px;
 
-  /* ---- motion ------------------------------------------------------------ */
-  --transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
-  --spring: 460ms cubic-bezier(0.22, 1, 0.36, 1);
-  /* Crisp Apple-esque panel open/close (minimize/enlarge): short duration,
-     ease-out-heavy curve — snappier than --spring. */
-  --panel-duration: 170ms;
-  --panel-ease: cubic-bezier(0.32, 0.72, 0, 1);
-
-  /* ---- elevation — soft floating-glass depth ----------------------------- */
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.42);
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.3);
-  --glow-accent: 0 0 0 1px var(--accent-line);
-  --glow-accent-strong: 0 0 0 1px var(--border-strong);
-  --glow-operator: 0 0 0 1px var(--border);
   --focus-ring: 0 0 0 1px var(--accent-line);
 
-  /* ---- controls ------------------------------------------------------------ */
   --scrollbar-thumb: rgba(255, 255, 255, 0.17);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
-
-  /* ---- typography — clean mono brand, clean sans body -------------------- */
-  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-  /* display face — kept defined for any remaining --font-display consumers */
-  --font-display: 'Lobster', cursive;
-  /* brand wordmark: understated monospace, matching the Cosmos screens */
-  --font-brand: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
-  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
-  --tracking-wide: 0.16em;
-  --tracking-tight: -0.012em;
 }
 
 * {
@@ -134,7 +194,8 @@ body {
    set by opacity.ts via isTauriRuntime()), fade it in lockstep with
    --surface-opacity so the real desktop shows through toward 0%. The plain
    browser dev target has no native window to show through, so it keeps the
-   solid background above untouched. */
+   solid background above untouched. On the flat paper base the see-through
+   slider is far less meaningful, but the mechanism is left intact. */
 [data-native-transparent='true'] body {
   background: color-mix(in srgb, var(--bg) calc(var(--surface-opacity) * 100%), transparent);
 }
@@ -149,7 +210,8 @@ body {
    Two fixed full-viewport layers painted behind the app, only when the active
    theme requests the cosmos backdrop (set via [data-backdrop] on the root by
    applyTheme). ::before is the coloured nebula wash; ::after is the star specks.
-   Both are inert (pointer-events:none) and sit at z-index 0, below #root. */
+   Both are inert (pointer-events:none) and sit at z-index 0, below #root.
+   The flat Vermilion default sets no backdrop, so neither layer paints. */
 html[data-backdrop='cosmos'] body::before {
   content: '';
   position: fixed;
