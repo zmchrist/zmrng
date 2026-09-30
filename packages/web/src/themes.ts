@@ -30,18 +30,44 @@ export interface ThemeDef {
   backdrop?: string
 }
 
-export const DEFAULT_THEME_ID = 'cosmos'
-export const DEFAULT_THEME_MODE: ThemeMode = 'dark'
+export const DEFAULT_THEME_ID = 'vermilion'
+export const DEFAULT_THEME_MODE: ThemeMode = 'light'
 
-// Order matches the confirmed catalog: one theme per color, plus black/white/grey.
+// Order: the flat "Vermilion Press" default + its cobalt A/B swap lead, then the
+// optional dark frosted-glass Cosmos theme, then one bold color field per hue
+// plus black/white/grey.
 //
-// Palette method (per theme): the bold `bg` field keeps its identity hue but is
-// tuned for harmony with its accents; each accent pair is chosen in a deliberate
-// color-theory relationship to the field (complementary for max pop, analogous
-// for a calmer duotone). Dark pairs run brighter/more luminous so they read on
-// the dark translucent glass and keep the bg-colored `--accent-ink` legible when
-// painted on an accent fill; light pairs are the same hue family pushed lighter.
+// Vermilion Press is the app's default look: flat editorial Swiss on light paper
+// with a single vermilion "weapon" accent — no gradient, no second hue, so both
+// accent stops are the same color (a flat --accent-grad). The flat structure
+// (paper surfaces, ink hairlines, hard edges) lives in theme.css :root; these
+// entries only push the accent family + bg field.
+//
+// Palette method (color themes): the bold `bg` field keeps its identity hue but
+// is tuned for harmony with its accents; each accent pair is chosen in a
+// deliberate color-theory relationship to the field. Dark pairs run brighter so
+// they read on the (Cosmos) dark translucent glass; light pairs are the same hue
+// family pushed lighter.
 export const THEMES: ThemeDef[] = [
+  {
+    id: 'vermilion',
+    label: 'Vermilion Press',
+    // The default: flat paper field, one vermilion weapon accent. No gradient,
+    // no second hue — both stops are the same vermilion so --accent-grad reads
+    // as a flat fill. No backdrop → the flat paper base shows through.
+    bg: '#f7f5f0',
+    dark: { accent: '#ff4d1a', accent2: '#ff4d1a' },
+    light: { accent: '#ff4d1a', accent2: '#ff4d1a' },
+  },
+  {
+    id: 'cobalt',
+    label: 'Cobalt Press',
+    // The approved A/B: the same flat Swiss language, weapon swapped to cobalt
+    // on cool paper. Single-lever accent change; structure identical.
+    bg: '#f5f6fa',
+    dark: { accent: '#1a4dff', accent2: '#1a4dff' },
+    light: { accent: '#1a4dff', accent2: '#1a4dff' },
+  },
   {
     id: 'cosmos',
     label: 'Cosmos',
@@ -175,6 +201,11 @@ export function hexToRgba(hex: string, alpha: number): string {
 export function buildThemeVars(theme: ThemeDef, mode: ThemeMode): Record<string, string> {
   const pair = mode === 'dark' ? theme.dark : theme.light
   const gradTo = pair.gradTo ?? pair.accent2
+  // Single-hue themes (Vermilion/Cobalt: accent === accent2 with no gradTo)
+  // emit a flat solid fill so the "no gradient" Swiss promise holds literally;
+  // multi-stop color themes still build a two-stop gradient.
+  const accentGrad =
+    pair.accent === gradTo ? pair.accent : `linear-gradient(135deg, ${pair.accent} 0%, ${gradTo} 100%)`
   return {
     '--bg': theme.bg,
     '--accent': pair.accent,
@@ -182,7 +213,7 @@ export function buildThemeVars(theme: ThemeDef, mode: ThemeMode): Record<string,
     '--accent-bright': pair.accent2,
     '--accent-soft': hexToRgba(pair.accent, 0.16),
     '--accent-line': hexToRgba(pair.accent, 0.7),
-    '--accent-grad': `linear-gradient(135deg, ${pair.accent} 0%, ${gradTo} 100%)`,
+    '--accent-grad': accentGrad,
     '--accent-ink': theme.bg,
   }
 }

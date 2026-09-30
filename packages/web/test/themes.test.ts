@@ -11,17 +11,23 @@ import {
 } from '../src/themes'
 
 describe('THEMES catalog', () => {
-  it('has 12 themes: cosmos + one per color plus black/white/grey', () => {
-    expect(THEMES).toHaveLength(12)
+  it('has 14 themes: vermilion + cobalt + cosmos + one per color plus black/white/grey', () => {
+    expect(THEMES).toHaveLength(14)
     const ids = THEMES.map((t) => t.id)
-    expect(new Set(ids).size).toBe(12)
-    for (const id of ['cosmos', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'teal', 'black', 'white', 'grey']) {
+    expect(new Set(ids).size).toBe(14)
+    for (const id of ['vermilion', 'cobalt', 'cosmos', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'teal', 'black', 'white', 'grey']) {
       expect(ids).toContain(id)
     }
   })
 
-  it('cosmos is the default theme and requests the cosmos backdrop', () => {
-    expect(DEFAULT_THEME_ID).toBe('cosmos')
+  it('vermilion is the flat default theme with no backdrop', () => {
+    expect(DEFAULT_THEME_ID).toBe('vermilion')
+    expect(DEFAULT_THEME_MODE).toBe('light')
+    // the flat Vermilion default paints no backdrop (flat paper field)
+    expect(getTheme('vermilion').backdrop).toBeUndefined()
+  })
+
+  it('cosmos remains available as the optional glass theme with its backdrop', () => {
     expect(getTheme('cosmos').backdrop).toBe('cosmos')
     // non-cosmos themes have no backdrop (flat field)
     expect(getTheme('orange').backdrop).toBeUndefined()
@@ -92,7 +98,7 @@ describe('theme persistence (localStorage)', () => {
     localStorage.clear()
   })
 
-  it('defaults to the default theme/dark when nothing is stored', () => {
+  it('defaults to the default theme/mode when nothing is stored', () => {
     expect(loadStoredTheme()).toEqual({ themeId: DEFAULT_THEME_ID, mode: DEFAULT_THEME_MODE })
   })
 
