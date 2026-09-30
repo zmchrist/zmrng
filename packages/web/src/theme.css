@@ -38,7 +38,9 @@
 
   /* ---- text --------------------------------------------------------------- */
   --text: #16130f;
-  --text-dim: rgba(22, 19, 15, 0.55);
+  /* 0.75 on paper = 7.9:1 — clears WCAG 1.4.3 (4.5:1) and adopted 1.4.6 (7:1).
+     0.55 measured 3.96–4.10:1 and failed 1.4.3. */
+  --text-dim: rgba(22, 19, 15, 0.75);
   --text-faint: rgba(22, 19, 15, 0.4);
 
   /* ---- accent — vermilion weapon (flat, no gradient, no 2nd hue) ---------- */
@@ -93,6 +95,9 @@
   --glow-accent-strong: 0 0 0 1px var(--border-strong);
   --glow-operator: 0 0 0 1px var(--border);
   --focus-ring: 0 0 0 2px var(--accent-line);
+  /* Darker vermilion for the focus outline only: >=3.5:1 on paper, bg and wells
+     (WCAG 1.4.11 / 2.4.13). Full #ff4d1a measured 2.91:1 on the tab-strip well. */
+  --focus-color: #d93a0b;
 
   /* ---- controls ----------------------------------------------------------- */
   --scrollbar-thumb: rgba(22, 19, 15, 0.28);
@@ -161,6 +166,7 @@ html[data-backdrop='cosmos'] {
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.42);
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.3);
   --focus-ring: 0 0 0 1px var(--accent-line);
+  --focus-color: var(--accent);
 
   --scrollbar-thumb: rgba(255, 255, 255, 0.17);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
@@ -269,8 +275,13 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 a:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  /* Solid 2px outline in the full-strength accent (WCAG 2.4.7 / 2.4.13, 1.4.11).
+     The old box-shadow ring used --accent-line (70% alpha) and measured 2.24–2.39:1
+     against paper — below the 3:1 non-text floor. Solid --focus-color clears 3:1 on every light surface.
+     outline also survives forced-colors mode, where box-shadow is dropped. */
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 ::-webkit-scrollbar {
