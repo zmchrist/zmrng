@@ -7,9 +7,6 @@
      1px ink hairlines + 2px solid borders + a strict grid, not from depth.
 
      Every component reads these vars, so this one :root drives the whole app.
-     The old dark frosted-glass "Cosmos" look is preserved as an OPTIONAL theme:
-     its glass tokens are re-declared under html[data-backdrop='cosmos'] below,
-     and applyTheme() only sets that attribute when the Cosmos theme is active.
      ============================================================================ */
 
   /* ---- base field — flat paper ------------------------------------------- */
@@ -113,66 +110,6 @@
   --tracking-tight: -0.03em;
 }
 
-/* ============================================================================
-   "Cosmos" — optional dark frosted-glass theme (deep space-navy field, warm
-   gold accent, nebula + starfield backdrop). Selected via the theme picker;
-   applyTheme() sets [data-backdrop='cosmos'] and pushes --bg + the accent
-   family as inline styles. Everything the flat base flattened (glass surfaces,
-   blur, soft borders, rounded corners, floating shadows, the cool status/actor
-   ramp) is restored here so Cosmos reads exactly as before. --bg and the
-   --accent* family come from themes.ts (buildThemeVars), so they're not set. */
-html[data-backdrop='cosmos'] {
-  --surface: rgba(14, 18, 32, calc(0.5 * var(--surface-opacity)));
-  --surface-strong: rgba(16, 20, 34, calc(0.62 * var(--surface-opacity)));
-  --surface-hover: rgba(255, 255, 255, 0.06);
-  --well: rgba(0, 0, 0, calc(0.3 * var(--surface-opacity)));
-  --well-strong: rgba(0, 0, 0, calc(0.46 * var(--surface-opacity)));
-
-  --blur: 20px;
-  --glass: blur(20px) saturate(1.1);
-
-  --border: rgba(255, 255, 255, 0.09);
-  --border-strong: rgba(255, 255, 255, 0.17);
-  --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --hairline-soft: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-
-  --text: #e9e6dd;
-  --text-dim: #9aa0b2;
-  --text-faint: #5f6678;
-
-  --status-backlog: #5f6678;
-  --status-clarify: #f0c98a;
-  --status-planning: #9fb4ff;
-  --status-executing: #9fb4ff;
-  --status-validating: #7fd0c0;
-  --status-blocked: #f0a86a;
-  --status-review: #c9a0f0;
-  --status-done: #8fd0a4;
-  --status-failed: #f09a8a;
-  --status-archived: #4a5063;
-  --status-building: #9fb4ff;
-
-  --actor-frontend-specialist: #9fb4ff;
-  --actor-backend-specialist: #7fb0ff;
-  --actor-qa: #f0c98a;
-  --actor-code-reviewer: #c9a0f0;
-  --actor-doc-updater: #7fd0c0;
-  --actor-general-purpose: #9aa0b2;
-  --actor-default: rgba(233, 230, 221, 0.7);
-
-  --radius: 11px;
-  --radius-sm: 8px;
-  --radius-pill: 999px;
-
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.42);
-  --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.3);
-  --focus-ring: 0 0 0 1px var(--accent-line);
-  --focus-color: var(--accent);
-
-  --scrollbar-thumb: rgba(255, 255, 255, 0.17);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
-}
-
 * {
   box-sizing: border-box;
 }
@@ -207,63 +144,10 @@ body {
   background: color-mix(in srgb, var(--bg) calc(var(--surface-opacity) * 100%), transparent);
 }
 
-/* App content sits above the fixed cosmic backdrop layers. */
+/* App content gets its own stacking layer above the body background. */
 #root {
   position: relative;
   z-index: 1;
-}
-
-/* ---- Cosmos backdrop — a drifting nebula + a twinkling starfield --------
-   Two fixed full-viewport layers painted behind the app, only when the active
-   theme requests the cosmos backdrop (set via [data-backdrop] on the root by
-   applyTheme). ::before is the coloured nebula wash; ::after is the star specks.
-   Both are inert (pointer-events:none) and sit at z-index 0, below #root.
-   The flat Vermilion default sets no backdrop, so neither layer paints. */
-html[data-backdrop='cosmos'] body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(900px 600px at 50% -12%, rgba(255, 224, 180, 0.2), transparent 60%),
-    radial-gradient(720px 540px at 10% 118%, rgba(255, 150, 172, 0.12), transparent 62%),
-    radial-gradient(760px 560px at 112% 6%, rgba(140, 170, 255, 0.14), transparent 60%),
-    radial-gradient(120% 120% at 50% 45%, transparent 52%, rgba(2, 3, 8, 0.62) 100%);
-}
-
-html[data-backdrop='cosmos'] body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background-image:
-    radial-gradient(1.6px 1.6px at 22% 14%, #ffffff, transparent),
-    radial-gradient(1.6px 1.6px at 68% 30%, #ffe9c8, transparent),
-    radial-gradient(1.4px 1.4px at 40% 62%, #cdd8ff, transparent),
-    radial-gradient(1.4px 1.4px at 47% 20%, #ffffff, transparent),
-    radial-gradient(1.6px 1.6px at 80% 74%, #ffd9b0, transparent),
-    radial-gradient(1.4px 1.4px at 12% 46%, #cdd8ff, transparent),
-    radial-gradient(1.4px 1.4px at 88% 22%, #ffffff, transparent),
-    radial-gradient(1.4px 1.4px at 30% 84%, #ffe9c8, transparent),
-    radial-gradient(1.5px 1.5px at 60% 50%, #ffffff, transparent),
-    radial-gradient(1.3px 1.3px at 5% 78%, #cdd8ff, transparent),
-    radial-gradient(1.4px 1.4px at 94% 60%, #ffd9b0, transparent),
-    radial-gradient(1.3px 1.3px at 72% 8%, #ffffff, transparent);
-  background-repeat: no-repeat;
-  opacity: 0.55;
-  animation: cosmos-twinkle 4.2s ease-in-out infinite;
-}
-
-@keyframes cosmos-twinkle {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 0.8;
-  }
 }
 
 button {

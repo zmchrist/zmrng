@@ -11,26 +11,14 @@ import {
 } from '../src/themes'
 
 describe('THEMES catalog', () => {
-  it('has 14 themes: vermilion + cobalt + cosmos + one per color plus black/white/grey', () => {
-    expect(THEMES).toHaveLength(14)
-    const ids = THEMES.map((t) => t.id)
-    expect(new Set(ids).size).toBe(14)
-    for (const id of ['vermilion', 'cobalt', 'cosmos', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'teal', 'black', 'white', 'grey']) {
-      expect(ids).toContain(id)
-    }
+  it('has exactly two themes: Vermilion Press + Cobalt Press', () => {
+    expect(THEMES.map((t) => t.id)).toEqual(['vermilion', 'cobalt'])
+    expect(THEMES.map((t) => t.label)).toEqual(['Vermilion Press', 'Cobalt Press'])
   })
 
-  it('vermilion is the flat default theme with no backdrop', () => {
+  it('vermilion is the default theme, light mode', () => {
     expect(DEFAULT_THEME_ID).toBe('vermilion')
     expect(DEFAULT_THEME_MODE).toBe('light')
-    // the flat Vermilion default paints no backdrop (flat paper field)
-    expect(getTheme('vermilion').backdrop).toBeUndefined()
-  })
-
-  it('cosmos remains available as the optional glass theme with its backdrop', () => {
-    expect(getTheme('cosmos').backdrop).toBe('cosmos')
-    // non-cosmos themes have no backdrop (flat field)
-    expect(getTheme('orange').backdrop).toBeUndefined()
   })
 
   it('every theme defines a dark and light accent pair', () => {
@@ -53,11 +41,15 @@ describe('THEMES catalog', () => {
 
 describe('getTheme', () => {
   it('finds a theme by id', () => {
-    expect(getTheme('teal').label).toBe('Teal')
+    expect(getTheme('cobalt').label).toBe('Cobalt Press')
   })
 
   it('falls back to the default theme for an unknown id', () => {
     expect(getTheme('nonexistent').id).toBe(DEFAULT_THEME_ID)
+  })
+
+  it('falls back to the default for a removed theme a user may still have stored', () => {
+    for (const id of ['cosmos', 'orange', 'teal', 'purple']) expect(getTheme(id).id).toBe(DEFAULT_THEME_ID)
   })
 })
 
@@ -68,27 +60,27 @@ describe('hexToRgba', () => {
 })
 
 describe('buildThemeVars', () => {
-  it('wires every accent token from the refined orange/dark pair + bg', () => {
-    const vars = buildThemeVars(getTheme('orange'), 'dark')
-    expect(vars['--bg']).toBe('#ff5a1f')
-    expect(vars['--accent']).toBe('#f2ff4d')
-    expect(vars['--accent-2']).toBe('#ffd23d')
-    expect(vars['--accent-bright']).toBe('#ffd23d')
-    expect(vars['--accent-soft']).toBe('rgba(242, 255, 77, 0.16)')
-    expect(vars['--accent-line']).toBe('rgba(242, 255, 77, 0.7)')
-    expect(vars['--accent-grad']).toBe('linear-gradient(135deg, #f2ff4d 0%, #c8e000 100%)')
-    expect(vars['--accent-ink']).toBe('#ff5a1f')
+  it('wires every accent token from the cobalt pair + bg', () => {
+    const vars = buildThemeVars(getTheme('cobalt'), 'light')
+    expect(vars['--bg']).toBe('#f5f6fa')
+    expect(vars['--accent']).toBe('#1a4dff')
+    expect(vars['--accent-2']).toBe('#1a4dff')
+    expect(vars['--accent-bright']).toBe('#1a4dff')
+    expect(vars['--accent-soft']).toBe('rgba(26, 77, 255, 0.16)')
+    expect(vars['--accent-line']).toBe('rgba(26, 77, 255, 0.7)')
+    expect(vars['--accent-ink']).toBe('#f5f6fa')
   })
 
-  it('swaps to the brighter accent pair for light mode', () => {
-    const dark = buildThemeVars(getTheme('teal'), 'dark')
-    const light = buildThemeVars(getTheme('teal'), 'light')
-    expect(light['--accent']).not.toBe(dark['--accent'])
-    expect(light['--bg']).toBe(dark['--bg']) // bg does not change with mode
+  it('single-hue themes emit a flat accent fill, not a gradient', () => {
+    for (const theme of THEMES) {
+      for (const mode of ['dark', 'light'] as const) {
+        expect(buildThemeVars(theme, mode)['--accent-grad']).toBe(mode === 'dark' ? theme.dark.accent : theme.light.accent)
+      }
+    }
   })
 
-  it('builds a two-stop gradient from accent to accent2 when no gradTo is set', () => {
-    const vars = buildThemeVars(getTheme('red'), 'dark')
+  it('builds a two-stop gradient when accent and accent2 differ', () => {
+    const vars = buildThemeVars({ id: 'x', label: 'X', bg: '#000000', dark: { accent: '#ffcf4d', accent2: '#ff7a3d' }, light: { accent: '#ffcf4d', accent2: '#ff7a3d' } }, 'dark')
     expect(vars['--accent-grad']).toBe('linear-gradient(135deg, #ffcf4d 0%, #ff7a3d 100%)')
   })
 })
@@ -103,8 +95,8 @@ describe('theme persistence (localStorage)', () => {
   })
 
   it('round-trips a saved theme choice', () => {
-    saveStoredTheme({ themeId: 'purple', mode: 'light' })
-    expect(loadStoredTheme()).toEqual({ themeId: 'purple', mode: 'light' })
+    saveStoredTheme({ themeId: 'cobalt', mode: 'light' })
+    expect(loadStoredTheme()).toEqual({ themeId: 'cobalt', mode: 'light' })
   })
 
   it('falls back to defaults on corrupt stored JSON', () => {
