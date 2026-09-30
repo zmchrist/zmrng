@@ -90,7 +90,7 @@
   color: var(--text);
   background: var(--surface-strong);
   border: 1px solid var(--accent);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   transition: var(--transition);
 }
