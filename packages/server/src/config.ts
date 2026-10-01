@@ -187,6 +187,22 @@ export interface Config {
    * /ws/workspace when origin/main moves ahead of this HEAD (WS-B / D3).
    */
   versionPollMs: number
+  /**
+   * Gauntlet-loop load gate (D7 of .agents/plans/gauntlet-loop-tab.md): no NEW
+   * Loop ticket is picked while the 1-minute load average per core exceeds this
+   * (`ZMRNG_LOOP_MAX_LOAD_PER_CORE`, default 1.0). In-flight steps are never killed.
+   */
+  loopMaxLoadPerCore: number
+  /**
+   * Gauntlet-loop load gate: no NEW Loop ticket is picked while AVAILABLE memory
+   * is below this many MB (`ZMRNG_LOOP_MIN_FREE_MEM_MB`, default 2048).
+   */
+  loopMinFreeMemMb: number
+  /**
+   * How often (ms) the Loop pump re-checks a deferred pick while a running run
+   * has free lane slots (`ZMRNG_LOOP_PUMP_INTERVAL_MS`, default 30000).
+   */
+  loopPumpIntervalMs: number
 }
 
 export type AuthMode = 'oauth' | 'apikey'
@@ -259,6 +275,41 @@ export function resolveSecurityPolicy(env: SecurityEnv): SecurityPolicy {
   const semgrepConfig = env.ZMRNG_SECURITY_SEMGREP_CONFIG?.trim() || DEFAULT_SEMGREP_CONFIG
   const minSeverity = parseSeverity(env.ZMRNG_SECURITY_MIN_SEVERITY) ?? 'ERROR'
   return { enabled, maxRounds, semgrepConfig, minSeverity }
+}
+
+/** Env inputs for the gauntlet-loop settings, isolated so `resolveLoopConfig` is testable. */
+export interface LoopEnv {
+  ZMRNG_LOOP_MAX_LOAD_PER_CORE?: string
+  ZMRNG_LOOP_MIN_FREE_MEM_MB?: string
+  ZMRNG_LOOP_PUMP_INTERVAL_MS?: string
+}
+
+/** The resolved gauntlet-loop settings (a slice of `Config`). */
+export interface LoopConfig {
+  loopMaxLoadPerCore: number
+  loopMinFreeMemMb: number
+  loopPumpIntervalMs: number
+}
+
+/** A positive finite number from an env string, else `fallback` (blank/garbage/0/negative). */
+function positiveNumber(raw: string | undefined, fallback: number): number {
+  const v = raw?.trim() ? Number(raw) : Number.NaN
+  return Number.isFinite(v) && v > 0 ? v : fallback
+}
+
+/**
+ * Resolve the gauntlet-loop load-gate thresholds and pump cadence from env —
+ * pure and unit-testable, mirroring `resolveSecurityPolicy`. Each field falls
+ * back to its default independently on a non-numeric, non-finite, or
+ * non-positive value, so a typo can never disable the gate (e.g. a 0 memory
+ * floor) or spin the pump.
+ */
+export function resolveLoopConfig(env: LoopEnv): LoopConfig {
+  return {
+    loopMaxLoadPerCore: positiveNumber(env.ZMRNG_LOOP_MAX_LOAD_PER_CORE, 1.0),
+    loopMinFreeMemMb: positiveNumber(env.ZMRNG_LOOP_MIN_FREE_MEM_MB, 2048),
+    loopPumpIntervalMs: positiveNumber(env.ZMRNG_LOOP_PUMP_INTERVAL_MS, 30000),
+  }
 }
 
 /**
@@ -722,6 +773,7 @@ function buildConfig(): Config {
     sessionTtlMs: Number(process.env.ZMRNG_SESSION_TTL_MS ?? SESSION_TTL_MS),
     headSha: readHeadSha(REPO_ROOT),
     versionPollMs: Number(process.env.ZMRNG_VERSION_POLL_MS ?? 0),
+    ...resolveLoopConfig(process.env),
   }
 }
 

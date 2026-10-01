@@ -1,0 +1,223 @@
+/* Loop tab — the orchestrator thread (left column). Same bubble language as
+   ChatPane.module.css; tokens only. */
+.pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--well);
+  color: var(--text);
+}
+
+.head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-strong);
+  font-size: 0.85rem;
+}
+
+.title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.state {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.state[data-busy] {
+  color: var(--status-executing);
+}
+
+/* ---- scrollable thread ------------------------------------------------- */
+.threadWrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.empty {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.newMsgPill {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  background: var(--surface-strong);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pill);
+  transition: var(--transition);
+}
+
+.newMsgPill:hover {
+  background: var(--surface-hover);
+}
+
+.bubble {
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Operator turns: accent-tinted, right-aligned. */
+.operator {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+}
+
+/* Orchestrator turns: neutral surface, left-aligned. */
+.orchestrator {
+  align-self: flex-start;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+}
+
+.caret {
+  display: inline-block;
+  width: 6px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* Compact muted note: the orchestrator's tool calls, loop notifications, errors. */
+.note {
+  align-self: stretch;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.noteName {
+  flex: none;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.noteText {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A loop notification wraps (it may carry a gap or a question to read). */
+.note[data-kind='loop'] .noteText {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.note[data-kind='loop'] .noteName {
+  color: var(--accent);
+}
+
+.note[data-kind='error'] .noteName,
+.note[data-kind='error'] .noteText {
+  color: var(--status-failed);
+}
+
+/* ---- composer ------------------------------------------------------------ */
+.composer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-strong);
+}
+
+.error {
+  font-size: 0.75rem;
+  color: var(--status-failed);
+}
+
+.composerRow {
+  display: flex;
+  gap: 6px;
+}
+
+.input {
+  flex: 1;
+  resize: none;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  transition: var(--transition);
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+.sendBtn {
+  flex: none;
+  align-self: stretch;
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+
+.sendBtn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.sendBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

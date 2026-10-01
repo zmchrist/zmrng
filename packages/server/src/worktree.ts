@@ -22,6 +22,15 @@ async function git(repo: string, args: string[]): Promise<string> {
   return stdout.trim()
 }
 
+/**
+ * Run `git <args>` inside `cwd` (as `git -C <cwd>`) and resolve its trimmed
+ * stdout; rejects on a non-zero exit. The exported face of this module's own
+ * git helper, for callers (the gauntlet loop) that drive branches/worktrees.
+ */
+export async function gitIn(cwd: string, args: string[]): Promise<string> {
+  return git(cwd, args)
+}
+
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
@@ -39,6 +48,23 @@ export function slugify(title: string): string {
 export interface WorktreeHandle {
   branch: string
   worktreePath: string
+}
+
+/** Optional `createWorktree` overrides (see its doc comment). */
+export interface CreateWorktreeOptions {
+  /** Branch name to use instead of `feat/zmrng/<slug>-<shortId>`. */
+  branch?: string
+  /** Start point for a FRESH branch instead of the resolved default-branch base. */
+  base?: string
+  /** Worktree directory name under `worktreesDir` instead of `<shortId>`. */
+  dir?: string
+}
+
+/** A `dir` override must name ONE directory under `worktreesDir`, never a path out of it. */
+function assertPlainDirName(dir: string): void {
+  if (!dir || dir === '.' || dir === '..' || /[\\/]/.test(dir)) {
+    throw new Error(`worktree dir override must be a plain directory name, got ${JSON.stringify(dir)}`)
+  }
 }
 
 /** True if `ref` resolves to a commit in `repo`. */
@@ -92,6 +118,13 @@ async function worktreeRegistered(repo: string, worktreePath: string): Promise<b
  *     worktree), reattach that existing branch — preserving any commits on it —
  *     instead of failing on `-b`;
  *   - otherwise cut a fresh branch from the resolved base.
+ *
+ * `opts` (optional; omitted ⇒ the behaviour above, unchanged) lets the gauntlet
+ * loop name its own branches and dirs: `branch` replaces the
+ * `feat/zmrng/<slug>-<short>` name, `base` replaces the resolved default-branch
+ * base as the start point of a FRESH branch (an existing branch is reattached
+ * as-is, never recut), and `dir` replaces the `<short>` directory NAME under
+ * `worktreesDir` — a plain name, never a path.
  */
 export async function createWorktree(
   repoPath: string,
@@ -99,11 +132,13 @@ export async function createWorktree(
   worktreesDir: string,
   taskId: string,
   title: string,
+  opts: CreateWorktreeOptions = {},
 ): Promise<WorktreeHandle> {
+  if (opts.dir !== undefined) assertPlainDirName(opts.dir)
   mkdirSync(worktreesDir, { recursive: true })
   const shortId = taskId.slice(0, 8)
-  const branch = `feat/zmrng/${slugify(title)}-${shortId}`
-  const worktreePath = path.join(worktreesDir, shortId)
+  const branch = opts.branch ?? `feat/zmrng/${slugify(title)}-${shortId}`
+  const worktreePath = path.join(worktreesDir, opts.dir ?? shortId)
 
   // Best effort — local-only repos have no origin to fetch.
   try {
@@ -130,7 +165,7 @@ export async function createWorktree(
     // existing branch (keeping any commits) rather than colliding on `-b`.
     await git(repoPath, ['worktree', 'add', worktreePath, branch])
   } else {
-    const base = await resolveBase(repoPath, defaultBranch)
+    const base = opts.base ?? (await resolveBase(repoPath, defaultBranch))
     await git(repoPath, ['worktree', 'add', '-b', branch, worktreePath, base])
   }
   return { branch, worktreePath }

@@ -16,8 +16,24 @@ import type {
   Attachment,
   SecurityScan,
   LaneSnapshot,
+  LoopCreateRequest,
+  LoopEvent,
+  LoopRun,
+  LoopRunView,
 } from './types'
 import { WorkspaceView } from './components/WorkspaceView'
+import { LoopView } from './components/LoopView'
+import { loopApi } from './loopProtocol'
+import {
+  appendLoopEvent,
+  appendLoopPartial,
+  isOrchestratorReply,
+  loadOpenRunId,
+  mergeLoopEvents,
+  removeRun,
+  saveOpenRunId,
+  upsertRun,
+} from './loopState'
 import { AuthBanner } from './components/AuthBanner'
 import { TeamView } from './components/TeamView'
 import { ActivityRail } from './components/ActivityRail'
@@ -119,10 +135,15 @@ export default function App() {
     setTeamSession(loadSession(TEAM_ORIGIN))
   }, [])
   const ui = useUiState()
+  // Read before `mode`: the phone shell has no Loop view, so it needs this to coerce.
+  const isMobile = useIsMobile()
   // Workspace is the default home; migrate the retired `'tasks'`/`'board'` modes to it.
   const storedMode = ui.state.global.mode ?? 'workspace'
-  const mode: WorkspaceMode =
+  const persistedMode: WorkspaceMode =
     storedMode === 'tasks' || storedMode === 'board' ? 'workspace' : storedMode
+  // Loop is desktop-only: a phone showing a persisted `'loop'` lands on Workspace
+  // (the stored mode is left alone, so the desktop still reopens Loop).
+  const mode: WorkspaceMode = isMobile && persistedMode === 'loop' ? 'workspace' : persistedMode
   const setMode = useCallback((m: WorkspaceMode) => ui.patchGlobal({ mode: m }), [ui])
   // ---- Team unread orb (in-memory only, resets on relaunch) --------------
   // The workspace socket is gated on the Team tab being active (#149), so while
@@ -174,7 +195,7 @@ export default function App() {
   // ---- phone shell -------------------------------------------------------
   // Below the phone breakpoint the Workspace split collapses to ONE full-screen
   // view at a time, chosen from the hamburger drawer. Desktop is untouched.
-  const isMobile = useIsMobile()
+  // (`isMobile` itself is read above, before `mode`.)
   const [nav, setNav] = useState<MobileNavState>(() => ({
     ...initialMobileNav,
     view: viewForMode(storedMode === 'tasks' || storedMode === 'board' ? 'workspace' : storedMode),
@@ -260,6 +281,53 @@ export default function App() {
     }
   }, [])
 
+  // ---- Loop mode (desktop only) -------------------------------------------
+  // The runs list, the ONE open run (its id persisted to localStorage so a
+  // reload reopens it), that run's view + events, and its orchestrator's
+  // streamed partial. Everything is fetched only while the Loop mode is active;
+  // the `loop*` frames on the /ws hub keep it live from then on.
+  const [loopRuns, setLoopRuns] = useState<LoopRun[]>([])
+  const [loopOpenId, setLoopOpenId] = useState<string | null>(loadOpenRunId)
+  const [loopView, setLoopView] = useState<LoopRunView | null>(null)
+  const [loopEvents, setLoopEvents] = useState<LoopEvent[]>([])
+  const [loopPartial, setLoopPartial] = useState('')
+  const [loopLoadError, setLoopLoadError] = useState<string | null>(null)
+  // The WS handler reads the open run through a ref so it never goes stale.
+  const loopOpenRef = useRef<string | null>(loopOpenId)
+  // Same per-frame coalescing as the task `partial` stream above: a fast
+  // orchestrator turn must not re-render the whole app once per token.
+  const loopBufRef = useRef('')
+  const loopRafRef = useRef<number | null>(null)
+  const flushLoopPartial = useCallback(() => {
+    loopRafRef.current = null
+    const chunk = loopBufRef.current
+    if (!chunk) return
+    loopBufRef.current = ''
+    setLoopPartial((prev) => appendLoopPartial(prev, chunk))
+  }, [])
+  const resetLoopPartial = useCallback(() => {
+    loopBufRef.current = ''
+    if (loopRafRef.current !== null) {
+      cancelAnimationFrame(loopRafRef.current)
+      loopRafRef.current = null
+    }
+    setLoopPartial('')
+  }, [])
+  // Open (or, with null, close) a run. Clears the previous run's view, events
+  // and partial in the handler itself — the fetch effect below refills them.
+  const openLoopRun = useCallback(
+    (id: string | null) => {
+      loopOpenRef.current = id
+      saveOpenRunId(id)
+      setLoopOpenId(id)
+      setLoopView(null)
+      setLoopEvents([])
+      setLoopLoadError(null)
+      resetLoopPartial()
+    },
+    [resetLoopPartial],
+  )
+
   const onWs = useCallback((e: WsEvent) => {
     switch (e.type) {
       case 'snapshot': {
@@ -319,8 +387,27 @@ export default function App() {
           setSecurityScans([])
         }
         break
+      case 'loop':
+        setLoopRuns((prev) => upsertRun(prev, e.run.run))
+        if (e.run.run.id === loopOpenRef.current) setLoopView(e.run)
+        break
+      case 'loop-event':
+        if (e.runId !== loopOpenRef.current) return
+        setLoopEvents((prev) => appendLoopEvent(prev, e.event))
+        // The finalized reply supersedes everything streamed for it so far.
+        if (isOrchestratorReply(e.event)) resetLoopPartial()
+        break
+      case 'loop-partial':
+        if (e.runId !== loopOpenRef.current) return
+        loopBufRef.current += e.text
+        if (loopRafRef.current === null) loopRafRef.current = requestAnimationFrame(flushLoopPartial)
+        break
+      case 'loop-removed':
+        setLoopRuns((prev) => removeRun(prev, e.runId))
+        if (e.runId === loopOpenRef.current) openLoopRun(null)
+        break
     }
-  }, [flushLive, resetLiveBuffer])
+  }, [flushLive, resetLiveBuffer, flushLoopPartial, resetLoopPartial, openLoopRun])
 
   const { connected } = useWs(onWs)
 
@@ -356,6 +443,67 @@ export default function App() {
 
   // Cancel any pending live-flush frame on unmount.
   useEffect(() => resetLiveBuffer, [resetLiveBuffer])
+
+  // Cancel any pending loop-partial frame on unmount.
+  useEffect(
+    () => () => {
+      if (loopRafRef.current !== null) cancelAnimationFrame(loopRafRef.current)
+    },
+    [],
+  )
+
+  // Loop: the runs list, (re)fetched each time the Loop mode is entered — never
+  // at boot, so an operator who never opens Loop pays nothing for it.
+  useEffect(() => {
+    if (mode !== 'loop') return
+    let cancelled = false
+    loopApi
+      .listRuns()
+      .then((runs) => {
+        if (!cancelled) setLoopRuns(runs)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [mode])
+
+  // Loop: the open run's view and its most recent events, while Loop is the mode.
+  useEffect(() => {
+    if (mode !== 'loop' || !loopOpenId) return
+    let cancelled = false
+    const id = loopOpenId
+    Promise.all([loopApi.getRun(id), loopApi.events(id)])
+      .then(([view, events]) => {
+        if (cancelled) return
+        setLoopLoadError(null)
+        setLoopView(view)
+        // Merge, never replace: frames that streamed in meanwhile must survive.
+        setLoopEvents((prev) => mergeLoopEvents(events, prev))
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setLoopLoadError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [mode, loopOpenId])
+
+  const onLoopCreate = useCallback(
+    async (req: LoopCreateRequest) => {
+      const view = await loopApi.createRun(req)
+      setLoopRuns((prev) => upsertRun(prev, view.run))
+      openLoopRun(view.run.id)
+      setLoopView(view)
+    },
+    [openLoopRun],
+  )
+
+  // A view an action returned — applied now rather than waiting for its frame.
+  const onLoopView = useCallback((view: LoopRunView) => {
+    setLoopRuns((prev) => upsertRun(prev, view.run))
+    if (view.run.id === loopOpenRef.current) setLoopView(view)
+  }, [])
 
   const onCreate = useCallback(
     async (
@@ -415,12 +563,17 @@ export default function App() {
   const selected = selectedId ? tasks[selectedId] : undefined
 
   // ---- persistent title-bar breadcrumb + status-bar metrics ----
+  const openLoop = loopView && loopView.run.id === loopOpenId ? loopView.run : null
   const breadcrumb =
     mode === 'workspace'
       ? (selected?.title ?? 'No task selected')
       : mode === 'kb'
         ? 'KB'
-        : 'Team'
+        : mode === 'loop'
+          ? openLoop
+            ? `Loop › #${openLoop.epic} ${openLoop.title}`
+            : 'Loop'
+          : 'Team'
   const lanes = cfg?.maxLanes ?? 0
   const running = sorted.filter((t) => t.status === 'executing').length
   const queued = sorted.filter((t) => t.queued).length
@@ -556,6 +709,28 @@ export default function App() {
               />
             )}
           </div>
+
+          {/* Loop is desktop-only: never mounted on the phone shell. */}
+          {!isMobile && (
+            <div
+              className={styles.modeContent}
+              style={{ display: mode === 'loop' ? 'flex' : 'none' }}
+            >
+              <LoopView
+                runs={loopRuns}
+                openRunId={loopOpenId}
+                view={loopView}
+                events={loopEvents}
+                partial={loopPartial}
+                loadError={loopLoadError}
+                repos={repos}
+                active={mode === 'loop'}
+                onOpenRun={openLoopRun}
+                onCreate={onLoopCreate}
+                onView={onLoopView}
+              />
+            </div>
+          )}
         </div>
 
         {/* status bar (persistent) — dropped on a phone to keep the view full */}

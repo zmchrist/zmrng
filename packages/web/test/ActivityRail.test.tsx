@@ -43,6 +43,21 @@ describe('ActivityRail', () => {
     expect(container.textContent).not.toMatch(/[≣❏⚙]/)
   })
 
+  it('renders a Loop button with the loop outline icon, and selecting it reports loop', () => {
+    const onSelect = vi.fn()
+    render(<ActivityRail mode="workspace" teamUnread={false} onSelect={onSelect} onSettings={noop} />)
+    const loop = screen.getByRole('button', { name: 'Loop' })
+    expect(loop.querySelector('svg')?.getAttribute('data-icon')).toBe('loop')
+    expect(loop).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(loop)
+    expect(onSelect).toHaveBeenCalledWith('loop')
+  })
+
+  it('marks Loop pressed while the Loop mode is active', () => {
+    render(<ActivityRail mode="loop" teamUnread={false} onSelect={noop} onSettings={noop} />)
+    expect(screen.getByRole('button', { name: 'Loop' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('hides the unread orb by default', () => {
     render(<ActivityRail mode="workspace" teamUnread={false} onSelect={noop} onSettings={noop} />)
     expect(screen.queryByTestId('team-unread-orb')).toBeNull()

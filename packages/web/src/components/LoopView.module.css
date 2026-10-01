@@ -1,0 +1,285 @@
+/* Loop mode root — run picker, slim run header, and the FIXED 1fr | 2fr grid
+   (chat full height left; lanes over map right). Desktop only. Tokens only. */
+.root {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* ---- slim header --------------------------------------------------------- */
+.header {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.7rem;
+  padding: 0.45rem 0.9rem;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--surface-strong);
+  font-size: 0.82rem;
+}
+
+.runTitle {
+  margin: 0;
+  min-width: 0;
+  max-width: 32rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dim {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.lanesField {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn,
+.primaryBtn {
+  padding: 0.2rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.primaryBtn {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.primaryBtn:hover:not(:disabled) {
+  background: var(--accent-bright);
+}
+
+.btn:disabled,
+.primaryBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.control {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.4rem;
+}
+
+.control:focus {
+  border-color: var(--accent);
+}
+
+.control:disabled {
+  opacity: 0.5;
+}
+
+.confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.notices {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.8rem;
+  padding: 0.3rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--well);
+}
+
+.error {
+  color: var(--status-failed);
+  font-size: 0.78rem;
+}
+
+.loading {
+  padding: 1rem 0.9rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+/* ---- the fixed grid ------------------------------------------------------- */
+.grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.chatCell {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border-strong);
+}
+
+.lanesCell {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.mapCell {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ---- run picker ------------------------------------------------------------- */
+.picker {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.pickerInner {
+  max-width: 44rem;
+  padding: 1.2rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.pickerTitle {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+}
+
+.sectionTitle {
+  margin: 0.6rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-dim);
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem 0.8rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+}
+
+.form .error {
+  flex-basis: 100%;
+}
+
+.form .hint {
+  flex-basis: 100%;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+}
+
+.field .control {
+  min-width: 10rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.runList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.runRow {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+
+.runRow:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.runRowTitle {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
