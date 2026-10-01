@@ -50,4 +50,33 @@ describe('<WorkerLogPanel>', () => {
     expect(screen.getByText(/session ended/i)).toBeInTheDocument()
     expect(screen.queryByRole('textbox')).toBeNull()
   })
+
+  it('shows a running-process strip above the composer, hidden when empty', () => {
+    const { rerender } = renderPanel('executing', vi.fn())
+    expect(screen.queryByRole('list', { name: /running processes/i })).toBeNull()
+    rerender(
+      <WorkerLogPanel
+        events={[]}
+        live=""
+        status="executing"
+        onMessage={vi.fn()}
+        processes={[
+          {
+            id: 's1',
+            kind: 'subagent',
+            name: 'zmrng-qa',
+            summary: 'run the suite',
+            status: 'running',
+            startedAt: Date.now(),
+          },
+        ]}
+      />,
+    )
+    const strip = screen.getByRole('list', { name: /running processes/i })
+    expect(strip).toHaveTextContent('zmrng-qa')
+    expect(strip).toHaveTextContent('run the suite')
+    expect(strip).toHaveTextContent('running')
+    // pinned before the composer form
+    expect(strip.compareDocumentPosition(screen.getByRole('textbox')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
 })

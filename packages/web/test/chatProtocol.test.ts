@@ -159,3 +159,34 @@ describe('parseChatServerMsg', () => {
     expect(parseChatServerMsg(JSON.stringify(['ready']))).toBeUndefined()
   })
 })
+
+describe('parseChatServerMsg — process frames', () => {
+  it('parses start / end / reset events', () => {
+    const start = { phase: 'start', id: 't1', kind: 'background', name: 'Bash', summary: 'npm run dev' }
+    expect(parseChatServerMsg(JSON.stringify({ type: 'process', event: start }))).toEqual({
+      type: 'process',
+      event: start,
+    })
+    expect(
+      parseChatServerMsg(JSON.stringify({ type: 'process', event: { phase: 'end', id: 't1', isError: true } })),
+    ).toEqual({ type: 'process', event: { phase: 'end', id: 't1', isError: true } })
+    expect(parseChatServerMsg(JSON.stringify({ type: 'process', event: { phase: 'reset' } }))).toEqual({
+      type: 'process',
+      event: { phase: 'reset' },
+    })
+  })
+
+  it('rejects malformed process events', () => {
+    for (const event of [
+      undefined,
+      [],
+      { phase: 'start', id: 't', kind: 'weird', name: 'x', summary: '' },
+      { phase: 'start', id: 't', kind: 'tool', name: 'x' },
+      { phase: 'end', id: 't' },
+      { phase: 'end', isError: false },
+      { phase: 'nope', id: 't' },
+    ]) {
+      expect(parseChatServerMsg(JSON.stringify({ type: 'process', event }))).toBeUndefined()
+    }
+  })
+})

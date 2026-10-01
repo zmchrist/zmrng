@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { LoginPane } from '../src/components/LoginPane'
 import { loadSession, type LoginPost } from '../src/auth'
@@ -137,5 +137,46 @@ describe('<LoginPane>', () => {
     // The partial failure is surfaced inline, naming the origin still gated.
     expect(await screen.findByText(new RegExp(VPS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))).toBeInTheDocument()
     expect(loadSession(LOCAL)?.token).toBe('local-token')
+  })
+})
+
+describe('<LoginPane> default network call', () => {
+  /**
+   * Regression: the VPS never sends `access-control-allow-credentials` (it
+   * reflects arbitrary origins), so a cross-origin login fetched with
+   * `credentials: 'include'` has its response discarded by the browser —
+   * Safari reports "Load failed". The cross-origin login must omit credentials
+   * and rely on the body token; same-origin must still include them so the
+   * httpOnly session cookie is set.
+   */
+  function stubFetch() {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify(ok('tok')), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('omits credentials on a cross-origin login and includes them same-origin', async () => {
+    const fetchMock = stubFetch()
+    const onAuthed = vi.fn()
+    render(<LoginPane origins={[LOCAL, VPS]} label="Team Chat" onAuthed={onAuthed} />)
+
+    fillCredentials()
+    fireEvent.click(submitButton())
+
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1))
+    const modeFor = (url: string) =>
+      fetchMock.mock.calls.find(([input]) => String(input) === url)?.[1]?.credentials
+    expect(modeFor('/api/auth/login')).toBe('include')
+    expect(modeFor(`${VPS}/api/auth/login`)).toBe('omit')
   })
 })

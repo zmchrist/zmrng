@@ -52,6 +52,7 @@ import { isTauriRuntime } from './runtime'
 import { WORKSPACE_URL, workspaceHttpOrigin } from './teamConfig'
 import { emptyUnread, hasUnread, markRead, observeTips, type ChannelTip } from './teamUnread'
 import { useIsMobile } from './useIsMobile'
+import { applyProcess, endTurn, withTaskRows, type ProcRow } from './processStrip'
 import { MobileNav } from './components/MobileNav'
 import {
   initialMobileNav,
@@ -72,6 +73,8 @@ const isNativeApp = isTauriRuntime()
 // without bound — the core idle leak. Trim both to a generous ceiling; older
 // events are still on the server (re-fetched on reselect) and the trimmed head
 // of a live turn is transient token noise finalized into an `event` anyway.
+/** Stable empty strip for a task with nothing running. */
+const NO_PROCESSES: ProcRow[] = []
 const MAX_EVENTS = 2000
 const MAX_LIVE_CHARS = 200_000
 
@@ -106,6 +109,8 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [events, setEvents] = useState<TaskEvent[]>([])
   const [securityScans, setSecurityScans] = useState<SecurityScan[]>([])
+  // Running-process strip rows per task (live, in-memory only — see processStrip.ts).
+  const [processes, setProcesses] = useState<Record<string, ProcRow[]>>({})
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
   // Everything zmrng is running right now (Lanes tab). Server-assembled and
@@ -335,6 +340,10 @@ export default function App() {
         setTasks((prev) => ({ ...prev, [e.task.id]: e.task }))
         break
       case 'event':
+        // A turn ended: finished strip rows clear (for every task, selected or not).
+        if (e.event.kind === 'claude' && e.event.payload.sub === 'result') {
+          setProcesses((prev) => withTaskRows(prev, e.taskId, endTurn))
+        }
         if (e.taskId !== selectedIdRef.current) return
         setEvents((prev) => {
           const next = [...prev, e.event]
@@ -357,12 +366,18 @@ export default function App() {
       case 'lanes':
         setLaneSnapshot(e.snapshot)
         break
+      case 'process': {
+        const at = Date.now()
+        setProcesses((prev) => withTaskRows(prev, e.taskId, (rows) => applyProcess(rows, e.event, at)))
+        break
+      }
       case 'task-removed':
         setTasks((prev) => {
           const next = { ...prev }
           delete next[e.taskId]
           return next
         })
+        setProcesses((prev) => withTaskRows(prev, e.taskId, () => []))
         if (e.taskId === selectedIdRef.current) {
           selectedIdRef.current = null
           setSelectedId(null)
@@ -619,6 +634,7 @@ export default function App() {
               task={selected}
               events={events}
               securityScans={securityScans}
+              processes={(selectedId && processes[selectedId]) || NO_PROCESSES}
               live={live}
               tasks={sorted}
               lanes={laneSnapshot}

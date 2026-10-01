@@ -9,6 +9,7 @@ import {
   buildUserMessage,
   sanitizeAttachments,
   Runner,
+  ProcessTracker,
   type RunnerCallbacks,
 } from '../src/runner.js'
 import type { Attachment } from '../src/types.js'
@@ -338,5 +339,86 @@ describe('worker child environment', () => {
 
     expect(server.test?.poolOptions?.forks?.maxForks).toBe(expected)
     expect(web.test?.poolOptions?.forks?.maxForks).toBe(expected)
+  })
+})
+
+describe('ProcessTracker', () => {
+  const use = (id: string, name: string, input: Record<string, unknown> = {}, extra = {}) => ({
+    type: 'assistant',
+    ...extra,
+    message: { content: [{ type: 'tool_use', id, name, input }] },
+  })
+  const result = (id: string, content: unknown, isError = false, extra = {}) => ({
+    type: 'user',
+    ...extra,
+    message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] },
+  })
+
+  it('pairs a foreground tool_use with its result by id', () => {
+    const t = new ProcessTracker()
+    expect(t.fromAssistant(use('t1', 'Bash', { command: 'npm test' }))).toEqual([
+      { phase: 'start', id: 't1', kind: 'tool', name: 'Bash', summary: summarizeTool('Bash', { command: 'npm test' }) },
+    ])
+    expect(t.fromUser(result('t1', 'ok', true))).toEqual([{ phase: 'end', id: 't1', isError: true }])
+    // a duplicate / unknown result is ignored
+    expect(t.fromUser(result('t1', 'ok'))).toEqual([])
+  })
+
+  it('labels Task and Agent calls as subagents by their subagent_type', () => {
+    const t = new ProcessTracker()
+    const [a] = t.fromAssistant(use('s1', 'Task', { subagent_type: 'zmrng-qa', description: 'run qa' }))
+    const [b] = t.fromAssistant(use('s2', 'Agent', { description: 'explore' }))
+    expect(a).toMatchObject({ kind: 'subagent', name: 'zmrng-qa' })
+    expect(b).toMatchObject({ kind: 'subagent', name: 'Agent' })
+  })
+
+  it('keeps a background Bash running past its result until a kill tool ends it', () => {
+    const t = new ProcessTracker()
+    expect(t.fromAssistant(use('b1', 'Bash', { command: 'npm run dev', run_in_background: true }))[0]).toMatchObject({
+      kind: 'background',
+    })
+    expect(t.fromUser(result('b1', 'Command running in background with ID: bash_7'))).toEqual([])
+    t.fromAssistant(use('k1', 'KillShell', { shell_id: 'bash_7' }))
+    expect(t.fromUser(result('k1', 'killed'))).toEqual([
+      { phase: 'end', id: 'k1', isError: false },
+      { phase: 'end', id: 'b1', isError: false },
+    ])
+  })
+
+  it('ends a background shell when a poll reports a final status', () => {
+    const t = new ProcessTracker()
+    t.fromAssistant(use('b1', 'Bash', { command: 'make', run_in_background: true }))
+    t.fromUser(result('b1', [{ type: 'text', text: 'Command running in background with ID: abc' }]))
+    t.fromAssistant(use('p1', 'BashOutput', { bash_id: 'abc' }))
+    expect(t.fromUser(result('p1', '<status>running</status>'))).toEqual([{ phase: 'end', id: 'p1', isError: false }])
+    t.fromAssistant(use('p2', 'BashOutput', { bash_id: 'abc' }))
+    expect(t.fromUser(result('p2', '<status>failed</status><exit_code>1</exit_code>'))).toEqual([
+      { phase: 'end', id: 'p2', isError: false },
+      { phase: 'end', id: 'b1', isError: true },
+    ])
+  })
+
+  it('ends a background shell on a system completion notice', () => {
+    const t = new ProcessTracker()
+    t.fromAssistant(use('b1', 'Bash', { command: 'sleep 9', run_in_background: true }))
+    t.fromUser(result('b1', 'Command running in background with ID: s1'))
+    expect(t.fromSystem({ type: 'system', subtype: 'init' })).toEqual([])
+    expect(t.fromSystem({ type: 'system', task_id: 's1', status: 'completed' })).toEqual([
+      { phase: 'end', id: 'b1', isError: false },
+    ])
+  })
+
+  it('ends a background Bash immediately when its result carries no shell id or errors', () => {
+    const t = new ProcessTracker()
+    t.fromAssistant(use('b1', 'Bash', { command: 'x', run_in_background: true }))
+    expect(t.fromUser(result('b1', 'started'))).toEqual([{ phase: 'end', id: 'b1', isError: false }])
+    t.fromAssistant(use('b2', 'Bash', { command: 'x', run_in_background: true }))
+    expect(t.fromUser(result('b2', 'background with ID: z', true))).toEqual([{ phase: 'end', id: 'b2', isError: true }])
+  })
+
+  it('skips subagent-internal tool calls', () => {
+    const t = new ProcessTracker()
+    expect(t.fromAssistant(use('i1', 'Read', {}, { parent_tool_use_id: 's1' }))).toEqual([])
+    expect(t.fromUser(result('i1', 'x', false, { parent_tool_use_id: 's1' }))).toEqual([])
   })
 })
