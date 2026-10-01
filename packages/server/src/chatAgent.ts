@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { config, repoById } from './config.js'
 import { styleDirective } from './phases.js'
 import {
@@ -8,7 +9,14 @@ import {
   type RunnerLike,
   type SpawnOptions,
 } from './runner.js'
-import type { CaveStyle, ChatClientMsg, EffortLevel, WorkflowPreset } from './types.js'
+import type {
+  CaveStyle,
+  ChatClientMsg,
+  EffortLevel,
+  LaneChat,
+  TaskUsage,
+  WorkflowPreset,
+} from './types.js'
 
 // ---- workflow presets ------------------------------------------------------
 
@@ -231,14 +239,50 @@ export interface ChatConfig {
  * `claude`. The OAuth env-strip already lives inside `Runner`'s constructor, so
  * (unlike `TerminalManager`) this manager does not repeat it.
  */
-export class ChatManager {
-  private sessions = new Set<RunnerLike>()
+/**
+ * What the manager remembers about one live chat session, over and above the
+ * `RunnerLike` handle itself: the controls it was spawned with, the repo it is
+ * rooted at, and a running usage accumulator folded in from each `result`. All
+ * in-memory and transient — a chat session is never persisted.
+ */
+interface ChatSessionMeta {
+  id: string
+  model: string
+  effort: EffortLevel
+  style: CaveStyle
+  /** The RESOLVED registered repo, or `null` for the Projects-root fallback. */
+  repoId: string | null
+  voice: boolean
+  startedAt: string
+  usage: TaskUsage
+}
 
-  constructor(private factory: RunnerFactory = defaultRunnerFactory) {}
+/** A zeroed usage accumulator for a freshly-created session. */
+function emptyUsage(): TaskUsage {
+  return { tokensIn: 0, tokensOut: 0, tokensCache: 0, costUsd: 0, turns: 0 }
+}
+
+export class ChatManager {
+  /** Live sessions keyed by their runner handle (the identity the route holds). */
+  private sessions = new Map<RunnerLike, ChatSessionMeta>()
+
+  /**
+   * @param idFactory assigns each session's row id. Defaults to `randomUUID`;
+   *   tests inject a deterministic counter (copying `TerminalManager`'s seam).
+   * @param onChange fired whenever the live-session set or a session's usage
+   *   changes, so the lane emitter can coalesce a rebuild. Both params are
+   *   optional and trailing: existing one-argument constructions are unaffected.
+   */
+  constructor(
+    private factory: RunnerFactory = defaultRunnerFactory,
+    private idFactory: () => string = () => randomUUID(),
+    private onChange: () => void = () => {},
+  ) {}
 
   /** Spawn one chat session with the given controls and track it. */
   create(cfg: ChatConfig, cb: RunnerCallbacks): RunnerLike {
-    const root = (cfg.repoId ? repoById(cfg.repoId)?.path : undefined) ?? config.projectsDir
+    const repo = cfg.repoId ? repoById(cfg.repoId) : undefined
+    const root = repo?.path ?? config.projectsDir
     const opts: SpawnOptions = {
       cwd: root,
       model: cfg.model,
@@ -247,22 +291,60 @@ export class ChatManager {
         ? voiceSystemPrompt(root)
         : chatSystemPrompt(cfg.style, root, cfg.workflow ?? 'none'),
     }
+    const meta: ChatSessionMeta = {
+      id: this.idFactory(),
+      model: cfg.model,
+      effort: cfg.effort,
+      style: cfg.style,
+      // Derived exactly like `root` above: an absent OR unresolvable repoId is
+      // the "Projects root" fallback, and reports as `null` rather than echoing
+      // an id the session is not actually rooted at.
+      repoId: repo?.id ?? null,
+      voice: cfg.voice === true,
+      startedAt: new Date().toISOString(),
+      usage: emptyUsage(),
+    }
     const session = this.factory(opts, {
       ...cb,
+      onResult: (text, isError, usage) => {
+        // Fold the result's usage delta into the session accumulator BEFORE
+        // calling through, so a caller reacting to `onResult` already sees the
+        // updated snapshot. The pass-through contract is unchanged: same args,
+        // always called.
+        if (usage) {
+          const acc = meta.usage
+          acc.tokensIn += usage.tokensIn
+          acc.tokensOut += usage.tokensOut
+          acc.tokensCache += usage.tokensCache
+          acc.costUsd += usage.costUsd
+          acc.turns += usage.turns
+          this.onChange()
+        }
+        cb.onResult(text, isError, usage)
+      },
       onExit: (code, signal) => {
-        // Drop out of the tracked set before notifying, so a later killAll()
+        // Drop out of the tracked map before notifying, so a later killAll()
         // never double-kills an already-exited session.
         this.sessions.delete(session)
+        this.onChange()
         cb.onExit(code, signal)
       },
     })
-    this.sessions.add(session)
+    this.sessions.set(session, meta)
+    this.onChange()
     return session
+  }
+
+  /** The id a live session is listed under in `snapshot()` (its Lanes row id),
+   *  or `undefined` once it has exited. The route sends it to the client so a
+   *  Lanes row click can focus the chat tab that owns the session. */
+  laneId(session: RunnerLike): string | undefined {
+    return this.sessions.get(session)?.id
   }
 
   /** Kill and forget every tracked session (graceful shutdown). */
   killAll(): void {
-    for (const session of this.sessions) {
+    for (const session of this.sessions.keys()) {
       try {
         session.kill()
       } catch {
@@ -270,5 +352,21 @@ export class ChatManager {
       }
     }
     this.sessions.clear()
+    this.onChange()
+  }
+
+  /** One read-only `LaneChat` row per LIVE session, for the lane viewer. The
+   *  usage object is copied so a later fold-in can't mutate an emitted frame. */
+  snapshot(): LaneChat[] {
+    return [...this.sessions.values()].map((m) => ({
+      id: m.id,
+      model: m.model,
+      effort: m.effort,
+      style: m.style,
+      repoId: m.repoId,
+      voice: m.voice,
+      startedAt: m.startedAt,
+      usage: { ...m.usage },
+    }))
   }
 }

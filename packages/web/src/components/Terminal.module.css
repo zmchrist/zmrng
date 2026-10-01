@@ -14,6 +14,13 @@
   width: 100%;
 }
 
+/* xterm.css ships `.xterm:focus { outline: none }` and focuses a hidden
+   textarea, so ring the host instead. Inset: the dock clips overflow. */
+.host:focus-within {
+  outline: 2px solid var(--focus-color);
+  outline-offset: -2px;
+}
+
 /* Keys a soft keyboard has no room for: Esc, Tab, sticky Ctrl/Alt, arrows and
    the shell symbols, plus a collapsed second row of navigation/function keys.
    Sits directly above the phone keyboard, 44px targets, never wraps wider than

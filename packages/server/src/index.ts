@@ -11,6 +11,7 @@ import { Db } from './db.js'
 import { WsHub } from './ws.js'
 import { TaskManager } from './phases.js'
 import { TerminalManager, parseClientMsg } from './terminal.js'
+import { LaneEmitter } from './lanes.js'
 import { ChatManager, parseChatClientMsg } from './chatAgent.js'
 import { WorkspaceManager, ChannelManager, PageManager, parseWorkspaceClientMsg } from './workspace.js'
 import { AgentResponder, resolveBotAgent } from './agentResponder.js'
@@ -98,13 +99,32 @@ process.on('unhandledRejection', (reason) => {
 
 const db = new Db(config.dbPath)
 const hub = new WsHub()
-const manager = new TaskManager(db, (e: WsEvent) => hub.broadcast(e), defaultRunnerFactory, defaultScanRunnerFactory)
+// Each manager's trailing `onChange`/`onLanesChange` defers to `emitter` through
+// an arrow, so the emitter can be constructed after the managers it reads from.
+const manager = new TaskManager(
+  db,
+  (e: WsEvent) => hub.broadcast(e),
+  defaultRunnerFactory,
+  defaultScanRunnerFactory,
+  () => emitter.notify(),
+)
+const terminals = new TerminalManager(undefined, undefined, undefined, () => emitter.notify())
+const chats = new ChatManager(undefined, undefined, () => emitter.notify())
+// The single lane-snapshot assembler: reads the three managers that own live
+// sessions and coalesces a burst of changes into one broadcast `lanes` frame.
+const emitter = new LaneEmitter(
+  {
+    tasks: () => manager.laneSnapshot(),
+    chats: () => chats.snapshot(),
+    terminals: () => terminals.snapshot(),
+  },
+  (snapshot) => hub.broadcast({ type: 'lanes', snapshot }),
+)
 // Boot reconciliation: mark any task still sitting in a live phase (its worker
 // child died with the previous process) `stale`, so the UI surfaces the dead
-// state and offers Restart instead of pretending the worker is alive.
+// state and offers Restart instead of pretending the worker is alive. Runs after
+// the emitter exists, since its patches notify it.
 manager.reconcileOrphans()
-const terminals = new TerminalManager()
-const chats = new ChatManager()
 // Team-workspace presence: every join/leave re-broadcasts the full roster to the
 // 'workspace' room. The broadcast sink mirrors TaskManager's hub injection.
 const workspace = new WorkspaceManager(db, (frame: WsWorkspaceServerMsg) =>
@@ -286,6 +306,12 @@ app.get('/api/agents', (): AgentSummary[] =>
 
 // Fresh probe every call — advisory only, never a gate on Start.
 app.get('/api/preflight', () => runPreflight())
+
+// Everything zmrng is running right now (Lanes panel). Read-only and in-memory:
+// built on demand from the three live-session managers, never persisted. The
+// same payload is pushed as a `lanes` frame over `/ws`; this route serves the
+// client's initial load, mirroring `/api/tasks` beside the `snapshot` frame.
+app.get('/api/lanes', () => emitter.snapshot())
 
 // Local-settings-file UI persistence (U5) — layout chrome + per-task open
 // files, kept out of zmrng.db entirely. Always 200: a missing/corrupt file
@@ -747,6 +773,8 @@ app.delete('/api/tasks/:id', async (req, reply) => {
 app.get('/ws', { websocket: true }, (socket: WebSocket) => {
   hub.add(socket)
   hub.send(socket, { type: 'snapshot', tasks: db.listTasks() })
+  // Seed the Lanes panel on connect, exactly as `snapshot` seeds the board.
+  hub.send(socket, { type: 'lanes', snapshot: emitter.snapshot() })
 })
 
 // Bidirectional PTY channel for the Workspace terminal. A socket ATTACHES to a
@@ -789,6 +817,11 @@ app.get('/ws/terminal', { websocket: true }, (socket: WebSocket) => {
         terminals.write(sessionId, msg.data)
       } else if (sessionId && msg.type === 'resize') {
         terminals.resize(sessionId, msg.cols, msg.rows)
+      } else if (sessionId && msg.type === 'close') {
+        // Explicit tab close: kill now, no grace window.
+        terminals.close(sessionId)
+        sessionId = null
+        socket.close()
       }
     } catch (err) {
       app.log.error({ err }, 'terminal message handler failed')
@@ -888,6 +921,10 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
           },
         },
       )
+      // Tell the client which Lanes row this session is, so clicking that row
+      // can focus the owning chat tab. Sent on every (re)spawn.
+      const laneId = chats.laneId(session)
+      if (laneId) send({ type: 'lane', laneId })
     } catch (err) {
       app.log.error({ err }, 'chat spawn failed')
       send({ type: 'error', text: errMsg(err) })

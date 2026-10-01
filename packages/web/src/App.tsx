@@ -15,6 +15,7 @@ import type {
   WorkspaceMode,
   Attachment,
   SecurityScan,
+  LaneSnapshot,
 } from './types'
 import { WorkspaceView } from './components/WorkspaceView'
 import { AuthBanner } from './components/AuthBanner'
@@ -91,6 +92,9 @@ export default function App() {
   const [securityScans, setSecurityScans] = useState<SecurityScan[]>([])
   const [live, setLive] = useState('')
   const [cfg, setCfg] = useState<ServerConfig | null>(null)
+  // Everything zmrng is running right now (Lanes tab). Server-assembled and
+  // in-memory only: fetched once on boot, then pushed as `lanes` frames.
+  const [laneSnapshot, setLaneSnapshot] = useState<LaneSnapshot | null>(null)
   const [repos, setRepos] = useState<RepoTarget[]>([])
   // ---- login sessions, one per gated origin --------------------------------
   // Seeded from localStorage in a useState INITIALISER (never a setState inside
@@ -282,6 +286,9 @@ export default function App() {
         liveBufRef.current += e.text
         if (rafRef.current === null) rafRef.current = requestAnimationFrame(flushLive)
         break
+      case 'lanes':
+        setLaneSnapshot(e.snapshot)
+        break
       case 'task-removed':
         setTasks((prev) => {
           const next = { ...prev }
@@ -305,6 +312,7 @@ export default function App() {
   useEffect(() => {
     api.getConfig().then(setCfg).catch(() => undefined)
     api.listRepos().then(setRepos).catch(() => undefined)
+    api.getLanes().then(setLaneSnapshot).catch(() => undefined)
     api
       .listTasks()
       .then((list) => {
@@ -460,11 +468,13 @@ export default function App() {
               securityScans={securityScans}
               live={live}
               tasks={sorted}
+              lanes={laneSnapshot}
               repos={repos}
               config={cfg}
               selectedId={selectedId}
               tasksCollapsed={tasksCollapsed}
               mobileView={isMobile ? (workspaceViewFor(nav.view) ?? 'tasks') : undefined}
+              onMobileViewChange={onSelectMobileView}
               chatTabs={chatTabs}
               onChatTabsChange={setChatTabs}
               terminalTabs={terminalTabs}

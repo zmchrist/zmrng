@@ -20,6 +20,10 @@ import { applyLink, toggleWrap } from '../kbEdits'
 import type { SelectionEdit } from '../kbEdits'
 import { openExternal } from '../openExternal'
 import { filterKbTree, pageBreadcrumb, parseKbNodePath } from '../kbTree'
+import { useIsMobile } from '../useIsMobile'
+import { KB_PANEL_KEY } from '../mobileTaskPanel'
+import { usePanelSplit } from '../usePanelSplit'
+import { PanelHandle } from './PanelHandle'
 import {
   encodeHello,
   encodePing,
@@ -115,6 +119,9 @@ function KbViewComponent({ user, onLogout, openTarget = null, active }: Props) {
   // The server attributes the persisted write from the socket's own session —
   // this is display only, and can no longer be asserted over the wire.
   const author = user.displayName
+  // Phone only: the Spaces/Pages list vs open-page split, remembered per view.
+  const isMobile = useIsMobile()
+  const [panel, movePanel] = usePanelSplit(KB_PANEL_KEY)
 
   const [spaces, setSpaces] = useState<Space[]>([])
   const [spaceId, setSpaceId] = useState<number | null>(null)
@@ -777,8 +784,11 @@ function KbViewComponent({ user, onLogout, openTarget = null, active }: Props) {
   const spaceName = spaces.find((s) => s.id === spaceId)?.name ?? ''
 
   return (
-    <div className={styles.kb}>
-      <aside className={styles.sidebar}>
+    <div className={styles.kb} data-panel={isMobile ? panel.position : undefined}>
+      <aside
+        className={styles.sidebar}
+        aria-hidden={(isMobile && panel.position === 'detail') || undefined}
+      >
         <div className={styles.sectionHead}>
           <span className={styles.sectionTitle}>Spaces</span>
           <span className={styles.headRight}>
@@ -936,7 +946,14 @@ function KbViewComponent({ user, onLogout, openTarget = null, active }: Props) {
         </div>
       </aside>
 
-      <section className={styles.detail}>
+      {/* Phone only: swipe up toward a full-screen page, down toward a
+          full-screen Spaces/Pages list, tap to cycle (mobileTaskPanel.ts). */}
+      {isMobile && <PanelHandle label="Page list" position={panel.position} onMove={movePanel} />}
+
+      <section
+        className={styles.detail}
+        aria-hidden={(isMobile && panel.position === 'list') || undefined}
+      >
         {detail ? (
           <>
             <header className={styles.detailHead}>

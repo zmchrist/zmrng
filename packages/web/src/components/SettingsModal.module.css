@@ -158,7 +158,7 @@
   width: 20px;
   height: 20px;
   border-radius: var(--radius-pill);
-  border: 1px solid rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-strong);
 }
 
 /* Theme picker dropdown — mirrors NewTaskForm.module.css .select so it matches
@@ -190,9 +190,7 @@
   background-color: var(--surface-hover);
 }
 .themeSelect:focus {
-  outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
 }
 .themeSelect option {
   background: var(--well);
@@ -249,9 +247,6 @@
   background: var(--accent);
   border: 1px solid var(--accent-line);
   box-shadow: var(--hairline-soft);
-}
-.opacitySlider:focus {
-  outline: none;
 }
 .opacitySlider:focus::-webkit-slider-thumb {
   box-shadow: var(--focus-ring);

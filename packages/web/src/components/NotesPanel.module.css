@@ -33,7 +33,6 @@
   font-size: 11.5px;
 }
 .select:focus {
-  outline: none;
   border-color: var(--accent);
 }
 .select:disabled {

@@ -27,6 +27,7 @@ import type {
   KbChangeEntry,
   LoginResponse,
   AuthState,
+  LaneSnapshot,
 } from './types'
 import { authHeaders, clearSession } from './auth'
 
@@ -192,6 +193,9 @@ export const api = {
   getConfig: () => req<ServerConfig>('/api/config'),
   listRepos: () => req<RepoTarget[]>('/api/repos'),
   getPreflight: () => req<PreflightResult>('/api/preflight'),
+  /** Everything zmrng is running right now (Lanes panel). Boot load only — the
+   *  live updates arrive as `lanes` frames on the /ws hub. */
+  getLanes: () => req<LaneSnapshot>('/api/lanes'),
   listTasks: () => req<Task[]>('/api/tasks'),
   getEvents: (id: string) => req<TaskEvent[]>(`/api/tasks/${id}/events`),
   /** Every persisted security-scan round for a task (oldest-first). Feeds the Security panel. */

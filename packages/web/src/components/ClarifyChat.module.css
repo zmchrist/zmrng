@@ -31,10 +31,8 @@
     background var(--transition);
 }
 .input:focus {
-  outline: none;
   border-color: var(--accent-line);
   background: var(--well-strong);
-  box-shadow: var(--focus-ring);
 }
 .input::placeholder {
   color: var(--text-faint);

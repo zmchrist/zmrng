@@ -175,7 +175,6 @@
 }
 
 .search:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -198,7 +197,6 @@
 }
 
 .select:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -289,7 +287,6 @@
 }
 
 .createInlineInput:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -551,7 +548,6 @@
 }
 
 .bodyTextarea:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -707,6 +703,15 @@
     flex: none;
     border-right: none;
     border-bottom: 1px solid var(--border);
+  }
+  /* Three-position split driven by the swipe handle (mobileTaskPanel.ts). */
+  .kb[data-panel='list'] .sidebar {
+    flex: 1;
+    max-height: none;
+  }
+  .kb[data-panel='list'] .detail,
+  .kb[data-panel='detail'] .sidebar {
+    display: none;
   }
   .historyPanel {
     right: 8px;
