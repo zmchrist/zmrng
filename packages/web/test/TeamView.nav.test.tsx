@@ -45,8 +45,8 @@ function setViewport(mobile: boolean): void {
 function renderTeam() {
   return render(
     <TeamView
-      teamHandle="Ada"
-      onHandleChange={() => {}}
+      user={{ id: 1, username: 'ada', displayName: 'Ada' }}
+      onLogout={() => {}}
       botHandle="@agent"
       repos={[]}
       onSendToZmrng={() => {}}

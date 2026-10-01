@@ -4,7 +4,7 @@
 // `parseWorkspaceClientMsg` accepts; `parseWorkspaceServerMsg` is a tolerant
 // guard over the server -> client frames (mirrors `chatProtocol.ts`).
 
-import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from './types'
+import { MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from './types'
 import type {
   Channel,
   KbPage,
@@ -15,16 +15,28 @@ import type {
 } from './types'
 
 /**
- * Encode a client `hello` frame — self-assert a display name on first connect.
- * The name is trimmed and clamped to `MAX_DISPLAY_NAME_LEN` so an over-long
- * handle never reaches the wire (the server rejects it too — this is the
- * fast-feedback client mirror of that guard).
+ * Encode a client `hello` frame — the socket's opening handshake.
+ *
+ * It carries NO display name any more: identity is the socket's AUTHENTICATED
+ * session, never a self-asserted string, so there is nothing here for a client
+ * to spoof. Which credential proves that session depends on the transport
+ * (decision D2 of `.agents/plans/zmrng-login-auth.md`):
+ *
+ * - **Same-origin** (a browser on the server's own origin — the desktop's
+ *   Knowledge Base, or a teammate browsing the VPS directly) needs no token:
+ *   the browser attaches the `HttpOnly; SameSite=Strict` `zmrng_session` cookie
+ *   to the WebSocket handshake itself, and the server reads it from there.
+ * - **Cross-origin** (the desktop app's Team connection to the VPS) cannot send
+ *   that cookie — `SameSite=Strict` never rides a cross-site request, and the
+ *   VPS is plain http, where browsers drop a `Secure` cookie outright. That
+ *   socket passes its stored bearer `token` here instead.
+ *
+ * A blank/whitespace token is omitted rather than sent as an empty string — an
+ * empty credential is no credential, and the server would only reject it.
  */
-export function encodeHello(displayName: string): string {
-  return JSON.stringify({
-    type: 'hello',
-    displayName: displayName.trim().slice(0, MAX_DISPLAY_NAME_LEN),
-  })
+export function encodeHello(token?: string): string {
+  const bearer = token?.trim()
+  return JSON.stringify(bearer ? { type: 'hello', token: bearer } : { type: 'hello' })
 }
 
 /** Encode a client `ping` heartbeat frame (the server answers with `pong`). */
@@ -44,36 +56,36 @@ export function encodeUnsubscribe(channelId: number): string {
 
 /**
  * Encode a `message` frame — post to a channel. The body is trimmed and clamped
- * to `MAX_MESSAGE_BODY_LEN` (the client mirror of the server's guard). No `kind`
- * is sent — a socket post is always persisted as `human` server-side; the
+ * to `MAX_MESSAGE_BODY_LEN` (the client mirror of the server's guard).
+ *
+ * No `author` is sent: the server attributes the post to the socket's
+ * authenticated user and REJECTS a frame that still asserts one, so adding the
+ * field back would break the post outright rather than merely be ignored. No
+ * `kind` either — a socket post is always persisted as `human` server-side; the
  * `agent` kind is server-controlled and can never be asserted by a client.
  */
-export function encodeMessage(channelId: number, author: string, body: string): string {
+export function encodeMessage(channelId: number, body: string): string {
   return JSON.stringify({
     type: 'message',
     channelId,
-    author: author.trim().slice(0, MAX_DISPLAY_NAME_LEN),
     body: body.trim().slice(0, MAX_MESSAGE_BODY_LEN),
   })
 }
 
 /**
  * Encode a `react` frame — toggle the reactor's emoji on one message. The
- * `handle` and `emoji` are trimmed and clamped to their caps (the client mirror
- * of the server's guard). Toggle semantics are server-side: the server adds the
- * reaction if absent, removes it if the same `(message, handle, emoji)` exists.
+ * `emoji` is trimmed and clamped to `MAX_EMOJI_LEN` (the client mirror of the
+ * server's guard). Toggle semantics are server-side: the server adds the
+ * reaction if absent, removes it if the same `(message, reactor, emoji)` exists.
+ *
+ * No `handle` is sent — the reactor is the socket's authenticated user, and a
+ * frame that still carries one is rejected, not ignored.
  */
-export function encodeReact(
-  channelId: number,
-  messageId: number,
-  handle: string,
-  emoji: string,
-): string {
+export function encodeReact(channelId: number, messageId: number, emoji: string): string {
   return JSON.stringify({
     type: 'react',
     channelId,
     messageId,
-    handle: handle.trim().slice(0, MAX_DISPLAY_NAME_LEN),
     emoji: emoji.trim().slice(0, MAX_EMOJI_LEN),
   })
 }
@@ -93,16 +105,18 @@ export function encodePageUnsubscribe(pageId: number): string {
 /**
  * Encode a `page.edit` frame — a whole-body autosave. The page is one
  * continuous field (no per-block delta), so this simply replaces `body`. It is
- * clamped to `MAX_MESSAGE_BODY_LEN` but NOT trimmed (leading/trailing
- * whitespace is meaningful markdown); `author` is trimmed + clamped (the
- * client mirror of the server's guard). A socket edit is always a human author.
+ * clamped to `MAX_MESSAGE_BODY_LEN` but NOT trimmed — leading/trailing
+ * whitespace is meaningful markdown.
+ *
+ * No `author` is sent: the edit is attributed to (and its changelog entry
+ * recorded against) the socket's authenticated user, and a frame still carrying
+ * an author is rejected rather than ignored. A socket edit is always human.
  */
-export function encodePageEdit(pageId: number, body: string, author: string): string {
+export function encodePageEdit(pageId: number, body: string): string {
   return JSON.stringify({
     type: 'page.edit',
     pageId,
     body: body.slice(0, MAX_MESSAGE_BODY_LEN),
-    author: author.trim().slice(0, MAX_DISPLAY_NAME_LEN),
   })
 }
 
@@ -236,6 +250,11 @@ export function parseWorkspaceServerMsg(raw: string): WsWorkspaceServerMsg | und
     }
     case 'pong':
       return { type: 'pong' }
+    // The socket presented no usable session (or it has expired) and the server
+    // is about to close it. The client clears that origin's stored session and
+    // re-shows the login pane — there is no silent re-auth.
+    case 'unauthorized':
+      return { type: 'unauthorized' }
     case 'message': {
       const message = asMessage(obj.message)
       return message ? { type: 'message', message } : undefined

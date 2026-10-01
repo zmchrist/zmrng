@@ -430,8 +430,20 @@ SQLite (better-sqlite3, WAL).
   worker session was lost to an app restart — see `reconcileOrphans()`/`restartAgent()`
   in the TaskManager section above. `security_status` (nullable) carries the latest scan
   verdict (`pass`/`fail`/`skipped`) for the task.
+  Login adds three more additive tables: **`users`** (username UNIQUE, display_name,
+  password_hash, timestamps), **`sessions`** (user_id, token_hash UNIQUE, expires_at) and
+  **`kb_changelog`** (space_id, page_id nullable, user_id nullable, username, action,
+  detail, created_at), plus a nullable **`members.user_id`**. There is deliberately NO
+  `page_revisions.user_id`: a revision snapshots the page's PRIOR body, whose author is
+  the free-text `pages.updated_by` string with no user id behind it, so the column could
+  only ever be null — and the additive-only rule means a column added today can never be
+  removed.
 - **Migrations:** `ensureColumns()` reads `PRAGMA table_info(tasks)` and `ALTER`s any
-  missing column (idempotent); columns also live in `SCHEMA` for fresh DBs.
+  missing column (idempotent); `ensurePageColumns()` and **`ensureAuthSchema()`** do the
+  same for the KB and login schema; columns also live in `SCHEMA` for fresh DBs.
+  Strictly additive — `db.test.ts` carries an explicit DATA-LOSS GUARD asserting that
+  pre-existing task/page/member/message rows are unchanged after the migration, because
+  the VPS redeploys in place over its live database.
 - **Durability:** constructor sets `wal_autocheckpoint = 1000` to bound in-run WAL
   growth. **`close()`** runs `wal_checkpoint(TRUNCATE)` then closes the handle — called
   from the `shutdown()` (SIGINT/SIGTERM) path in `index.ts` so recent tasks are flushed
@@ -443,6 +455,103 @@ SQLite (better-sqlite3, WAL).
   **`insertSecurityScan(...)`** / **`listSecurityScansForTask(taskId)`** (the scan-row
   persistence reused by `onScanReady` and the `security-scans` route), **`taskCount`**
   (logged at startup alongside `dbPath` to surface which DB loaded).
+- **Auth/KB additions:** `createUser` / `getUserByUsername` / `getUserById` /
+  `setUserPassword`; `createSession` / `getSession(tokenHash)` / `touchSession` /
+  `deleteSession` / `deleteExpiredSessions(now)`; **`memberForUser(user, now)`** (upserts
+  the roster row keyed on `members.user_id`, so it is stable across reconnects and
+  renames — it deliberately does NOT adopt legacy handle-only rows); `addChangelogEntry`
+  / `listChangelog(spaceId, limit)` (newest first, space-scoped). `updatePageBody` takes
+  an optional 5th `actor` argument and, when given, also writes a **throttled** (30s,
+  keyed on the changelog's own newest `page.edit` row for that page) `page.edit` entry
+  inside the same transaction. `upsertMember` is retained but is now LEGACY — nothing in
+  the running server calls it.
+
+## Auth — `password.ts` / `session.ts` / `auth.ts` / `authRoutes.ts` / `cli/createUser.ts`
+
+Username/password login gating the **Knowledge Base** and **Team Chat** surfaces. The
+**Workspace** task orchestrator is deliberately ungated. Full rationale and the rejected
+alternatives: `.agents/plans/zmrng-login-auth.md`.
+
+- **`password.ts`** — `hashPassword(password)` / `verifyPassword(password, stored)` over
+  `node:crypto` **scrypt** (`SCRYPT_N=32768`, `SCRYPT_R=8`, `SCRYPT_P=1`, 32-byte salt,
+  64-byte key), stored as `scrypt$N$r$p$<salt-b64>$<key-b64>`. Verify re-derives using the
+  parameters PARSED FROM the stored string, so an old-parameter hash keeps working, and
+  compares with `timingSafeEqual` after a length check. It never throws: a malformed,
+  truncated, unknown-prefix or bad-base64 stored hash is simply `false`. Synchronous by
+  choice — login is a rare, throttled path. **`scryptSync` needs an explicitly raised
+  `maxmem` at these parameters** (128·N·r is exactly the 32 MiB default) or it throws.
+  This is scrypt rather than the originally-specified argon2id (D3) because argon2 is a
+  node-gyp addon that `packages/desktop/scripts/bundle-sidecar.mjs` would have to
+  hand-vendor; the versioned prefix keeps a later swap to a one-file change.
+- **`session.ts`** — pure, no DB. `newToken()` (32 random bytes → base64url),
+  `hashToken()` (sha256 hex — **only this is stored**), `expiryFrom(nowIso, ttlMs?)`,
+  `isExpired` (fail-closed on an unparseable date), `shouldRenew`. `SESSION_TTL_MS` = 7
+  days; `SESSION_RENEW_BELOW_MS` = 6 days, so a session slides only once ~24h of its
+  window is spent — a fresh session causes **no DB write per request**.
+- **`auth.ts`** — `AuthService(db, ttlMs)`:
+  - `login(username, password, now?)` → `{ user, token, expiresAt }` or `undefined` for
+    BOTH a wrong password and an unknown username. An unknown username still runs a full
+    scrypt verify against a lazily-derived dummy hash, so a miss costs what a hit costs
+    and the endpoint is not a username oracle. Callers report `GENERIC_LOGIN_ERROR`.
+  - `resolve(authorization, cookieHeader, now?)` — bearer header first, then the
+    `zmrng_session` cookie. Rejects unknown/tampered/deleted/expired tokens (sweeping an
+    expired row as it notices it) and slides an active session past the renewal window.
+  - `resolveSocketIdentity(cookieHeader, helloToken, now?)` — the `/ws/workspace`
+    analogue. The `hello` bearer token WINS over the handshake cookie (an explicitly
+    presented credential beats an ambient one).
+  - `logout(token)`, `sweep(now?)` (delete expired rows; called once at boot).
+  - `LoginThrottle` — fixed window, in-memory: **5** failures per `(username, IP)` per
+    **15 min**, then `429` until the window lapses. A restart clears it, by design.
+  - `sessionCookie(token, {secure, maxAgeMs})` / `clearCookie({secure})` — always
+    `HttpOnly; SameSite=Strict; Path=/`. **`Secure` is conditional on purpose (D2):**
+    browsers silently DROP a `Secure` cookie on a plain-http origin, and the VPS is plain
+    http on the tailnet, so an unconditional flag would break login there outright.
+  - `PROTECTED_PREFIXES` / `isProtectedPath(url)` — the single gated-route list:
+    `/api/spaces`, `/api/pages`, `/api/folders`, `/api/page-revisions`, `/api/channels`,
+    `/api/auth/me`, `/api/auth/logout`. Matches a prefix exactly or at a segment
+    boundary. `/api/tasks`, `/api/config`, `/api/preflight`, `/api/settings`,
+    `/api/auth/login` and the static UI are NOT gated.
+- **`authRoutes.ts`** — `registerAuth(app, { auth, secureCookies, sessionTtlMs?, throttle? })`
+  installs the `onRequest` gate (attaches `req.authUser`; 401s a gated path with no
+  session; skips `OPTIONS` so a CORS preflight is never gated) and three routes:
+  `POST /api/auth/login` (200 + `Set-Cookie` + a body `token`; 401 with **no** cookie on
+  bad credentials; 400 on a missing field; 429 when throttled),
+  `POST /api/auth/logout`, `GET /api/auth/me`. Also exports `requireUser(req, reply)`.
+  It is a **plain function, not a `fastify-plugin` plugin** — an encapsulated plugin's
+  hook would not cover the parent instance's routes, and `requireUser` reads exactly the
+  `req.authUser` that hook sets. That also makes it registerable on a bare `Fastify()`
+  and drivable with `app.inject()` in tests, which is how the gate is proven.
+- **Two transports, one token (D2).** Same-origin browsing rides the httpOnly cookie and
+  never exposes the token to JS. The desktop app's **cross-origin** Team connection to
+  the VPS cannot send a `SameSite=Strict` cookie over plain http at all, so it stores the
+  returned token in `localStorage` and sends `Authorization: Bearer`. Because the
+  cross-origin path uses a header, `access-control-allow-credentials` is never sent and
+  the existing reflected-origin CORS policy stays safe; the only CORS change was allowing
+  the `authorization` request header.
+- **One login, not one account (D1).** A session belongs to the server that issued it.
+  The web client keeps an **origin-keyed** store and submits one credential pair to every
+  gated origin in parallel, so the operator types their password once — but the servers
+  do not trust each other and `create-user` must be run on each host.
+- **`cli/createUser.ts`** — `npm run create-user -- --username <u> [--display-name <d>]
+  [--password <p>]` (prompts with echo off when `--password` is omitted; errors if stdin
+  is not a TTY). Re-running for an existing username **RESETS the password** and never
+  renames the user — the documented recovery path, since there is no reset flow.
+  Minimum 8 characters, no composition rules, no maximum beyond `MAX_PASSWORD_LEN`.
+  `parseArgs` / `validatePassword` / `provisionUser` are exported separately from the
+  `process.argv`+TTY entrypoint so tests drive the logic without executing the script.
+
+## KB routes — `packages/server/src/kbRoutes.ts`
+
+`registerKbRoutes(app, { db, broadcast, log })` — the whole Knowledge Base REST surface
+(spaces / folders / pages / revisions CRUD, plus `GET /api/spaces/:id/changelog`),
+extracted from `index.ts` as a plain function for the same reason as `registerAuth`, and
+tested the same way. Every write calls `requireUser` and attributes the page to the
+**authenticated** user: a client-supplied `author` is ignored entirely. Each write also
+records a `kb_changelog` entry (`page.create` / `page.rename` / `page.move` /
+`page.edit` / `page.delete`). One deliberate carve-out: a page promoted from a channel
+message keeps the canonical MESSAGE author (that is its provenance, and the provenance
+line carries only the channel and message id), while the changelog records who performed
+the promotion.
 
 ## Config — `packages/server/src/config.ts`
 
@@ -830,21 +939,36 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
 
 - **parseWorkspaceClientMsg(raw)** — tolerant guard over client→server frames (mirrors
   `terminal.ts`/`chatAgent.ts`): malformed JSON, unknown `type`, or a missing/ill-typed/blank
-  field all yield `undefined`, never a throw. Accepts `hello` (trimmed display name, rejected
-  if blank or > `MAX_DISPLAY_NAME_LEN`), `ping`, `subscribe`/`unsubscribe` (integer
-  `channelId`), and `message` (integer `channelId` + non-blank trimmed `author`/`body` within
-  the length caps). **A `message` frame carries no `kind`** — the parser drops any
-  client-supplied `kind`, so a human client can never forge an `agent` message. Also
-  accepts `react` (integer `channelId`/`messageId` + non-blank trimmed `emoji`/`handle`,
-  emoji capped at `MAX_EMOJI_LEN`).
+  field all yield `undefined`, never a throw. **Identity has left the wire**: a socket is
+  named by its AUTHENTICATED session, never by a frame field. Accepts `hello` (no display
+  name; an optional bearer `token` up to `MAX_HELLO_TOKEN_LEN`, for a cross-origin socket
+  that has no cookie it can send — an empty token is treated as absent so it cannot blank
+  out a cookie-authenticated socket), `ping`, `subscribe`/`unsubscribe` (integer
+  `channelId`), `message` (integer `channelId` + non-blank trimmed `body`), `react`
+  (integer `channelId`/`messageId` + trimmed `emoji`) and `page.edit` (`pageId` + a capped,
+  deliberately un-trimmed `body`). **`message`, `react` and `page.edit` REJECT a frame that
+  still carries an `author`/`handle`** — an outdated client fails loudly instead of having
+  its post silently attributed to a server-chosen name. (A legacy `hello.displayName` is
+  merely dropped, not rejected: it names nothing that gets persisted, and refusing it would
+  lock out an otherwise-authenticated socket.) **A `message` frame carries no `kind`** —
+  any client-supplied `kind` is dropped, so a human client can never forge an `agent`
+  message.
+- **Socket authentication** — the `/ws/workspace` route resolves the socket's identity on
+  `hello` via `AuthService.resolveSocketIdentity(handshakeCookie, msg.token)`. A socket
+  with no usable session is sent `{type:'unauthorized'}` and CLOSED; so is any socket that
+  sends a non-`hello`/`ping` frame before authenticating. Nothing is persisted from an
+  unauthenticated socket, and the roster/`new-version` seeds are sent only AFTER a
+  successful `hello` — an anonymous socket learns nothing, not even who is present.
 - **PresenceTracker<S>** — connection-based presence, generic over the socket type for
   testability. `join(socket, memberId)` / `leave(socket)` / `onlineIds()` /
   `roster(members)`. A member is online while holding ≥1 live socket (multi-tab safe); the
   member goes offline only when their last socket leaves.
 - **WorkspaceManager** — ties the `members` table to a `PresenceTracker` and a broadcast sink
-  (`(frame) => hub.broadcastRoom('workspace', …)`). `join(socket, displayName)` upserts the
-  member + marks online, `leave(socket)` recomputes, both re-broadcast the full roster
-  snapshot (no history replay). `roster()` merges live presence over `Db.listMembers()`.
+  (`(frame) => hub.broadcastRoom('workspace', …)`). **`join(socket, user: PublicUser)`**
+  resolves the roster row via `Db.memberForUser` (keyed on the user id, so it is stable
+  across reconnects and renames) + marks online, `leave(socket)` recomputes, both
+  re-broadcast the full roster snapshot (no history replay). `roster()` merges live
+  presence over `Db.listMembers()`.
 - **ChannelManager<S>** — owns channel message posting + live fan-out via the ticket's
   `Map<channel_id, Set<socket>>` subscription registry (a dedicated map, NOT `WsHub` rooms — a
   deliberate choice so the acceptance-critical fan-out test is crisp). `subscribe(socket,
@@ -854,7 +978,9 @@ same `zmrng.db`; local task execution is untouched. One multiplexed WebSocket pe
   `Db.addMessage` and fans the `{type:'message', message}` frame out ONLY to sockets subscribed
   to that channel. The `/ws/workspace` route always calls `post(..., 'human')` — the `agent`
   kind is reserved for the future T4 server-side agent path. `react(channelId, messageId,
-  handle, emoji, now)` validates the message belongs to the channel (via
+  handle, emoji, now)` — the `author`/`handle` arguments are unchanged in shape, but the
+  route now passes the socket's AUTHENTICATED display name rather than a wire field. It
+  validates the message belongs to the channel (via
   `Db.getMessageChannelId`), toggles the reaction through `Db.toggleReaction`, and fans the
   resulting `{type:'reaction', channelId, messageId, reactions}` frame out to that channel's
   subscribers only.

@@ -211,14 +211,29 @@ with no env set everything still resolves under the repo root.
 ## Self-host
 
 Run zmrng as a plain long-lived Node process on a machine you control — no
-container, no built-in auth (bind it to `localhost` or a trusted LAN, or put a
-reverse proxy with your own auth in front). Steps:
+container. The **task orchestrator surface has no auth**: bind it to `localhost` or a
+trusted LAN, or put a reverse proxy with your own auth in front. (The Knowledge Base and
+Team Chat surfaces *are* behind a username/password login — see below — but that gate
+covers those two surfaces only, not the whole server.) Steps:
 
 ```bash
 npm install
 npm run build                 # tsc (server) + vite build (web) → packages/*/dist
 npm start                     # node packages/server/dist/index.js, serves API + UI
 ```
+
+The Knowledge Base and Team Chat surfaces require an account. There is no self-serve
+signup, so create one by hand — re-running the command for an existing username **resets**
+that password, which is the only recovery path:
+
+```bash
+npm run create-user -- --username you --display-name "You"   # prompts, no echo
+```
+
+Accounts are per server instance: if you run more than one, provision the same username
+and password on each. Set `ZMRNG_SECURE_COOKIES=1` only when a TLS-terminating proxy sits
+in front — browsers silently drop a `Secure` cookie on a plain-http origin, which would
+break login entirely.
 
 If you skip the build step, `npm start` fails loud in the logs — it will not
 silently serve an API with no UI. Check `GET /api/preflight` after boot: its

@@ -1,15 +1,25 @@
-import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from './types.js'
+import { MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from './types.js'
 import type { Db } from './db.js'
 import type {
   KbPage,
   Member,
   Message,
   MessageKind,
+  PublicUser,
   ReactionSummary,
   WorkspaceMember,
   WsWorkspaceClientMsg,
   WsWorkspaceServerMsg,
 } from './types.js'
+
+/**
+ * Max length of a `hello` frame's bearer token. A session token is 32 random
+ * bytes base64url (43 chars), so this is generous — its job is simply to stop an
+ * unbounded wire field riding straight into a session lookup. It lives here
+ * rather than in `types.ts` because it bounds a server-side parse, not a shape
+ * the web client has to mirror.
+ */
+export const MAX_HELLO_TOKEN_LEN = 512
 
 /** A finite integer that could index a channel row (positive whole number). */
 function isChannelId(v: unknown): v is number {
@@ -32,10 +42,16 @@ function asRecord(v: unknown): Record<string, unknown> | undefined {
 /**
  * Parse one client->server frame from the multiplexed workspace socket. Tolerant:
  * malformed JSON, an unknown `type`, or a missing/ill-typed/blank field all yield
- * `undefined` rather than throwing (mirrors `terminal.ts` / `chatAgent.ts`). A
- * `hello` frame's display name is trimmed; an empty/whitespace-only name — or
- * one longer than `MAX_DISPLAY_NAME_LEN` after trimming — is rejected so it can
- * never create a blank or unbounded `members` row.
+ * `undefined` rather than throwing (mirrors `terminal.ts` / `chatAgent.ts`).
+ *
+ * NO frame carries identity any more. A socket is named by its AUTHENTICATED
+ * session — the handshake cookie, or the bearer `token` a cross-origin client
+ * puts on its `hello` — never by a free-text field on the wire. `message`,
+ * `react` and `page.edit` therefore REJECT a frame that still asserts an
+ * `author`/`handle`: an outdated client fails loudly instead of having its post
+ * silently attributed to a server-chosen name. (`hello`'s legacy `displayName`
+ * is merely dropped, not a rejection — it named nothing that gets persisted, and
+ * refusing it would lock an otherwise-authenticated socket out entirely.)
  */
 export function parseWorkspaceClientMsg(raw: string): WsWorkspaceClientMsg | undefined {
   let parsed: unknown
@@ -47,11 +63,14 @@ export function parseWorkspaceClientMsg(raw: string): WsWorkspaceClientMsg | und
   const obj = asRecord(parsed)
   if (!obj) return undefined
   if (obj.type === 'hello') {
-    if (typeof obj.displayName !== 'string') return undefined
-    const displayName = obj.displayName.trim()
-    return displayName.length > 0 && displayName.length <= MAX_DISPLAY_NAME_LEN
-      ? { type: 'hello', displayName }
-      : undefined
+    // Absent token: a same-origin socket whose identity rides the session cookie
+    // sent on the HTTP handshake.
+    if (obj.token === undefined) return { type: 'hello' }
+    if (typeof obj.token !== 'string' || obj.token.length > MAX_HELLO_TOKEN_LEN) return undefined
+    // An empty token is NO token: `resolveSocketIdentity` prefers the hello
+    // token over the cookie, so letting `''` through would blank out an
+    // otherwise-authenticated socket.
+    return obj.token.length === 0 ? { type: 'hello' } : { type: 'hello', token: obj.token }
   }
   if (obj.type === 'ping') {
     return { type: 'ping' }
@@ -62,57 +81,62 @@ export function parseWorkspaceClientMsg(raw: string): WsWorkspaceClientMsg | und
       : undefined
   }
   if (obj.type === 'message') {
+    if (assertsIdentity(obj)) return undefined
     if (!isChannelId(obj.channelId)) return undefined
-    if (typeof obj.author !== 'string' || typeof obj.body !== 'string') return undefined
-    const author = obj.author.trim()
+    if (typeof obj.body !== 'string') return undefined
     const body = obj.body.trim()
-    if (author.length === 0 || author.length > MAX_DISPLAY_NAME_LEN) return undefined
     if (body.length === 0 || body.length > MAX_MESSAGE_BODY_LEN) return undefined
-    // A client `message` frame carries no `kind`: an inbound socket post is
-    // always `human`. Any client-supplied `kind` is ignored here so a human
+    // A client `message` frame carries neither an author nor a `kind`: an
+    // inbound socket post is always `human`, authored by the socket's
+    // authenticated user. Any client-supplied `kind` is ignored here so a human
     // cannot forge an `agent`-authored message (the `agent` kind is set
-    // server-side by the future T4 agent path, never over this socket).
+    // server-side by the T4 agent path, never over this socket).
     return {
       type: 'message',
       channelId: obj.channelId,
-      author,
       body,
     }
   }
   if (obj.type === 'react') {
+    if (assertsIdentity(obj)) return undefined
     if (!isChannelId(obj.channelId) || !isChannelId(obj.messageId)) return undefined
-    if (typeof obj.emoji !== 'string' || typeof obj.handle !== 'string') return undefined
+    if (typeof obj.emoji !== 'string') return undefined
     const emoji = obj.emoji.trim()
-    const handle = obj.handle.trim()
     if (emoji.length === 0 || emoji.length > MAX_EMOJI_LEN) return undefined
-    if (handle.length === 0 || handle.length > MAX_DISPLAY_NAME_LEN) return undefined
-    // The reactor handle is self-asserted, exactly like a `message` frame's
-    // `author` — the identity model is a free-text handle with no verification.
-    return { type: 'react', channelId: obj.channelId, messageId: obj.messageId, emoji, handle }
+    // The reactor is the socket's authenticated user, exactly like a `message`
+    // frame's author — the wire says only WHAT was reacted, never by whom.
+    return { type: 'react', channelId: obj.channelId, messageId: obj.messageId, emoji }
   }
   // ---- KB real-time sync frames (T2, #144) ----
   if (obj.type === 'page.subscribe' || obj.type === 'page.unsubscribe') {
     return isPageId(obj.pageId) ? { type: obj.type, pageId: obj.pageId } : undefined
   }
   if (obj.type === 'page.edit') {
+    if (assertsIdentity(obj)) return undefined
     if (!isPageId(obj.pageId)) return undefined
     // The page `body` may be empty (a fresh page starts blank), but is capped.
     // It is NOT trimmed: leading/trailing whitespace is meaningful markdown, so
     // we preserve it verbatim and only bound its length.
     if (typeof obj.body !== 'string' || obj.body.length > MAX_MESSAGE_BODY_LEN) return undefined
-    if (typeof obj.author !== 'string') return undefined
-    const author = obj.author.trim()
-    if (author.length === 0 || author.length > MAX_DISPLAY_NAME_LEN) return undefined
-    // A socket `page.edit` is ALWAYS a human author — mirrors the channel
-    // `message` "always human" posture.
+    // A socket `page.edit` is ALWAYS a human edit, attributed to the socket's
+    // authenticated user — mirrors the channel `message` "always human" posture.
     return {
       type: 'page.edit',
       pageId: obj.pageId,
       body: obj.body,
-      author,
     }
   }
   return undefined
+}
+
+/**
+ * Does this frame still try to name its own author? Identity left the wire with
+ * login: the server takes it from the socket's session. A frame that asserts one
+ * is refused outright rather than having the field quietly ignored — silently
+ * dropping it would persist the post under a different name than the sender saw.
+ */
+function assertsIdentity(obj: Record<string, unknown>): boolean {
+  return 'author' in obj || 'handle' in obj
 }
 
 // ---- presence tracker ------------------------------------------------------
@@ -171,7 +195,7 @@ export class PresenceTracker<S = object> {
 // ---- workspace manager -----------------------------------------------------
 
 /** The members-table surface the manager needs (kept narrow for testability). */
-type MemberStore = Pick<Db, 'upsertMember' | 'listMembers'>
+type MemberStore = Pick<Db, 'memberForUser' | 'listMembers'>
 
 /**
  * Owns the workspace-wide presence roster: ties the `members` table to a live
@@ -179,6 +203,10 @@ type MemberStore = Pick<Db, 'upsertMember' | 'listMembers'>
  * full roster snapshot (no history replay). Mirrors `TaskManager`'s
  * `(event) => hub.broadcast(event)` injection seam — tests inject a frame
  * collector, the route injects `(frame) => hub.broadcastRoom('workspace', …)`.
+ *
+ * A member is an AUTHENTICATED user, never a free-text handle: the roster is
+ * keyed on `members.user_id`, so the same login always resolves to the same row
+ * across reconnects, tabs and display-name changes.
  */
 export class WorkspaceManager {
   private presence = new PresenceTracker<object>()
@@ -189,11 +217,13 @@ export class WorkspaceManager {
   ) {}
 
   /**
-   * A socket self-asserts a display name: upsert the member row, mark them
-   * online, and re-broadcast the roster to every subscriber.
+   * An AUTHENTICATED socket joins: resolve the user's member row (created on
+   * first use, keyed on `user_id`), mark them online, and re-broadcast the
+   * roster to every subscriber. The identity comes from the socket's session —
+   * there is no self-asserted name to trust.
    */
-  join(socket: object, displayName: string, now: string = new Date().toISOString()): Member {
-    const member = this.db.upsertMember(displayName, now)
+  join(socket: object, user: PublicUser, now: string = new Date().toISOString()): Member {
+    const member = this.db.memberForUser(user, now)
     this.presence.join(socket, member.id)
     this.broadcastRoster()
     return member
@@ -277,6 +307,10 @@ export class ChannelManager<S = object> {
    * Persist a message to a channel and fan it out to every subscribed socket.
    * Returns the stored message, or `undefined` if the channel does not exist
    * (in which case nothing is persisted and nothing is delivered).
+   *
+   * `author` is supplied BY THE CALLER and is the socket's AUTHENTICATED display
+   * name (or, for `AgentResponder`, the configured bot handle) — never a field
+   * off the wire, which no longer carries one.
    */
   post(
     channelId: number,
@@ -302,6 +336,9 @@ export class ChannelManager<S = object> {
    * mismatched or unknown message is a no-op (nothing persisted, nothing
    * delivered), returning `undefined`. Returns the message's reaction set after
    * the toggle on success.
+   *
+   * As with `post`, `handle` is supplied BY THE CALLER from the socket's
+   * AUTHENTICATED session — a `react` frame carries no handle to trust.
    */
   react(
     channelId: number,
@@ -410,15 +447,23 @@ export class PageManager<S = object> {
    * without recording every keystroke). Never trusts the wire: the page must
    * exist. Returns the updated page, or `undefined` on an unknown page (a
    * no-op — nothing persisted, nothing delivered).
+   *
+   * `actor` is the socket's AUTHENTICATED user, supplied by the caller — a
+   * `page.edit` frame carries no author. Their display name lands in the page's
+   * `updated_by`, and their id + username are recorded in the KB changelog
+   * (throttled by `Db.updatePageBody`, so autosave does not spam the feed).
    */
   savePage(
     pageId: number,
     body: string,
-    author: string,
+    actor: PublicUser,
     now: string = new Date().toISOString(),
   ): KbPage | undefined {
     if (!this.db.getPage(pageId)) return undefined
-    const page = this.db.updatePageBody(pageId, body, author, now)
+    const page = this.db.updatePageBody(pageId, body, actor.displayName, now, {
+      userId: actor.id,
+      username: actor.username,
+    })
     if (!page) return undefined
     const set = this.subs.get(pageId)
     if (set) {

@@ -2,9 +2,26 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
+import Fastify from 'fastify'
+import type { FastifyInstance, HTTPMethods } from 'fastify'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import { Db } from '../src/db.js'
-import { PROTECTED_SPACE_NAME } from '../src/types.js'
+import { AuthService } from '../src/auth.js'
+import { registerAuth } from '../src/authRoutes.js'
+import { registerKbRoutes } from '../src/kbRoutes.js'
+import { hashPassword } from '../src/password.js'
+import {
+  DEFAULT_CHANGELOG_PAGE,
+  MAX_CHANGELOG_PAGE,
+  PROTECTED_SPACE_NAME,
+} from '../src/types.js'
+import type {
+  KbChangeEntry,
+  KbPage,
+  LoginResponse,
+  Space,
+  WsWorkspaceServerMsg,
+} from '../src/types.js'
 import { resolvePageTitle, buildPageBody } from '../src/kbFromMessage.js'
 
 let dir: string
@@ -564,5 +581,482 @@ describe('KB "Send to KB" composition (T4, #154)', () => {
     expect(page.folderId).toBe(folder.id)
     expect(page.title).toBe('Custom') // explicit client title honored
     db.close()
+  })
+})
+
+// ===================================================================
+// The KB REST surface, end to end over `app.inject()` (no port, no network).
+//
+// `index.ts` opens the real DB, spawns managers and top-level-`await`s at import
+// time, so a test that imported it would boot a whole server — which is why the
+// KB routes live in `kbRoutes.ts` as a plain function (the same seam, and for
+// the same reason, as `registerAuth`). Registered onto a bare Fastify over the
+// temp-file Db above, they can be driven exactly as a client would, which is
+// what makes the feature's central security claim PROVABLE rather than merely
+// readable: a client-supplied `author` is ignored, and every KB write is
+// attributed to the authenticated session.
+// ===================================================================
+describe('KB REST routes (authenticated, driven with app.inject())', () => {
+  const PASSWORD = 'correct horse battery'
+  const DISPLAY_NAME = 'Zed Codeman'
+  const USERNAME = 'zc'
+
+  let db: Db
+  let app: FastifyInstance
+  /** Every `space.tree` convergence frame the routes fanned to the workspace room. */
+  let frames: WsWorkspaceServerMsg[]
+  let token: string
+
+  beforeEach(async () => {
+    db = new Db(dbPath)
+    db.createUser(USERNAME, DISPLAY_NAME, hashPassword(PASSWORD), NOW)
+    frames = []
+
+    app = Fastify()
+    registerAuth(app, { auth: new AuthService(db), secureCookies: false })
+    registerKbRoutes(app, {
+      db,
+      broadcast: (frame) => {
+        frames.push(frame)
+      },
+      log: app.log,
+    })
+    await app.ready()
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: USERNAME, password: PASSWORD },
+    })
+    token = (res.json() as LoginResponse).token
+  })
+
+  afterEach(async () => {
+    await app.close()
+    db.close()
+  })
+
+  /** The session credential, as the cross-origin bearer transport sends it. */
+  function as(): { authorization: string } {
+    return { authorization: `Bearer ${token}` }
+  }
+
+  /** The `general` seed space — the scratch space for most of these tests. */
+  function generalSpace(): Space {
+    return db.listSpaces()[0]
+  }
+
+  /** Create a page through the REST route (as the operator's client does). */
+  async function createPage(spaceId: number, title: string): Promise<KbPage> {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/spaces/${spaceId}/pages`,
+      headers: as(),
+      payload: { title },
+    })
+    expect(res.statusCode).toBe(200)
+    return res.json() as KbPage
+  }
+
+  /** A space's changelog as the feed endpoint serves it (newest first). */
+  async function changelog(spaceId: number, query = ''): Promise<KbChangeEntry[]> {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/spaces/${spaceId}/changelog${query}`,
+      headers: as(),
+    })
+    expect(res.statusCode).toBe(200)
+    return res.json() as KbChangeEntry[]
+  }
+
+  // -----------------------------------------------------------------
+  // THE CENTRAL CLAIM of the whole login feature: identity is taken from the
+  // session, never from the request body. A client that asserts an `author` is
+  // simply ignored — which is the spoofing hole the self-asserted handle left
+  // open, and the reason these routes are worth an integration test at all.
+  // -----------------------------------------------------------------
+  describe('attribution comes from the session, never from the client', () => {
+    it('ignores a client-supplied `author` on page create', async () => {
+      const space = generalSpace()
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/spaces/${space.id}/pages`,
+        headers: as(),
+        payload: { title: 'Runbook', author: 'somebody else', updatedBy: 'somebody else' },
+      })
+      expect(res.statusCode).toBe(200)
+      const page = res.json() as KbPage
+
+      // The authenticated user's display name — NOT the body's `author`.
+      expect(page.author).toBe(DISPLAY_NAME)
+      expect(page.updatedBy).toBe(DISPLAY_NAME)
+      expect(page.author).not.toBe('somebody else')
+
+      // And that is what was persisted, not merely what was echoed back.
+      const stored = db.getPage(page.id)
+      expect(stored?.author).toBe(DISPLAY_NAME)
+      expect(stored?.updatedBy).toBe(DISPLAY_NAME)
+
+      // The changelog names the session user too, by username.
+      const entries = await changelog(space.id)
+      expect(entries[0].username).toBe(USERNAME)
+      expect(entries[0].userId).toBe(db.getUserByUsername(USERNAME)?.id)
+    })
+
+    it('ignores a client-supplied `author` on revision restore', async () => {
+      const space = generalSpace()
+      const page = await createPage(space.id, 'Runbook')
+      // Two saves so a restorable revision of the FIRST body exists.
+      db.updatePageBody(page.id, 'v1', DISPLAY_NAME, NOW)
+      const revision = db.listPageRevisions(page.id)[0]
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/page-revisions/${revision.id}/restore`,
+        headers: as(),
+        payload: { author: 'somebody else' },
+      })
+      expect(res.statusCode).toBe(200)
+      const restored = res.json() as KbPage
+
+      // The restorer is the session user; the body's `author` is ignored.
+      expect(restored.updatedBy).toBe(DISPLAY_NAME)
+      expect(restored.updatedBy).not.toBe('somebody else')
+      expect(db.getPage(page.id)?.updatedBy).toBe(DISPLAY_NAME)
+
+      const entry = (await changelog(space.id))[0]
+      expect(entry.action).toBe('page.edit')
+      expect(entry.username).toBe(USERNAME)
+      expect(entry.detail).toContain(`restored revision #${revision.id}`)
+    })
+
+    it('ignores a client-supplied `author` on rename, move and delete', async () => {
+      const space = generalSpace()
+      const page = await createPage(space.id, 'Runbook')
+      const folder = db.createFolder(space.id, null, 'Ops', NOW)
+
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/pages/${page.id}`,
+        headers: as(),
+        payload: { title: 'Runbook v2', author: 'somebody else' },
+      })
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/pages/${page.id}`,
+        headers: as(),
+        payload: { folderId: folder.id, author: 'somebody else' },
+      })
+      await app.inject({
+        method: 'DELETE',
+        url: `/api/pages/${page.id}`,
+        headers: as(),
+        payload: { author: 'somebody else' },
+      })
+
+      // Every entry the three writes produced names the session user.
+      const entries = await changelog(space.id)
+      expect(entries.length).toBeGreaterThanOrEqual(4)
+      for (const entry of entries) {
+        expect(entry.username).toBe(USERNAME)
+        expect(entry.username).not.toBe('somebody else')
+      }
+    })
+
+    it('does not require an `author` field at all, and 400s a blank title', async () => {
+      const space = generalSpace()
+      // No `author` anywhere in the body — the pre-auth shape is gone for good.
+      const ok = await app.inject({
+        method: 'POST',
+        url: `/api/spaces/${space.id}/pages`,
+        headers: as(),
+        payload: { title: 'Authorless' },
+      })
+      expect(ok.statusCode).toBe(200)
+      expect((ok.json() as KbPage).author).toBe(DISPLAY_NAME)
+
+      for (const payload of [{}, { title: '   ' }, { title: 42 }, { title: '', author: 'x' }]) {
+        const res = await app.inject({
+          method: 'POST',
+          url: `/api/spaces/${space.id}/pages`,
+          headers: as(),
+          payload,
+        })
+        expect(res.statusCode, JSON.stringify(payload)).toBe(400)
+        expect((res.json() as { error: string }).error).toBe('title is required')
+      }
+    })
+  })
+
+  // -----------------------------------------------------------------
+  // One changelog entry per lifecycle action — the gap `page_revisions` left
+  // (it only ever sees body saves, and dies with its page).
+  // -----------------------------------------------------------------
+  describe('every action writes its changelog entry', () => {
+    it('records page.create with the page title', async () => {
+      const space = generalSpace()
+      const page = await createPage(space.id, 'Runbook')
+      const entries = await changelog(space.id)
+      expect(entries).toHaveLength(1)
+      expect(entries[0]).toMatchObject({
+        spaceId: space.id,
+        pageId: page.id,
+        action: 'page.create',
+        detail: 'Runbook',
+        username: USERNAME,
+      })
+    })
+
+    it('records page.rename naming BOTH the old and the new title', async () => {
+      const space = generalSpace()
+      // Deliberately NON-overlapping titles: with `Runbook` → `Runbook v2` a
+      // detail that dropped the old title would still satisfy `toContain`.
+      const page = await createPage(space.id, 'Runbook')
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/pages/${page.id}`,
+        headers: as(),
+        payload: { title: 'Operations manual' },
+      })
+      expect(res.statusCode).toBe(200)
+      expect((res.json() as KbPage).title).toBe('Operations manual')
+
+      const entry = (await changelog(space.id))[0]
+      expect(entry.action).toBe('page.rename')
+      expect(entry.pageId).toBe(page.id)
+      expect(entry.detail).toContain('Runbook')
+      expect(entry.detail).toContain('Operations manual')
+      // Old first, new second — the direction of the change is readable.
+      expect(entry.detail.indexOf('Runbook')).toBeLessThan(
+        entry.detail.indexOf('Operations manual'),
+      )
+    })
+
+    it('records page.move and fans the space.tree convergence frame', async () => {
+      const space = generalSpace()
+      const page = await createPage(space.id, 'Runbook')
+      const folder = db.createFolder(space.id, null, 'Ops', NOW)
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/pages/${page.id}`,
+        headers: as(),
+        payload: { folderId: folder.id },
+      })
+      expect(res.statusCode).toBe(200)
+      expect((res.json() as KbPage).folderId).toBe(folder.id)
+
+      const entry = (await changelog(space.id))[0]
+      expect(entry.action).toBe('page.move')
+      expect(entry.detail).toContain('Ops')
+
+      // The move still converges every client viewing the space (the broadcast
+      // the extraction replaced with the injected `broadcast` dep).
+      expect(frames).toContainEqual({ type: 'space.tree', spaceId: space.id })
+    })
+
+    it("records page.delete, and the entry OUTLIVES the page it describes", async () => {
+      const space = generalSpace()
+      const page = await createPage(space.id, 'Doomed')
+
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/api/pages/${page.id}`,
+        headers: as(),
+      })
+      expect(res.statusCode).toBe(204)
+      expect(db.getPage(page.id)).toBeUndefined()
+      // Its revisions went with it — which is exactly why `page_revisions`
+      // could never have served as the changelog.
+      expect(db.listPageRevisions(page.id)).toHaveLength(0)
+
+      const entries = await changelog(space.id)
+      const deletion = entries[0]
+      expect(deletion.action).toBe('page.delete')
+      expect(deletion.detail).toBe('Doomed')
+      // `pageId` is null precisely so the row can survive its page.
+      expect(deletion.pageId).toBeNull()
+      expect(deletion.username).toBe(USERNAME)
+      // The create entry survives too, still pointing at the now-gone page.
+      expect(entries.some((e) => e.action === 'page.create' && e.pageId === page.id)).toBe(true)
+    })
+
+    it('records page.create for a page promoted from a channel message', async () => {
+      const space = generalSpace()
+      const channel = db.createChannel('zmrng-dev', 'zmrng', NOW)
+      const message = db.addMessage(channel.id, 'Ada', 'Investigate the retry bug', 'human', NOW)
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/spaces/${space.id}/pages/from-message`,
+        headers: as(),
+        payload: { messageId: message.id },
+      })
+      expect(res.statusCode).toBe(200)
+      const page = res.json() as KbPage
+      // Deliberate carve-out: a promoted page keeps the MESSAGE author as its
+      // provenance — but who performed the promotion is the session user, and
+      // that is recorded in the changelog so nothing is lost.
+      expect(page.author).toBe('Ada')
+      const entry = (await changelog(space.id))[0]
+      expect(entry.action).toBe('page.create')
+      expect(entry.username).toBe(USERNAME)
+      expect(entry.detail).toContain(`#${channel.name}`)
+    })
+  })
+
+  // -----------------------------------------------------------------
+  // The feed endpoint itself.
+  // -----------------------------------------------------------------
+  describe('GET /api/spaces/:id/changelog', () => {
+    it('returns entries NEWEST FIRST', async () => {
+      const space = generalSpace()
+      const page = await createPage(space.id, 'Runbook')
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/pages/${page.id}`,
+        headers: as(),
+        payload: { title: 'Runbook v2' },
+      })
+      await app.inject({ method: 'DELETE', url: `/api/pages/${page.id}`, headers: as() })
+
+      const entries = await changelog(space.id)
+      expect(entries.map((e) => e.action)).toEqual(['page.delete', 'page.rename', 'page.create'])
+      // Newest first = strictly descending id.
+      expect(entries.map((e) => e.id)).toEqual([...entries.map((e) => e.id)].sort((a, b) => b - a))
+    })
+
+    it("is scoped to its space — another space's entries never leak in", async () => {
+      const first = generalSpace()
+      const second = db.listSpaces()[2] // example-app
+      await createPage(first.id, 'First page')
+      await createPage(second.id, 'Second page')
+
+      const firstEntries = await changelog(first.id)
+      expect(firstEntries).toHaveLength(1)
+      expect(firstEntries[0].detail).toBe('First page')
+      expect(firstEntries.every((e) => e.spaceId === first.id)).toBe(true)
+
+      const secondEntries = await changelog(second.id)
+      expect(secondEntries).toHaveLength(1)
+      expect(secondEntries[0].detail).toBe('Second page')
+    })
+
+    it('clamps ?limit= to the hard cap and falls back to the default on junk', async () => {
+      const space = generalSpace()
+      for (let i = 0; i < MAX_CHANGELOG_PAGE + 5; i++) {
+        db.addChangelogEntry({
+          spaceId: space.id,
+          pageId: null,
+          userId: null,
+          username: USERNAME,
+          action: 'page.edit',
+          detail: `entry ${i}`,
+          now: NOW,
+        })
+      }
+      expect(await changelog(space.id, '?limit=1')).toHaveLength(1)
+      expect(await changelog(space.id, '?limit=100000')).toHaveLength(MAX_CHANGELOG_PAGE)
+      for (const junk of ['?limit=abc', '?limit=-1', '?limit=0', '?limit=1.5', '']) {
+        expect(await changelog(space.id, junk), junk).toHaveLength(DEFAULT_CHANGELOG_PAGE)
+      }
+    })
+
+    it('404s an unknown space', async () => {
+      for (const id of ['9999', '0', '-1', 'abc']) {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/spaces/${id}/changelog`,
+          headers: as(),
+        })
+        expect(res.statusCode, id).toBe(404)
+        expect((res.json() as { error: string }).error).toBe('space not found')
+      }
+    })
+  })
+
+  // -----------------------------------------------------------------
+  // The whole surface sits behind the login gate — reads as well as writes.
+  // -----------------------------------------------------------------
+  describe('the login gate covers the whole KB surface', () => {
+    /** One request per KB route, against real resources. */
+    function kbRequests(): { method: HTTPMethods; url: string; payload?: unknown }[] {
+      const space = generalSpace()
+      const scratchSpace = db.createSpace(`scratch-${Date.now()}`, NOW)
+      const folder = db.createFolder(space.id, null, `Folder-${Date.now()}`, NOW)
+      const doomedFolder = db.createFolder(space.id, null, `Doomed-${Date.now()}`, NOW)
+      const page = db.createPage(space.id, null, 'Page', DISPLAY_NAME, NOW)
+      const doomedPage = db.createPage(space.id, null, 'Doomed', DISPLAY_NAME, NOW)
+      db.updatePageBody(page.id, 'v1', DISPLAY_NAME, NOW)
+      const revision = db.listPageRevisions(page.id)[0]
+      const channel = db.createChannel(`chan-${Date.now()}`, null, NOW)
+      const message = db.addMessage(channel.id, 'Ada', 'Promote me', 'human', NOW)
+
+      return [
+        { method: 'GET', url: '/api/spaces' },
+        { method: 'POST', url: '/api/spaces', payload: { name: `Made-${Date.now()}` } },
+        { method: 'DELETE', url: `/api/spaces/${scratchSpace.id}` },
+        { method: 'GET', url: `/api/spaces/${space.id}/tree` },
+        { method: 'GET', url: `/api/spaces/${space.id}/changelog` },
+        { method: 'GET', url: `/api/pages/${page.id}` },
+        { method: 'POST', url: `/api/spaces/${space.id}/folders`, payload: { name: 'New folder' } },
+        { method: 'PATCH', url: `/api/folders/${folder.id}`, payload: { name: 'Renamed' } },
+        { method: 'DELETE', url: `/api/folders/${doomedFolder.id}` },
+        { method: 'POST', url: `/api/spaces/${space.id}/pages`, payload: { title: 'New page' } },
+        {
+          method: 'POST',
+          url: `/api/spaces/${space.id}/pages/from-message`,
+          payload: { messageId: message.id },
+        },
+        { method: 'PATCH', url: `/api/pages/${page.id}`, payload: { title: 'Renamed page' } },
+        { method: 'DELETE', url: `/api/pages/${doomedPage.id}` },
+        { method: 'GET', url: `/api/pages/${page.id}/revisions` },
+        { method: 'POST', url: `/api/page-revisions/${revision.id}/restore`, payload: {} },
+      ]
+    }
+
+    it('401s every KB route — read and write — with no credential', async () => {
+      for (const r of kbRequests()) {
+        const res = await app.inject({ method: r.method, url: r.url, payload: r.payload })
+        expect(res.statusCode, `${r.method} ${r.url}`).toBe(401)
+        expect((res.json() as { error: string }).error).toBe('authentication required')
+      }
+      // Nothing was created or destroyed behind the 401s.
+      expect(db.listPages(generalSpace().id).some((p) => p.title === 'New page')).toBe(false)
+      expect(db.listChangelog(generalSpace().id, 10)).toHaveLength(0)
+    })
+
+    it('answers every KB route 2xx with the session', async () => {
+      for (const r of kbRequests()) {
+        const res = await app.inject({
+          method: r.method,
+          url: r.url,
+          headers: as(),
+          payload: r.payload,
+        })
+        expect([200, 204], `${r.method} ${r.url} -> ${res.statusCode} ${res.body}`).toContain(
+          res.statusCode,
+        )
+      }
+    })
+
+    it('401s a garbage or revoked token on a KB read', async () => {
+      const space = generalSpace()
+      for (const header of ['Bearer nonsense', `Bearer ${token}x`, 'Basic zc:hunter2']) {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/spaces/${space.id}/tree`,
+          headers: { authorization: header },
+        })
+        expect(res.statusCode, header).toBe(401)
+      }
+      await app.inject({ method: 'POST', url: '/api/auth/logout', headers: as() })
+      const after = await app.inject({
+        method: 'GET',
+        url: `/api/spaces/${space.id}/tree`,
+        headers: as(),
+      })
+      expect(after.statusCode).toBe(401)
+    })
   })
 })

@@ -4,7 +4,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import { Db } from '../src/db.js'
-import type { TaskUsage } from '../src/types.js'
+import type { KbChangeAction, TaskUsage } from '../src/types.js'
 
 let dir: string
 let dbPath: string
@@ -874,5 +874,596 @@ describe('addUsage', () => {
     for (let i = 0; i < 50; i++) db.addUsage('t1', delta, '2026-07-27T00:00:03.000Z')
     expect(db.getTask('t1')?.usage.tokensIn).toBe(5000)
     expect(db.getTask('t1')?.usage.turns).toBe(50)
+  })
+})
+
+// =====================================================================
+// auth (username/password login gating KB + Team) — users / sessions /
+// kb_changelog, plus the additive user_id columns on members and
+// page_revisions. See .agents/plans/zmrng-login-auth.md.
+// =====================================================================
+
+/** Table names present in the DB file at `p`. */
+function tableNames(p: string): Set<string> {
+  const raw = new Database(p)
+  const names = new Set(
+    (
+      raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+        name: string
+      }[]
+    ).map((t) => t.name),
+  )
+  raw.close()
+  return names
+}
+
+/** Column names of one table in the DB file at `p`. */
+function tableColumns(p: string, table: string): Set<string> {
+  const raw = new Database(p)
+  const cols = new Set(
+    (raw.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name),
+  )
+  raw.close()
+  return cols
+}
+
+/**
+ * Every row of one table, serialized to JSON in rowid order. Used as a
+ * before/after snapshot for the data-loss guard: the additive migration must
+ * leave pre-existing rows byte-identical.
+ */
+function snapshotRows(p: string, table: string): string {
+  const raw = new Database(p)
+  const rows = raw.prepare(`SELECT * FROM ${table} ORDER BY rowid ASC`).all()
+  raw.close()
+  return JSON.stringify(rows)
+}
+
+/**
+ * Hand-build a PRE-AUTH `zmrng.db` — the shape a live VPS/desktop instance has
+ * before this feature lands: the old tasks/members/pages/page_revisions/messages
+ * tables, populated, with NO users/sessions/kb_changelog and NO user_id columns.
+ * `channels`/`spaces` are deliberately left for `SCHEMA` to create so the
+ * constructor's idempotent seeds behave exactly as they do in production.
+ */
+function buildPreAuthDb(p: string): void {
+  const raw = new Database(p)
+  raw.exec(`
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL,
+      session_id TEXT, branch TEXT, worktree TEXT, pr_url TEXT, model TEXT,
+      queued INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      display_name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id INTEGER NOT NULL,
+      author TEXT NOT NULL,
+      body TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE pages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      space_id INTEGER NOT NULL,
+      folder_id INTEGER,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      author TEXT NOT NULL,
+      updated_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE page_revisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      page_id INTEGER NOT NULL,
+      body TEXT NOT NULL,
+      author TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `)
+  raw
+    .prepare(
+      `INSERT INTO tasks (id, title, body, status, queued, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`,
+    )
+    .run('legacy-1', 'old task', 'old body', 'done', 't0', 't1')
+  raw
+    .prepare('INSERT INTO members (display_name, created_at) VALUES (?, ?)')
+    .run('Ada', 't0')
+  raw
+    .prepare(
+      'INSERT INTO messages (channel_id, author, body, kind, created_at) VALUES (?, ?, ?, ?, ?)',
+    )
+    .run(1, 'Ada', 'hello team', 'human', 't0')
+  raw
+    .prepare(
+      `INSERT INTO pages (space_id, folder_id, title, body, author, updated_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(1, null, 'Old page', 'old contents', 'Ada', 'Ada', 't0', 't1')
+  raw
+    .prepare(
+      'INSERT INTO page_revisions (page_id, body, author, created_at) VALUES (?, ?, ?, ?)',
+    )
+    .run(1, 'older contents', 'Ada', 't0')
+  raw.close()
+}
+
+describe('ensureAuthSchema migration (pre-auth zmrng.db)', () => {
+  it('adds users/sessions/kb_changelog and the members.user_id column', () => {
+    buildPreAuthDb(dbPath)
+    const before = tableNames(dbPath)
+    expect(before.has('users')).toBe(false)
+    expect(before.has('sessions')).toBe(false)
+    expect(before.has('kb_changelog')).toBe(false)
+    expect(tableColumns(dbPath, 'members').has('user_id')).toBe(false)
+
+    new Db(dbPath).close() // constructor runs ensureAuthSchema()
+
+    const after = tableNames(dbPath)
+    expect(after.has('users')).toBe(true)
+    expect(after.has('sessions')).toBe(true)
+    expect(after.has('kb_changelog')).toBe(true)
+    expect(tableColumns(dbPath, 'members').has('user_id')).toBe(true)
+    // Deliberately NOT on page_revisions: a revision snapshots the page's PRIOR
+    // body, whose author is the free-text `pages.updated_by` string with no user
+    // id behind it, so the column could only ever be null — and the
+    // additive-only rule means a column added today can never be removed.
+    expect(tableColumns(dbPath, 'page_revisions').has('user_id')).toBe(false)
+  })
+
+  it('is idempotent: re-opening the migrated DB does not throw or duplicate anything', () => {
+    buildPreAuthDb(dbPath)
+    new Db(dbPath).close()
+    const tablesAfter1 = [...tableNames(dbPath)].sort()
+    const memberCols1 = [...tableColumns(dbPath, 'members')].sort()
+    const revCols1 = [...tableColumns(dbPath, 'page_revisions')].sort()
+
+    expect(() => new Db(dbPath).close()).not.toThrow()
+
+    expect([...tableNames(dbPath)].sort()).toEqual(tablesAfter1)
+    expect([...tableColumns(dbPath, 'members')].sort()).toEqual(memberCols1)
+    expect([...tableColumns(dbPath, 'page_revisions')].sort()).toEqual(revCols1)
+  })
+
+  it('DATA-LOSS GUARD: pre-existing task/page/member/message rows are byte-identical afterwards', () => {
+    // CLAUDE.md's ADDITIVE-ONLY rule: the VPS team workspace redeploys in place
+    // over the same populated zmrng.db, so a migration that rewrote (or dropped)
+    // a row is the ONE thing that could lose live data. Snapshot every
+    // pre-existing row set as JSON, migrate, and demand an exact match.
+    buildPreAuthDb(dbPath)
+    const watched = ['tasks', 'members', 'messages', 'pages', 'page_revisions']
+    const before = new Map(watched.map((t) => [t, snapshotRows(dbPath, t)]))
+
+    new Db(dbPath).close()
+    new Db(dbPath).close() // and again — a redeploy re-opens repeatedly
+
+    for (const t of watched) {
+      // The new nullable user_id column widens the row shape for members and
+      // page_revisions, so compare only the pre-existing columns' values.
+      const after = JSON.parse(snapshotRows(dbPath, t)) as Record<string, unknown>[]
+      const original = JSON.parse(before.get(t)!) as Record<string, unknown>[]
+      expect(after).toHaveLength(original.length)
+      original.forEach((row, i) => {
+        expect(after[i]).toMatchObject(row)
+      })
+    }
+  })
+})
+
+describe('users (auth)', () => {
+  const NOW = '2026-09-23T00:00:00.000Z'
+
+  it('createUser round-trips through getUserByUsername and getUserById', () => {
+    const db = new Db(dbPath)
+    const created = db.createUser('zc', 'zc', 'scrypt$32768$8$1$salt$key', NOW)
+    expect(created.id).toBeTypeOf('number')
+    expect(created).toMatchObject({
+      username: 'zc',
+      displayName: 'zc',
+      passwordHash: 'scrypt$32768$8$1$salt$key',
+      createdAt: NOW,
+      updatedAt: NOW,
+    })
+    expect(db.getUserByUsername('zc')).toEqual(created)
+    expect(db.getUserById(created.id)).toEqual(created)
+    db.close()
+  })
+
+  it('lookups miss cleanly for an unknown username or id (exact match on the stored string)', () => {
+    const db = new Db(dbPath)
+    db.createUser('zc', 'zc', 'hash', NOW)
+    expect(db.getUserByUsername('nobody')).toBeUndefined()
+    expect(db.getUserByUsername('ZC')).toBeUndefined() // exact match, not case-folded
+    expect(db.getUserById(99999)).toBeUndefined()
+    db.close()
+  })
+
+  it('rejects a duplicate username (UNIQUE constraint surfaces to the caller)', () => {
+    const db = new Db(dbPath)
+    db.createUser('zc', 'zc', 'hash', NOW)
+    expect(() => db.createUser('zc', 'someone else', 'other-hash', NOW)).toThrow()
+    db.close()
+  })
+
+  it('setUserPassword replaces the hash and bumps updatedAt, leaving createdAt/username alone', () => {
+    const db = new Db(dbPath)
+    const created = db.createUser('zc', 'zc', 'old-hash', NOW)
+    const later = '2026-09-24T00:00:00.000Z'
+    const updated = db.setUserPassword(created.id, 'new-hash', later)
+    expect(updated?.passwordHash).toBe('new-hash')
+    expect(updated?.updatedAt).toBe(later)
+    expect(updated?.createdAt).toBe(NOW)
+    expect(updated?.username).toBe('zc')
+    expect(updated?.displayName).toBe('zc')
+    expect(db.getUserByUsername('zc')?.passwordHash).toBe('new-hash')
+    db.close()
+  })
+
+  it('setUserPassword returns undefined for an unknown user id', () => {
+    const db = new Db(dbPath)
+    expect(db.setUserPassword(99999, 'new-hash', NOW)).toBeUndefined()
+    db.close()
+  })
+
+  it('persists users across a reopen', () => {
+    const db = new Db(dbPath)
+    db.createUser('zc', 'zc', 'hash', NOW)
+    db.close()
+    const reopened = new Db(dbPath)
+    expect(reopened.getUserByUsername('zc')?.displayName).toBe('zc')
+    reopened.close()
+  })
+})
+
+describe('sessions (auth)', () => {
+  const NOW = '2026-09-23T00:00:00.000Z'
+  const EXPIRES = '2026-09-30T00:00:00.000Z'
+
+  const mkUser = (db: Db): number => db.createUser('zc', 'zc', 'hash', NOW).id
+
+  it('createSession round-trips through getSession(tokenHash)', () => {
+    const db = new Db(dbPath)
+    const userId = mkUser(db)
+    const session = db.createSession(userId, 'token-hash-a', NOW, EXPIRES)
+    expect(session.id).toBeTypeOf('number')
+    expect(session).toMatchObject({
+      userId,
+      tokenHash: 'token-hash-a',
+      createdAt: NOW,
+      expiresAt: EXPIRES,
+    })
+    expect(db.getSession('token-hash-a')).toEqual(session)
+    expect(db.getSession('unknown-hash')).toBeUndefined()
+    db.close()
+  })
+
+  it('touchSession extends expiresAt in place (sliding renewal)', () => {
+    const db = new Db(dbPath)
+    const userId = mkUser(db)
+    const session = db.createSession(userId, 'token-hash-a', NOW, EXPIRES)
+    const extended = '2026-10-07T00:00:00.000Z'
+    db.touchSession(session.id, extended)
+    const after = db.getSession('token-hash-a')
+    expect(after?.expiresAt).toBe(extended)
+    expect(after?.id).toBe(session.id)
+    expect(after?.createdAt).toBe(NOW) // creation time untouched
+    db.close()
+  })
+
+  it('deleteSession makes the token unresolvable (logout)', () => {
+    const db = new Db(dbPath)
+    const userId = mkUser(db)
+    db.createSession(userId, 'token-hash-a', NOW, EXPIRES)
+    db.deleteSession('token-hash-a')
+    expect(db.getSession('token-hash-a')).toBeUndefined()
+    db.close()
+  })
+
+  it('deleteSession on an unknown token hash is a silent no-op', () => {
+    const db = new Db(dbPath)
+    const userId = mkUser(db)
+    db.createSession(userId, 'live', NOW, EXPIRES)
+    expect(() => db.deleteSession('never-existed')).not.toThrow()
+    expect(db.getSession('live')).toBeDefined()
+    db.close()
+  })
+
+  it('deleteExpiredSessions removes only rows at/behind `now` and returns the count', () => {
+    const db = new Db(dbPath)
+    const userId = mkUser(db)
+    db.createSession(userId, 'stale-1', NOW, '2026-09-22T00:00:00.000Z') // behind
+    db.createSession(userId, 'stale-2', NOW, '2026-09-23T00:00:00.000Z') // exactly at now
+    db.createSession(userId, 'live', NOW, '2026-09-24T00:00:00.000Z') // ahead
+
+    const removed = db.deleteExpiredSessions('2026-09-23T00:00:00.000Z')
+    expect(removed).toBe(2)
+    expect(db.getSession('stale-1')).toBeUndefined()
+    expect(db.getSession('stale-2')).toBeUndefined()
+    expect(db.getSession('live')).toBeDefined()
+    expect(db.deleteExpiredSessions('2026-09-23T00:00:00.000Z')).toBe(0) // nothing left to sweep
+    db.close()
+  })
+
+  it('rejects a duplicate token hash (UNIQUE) and persists sessions across a reopen', () => {
+    const db = new Db(dbPath)
+    const userId = mkUser(db)
+    db.createSession(userId, 'token-hash-a', NOW, EXPIRES)
+    expect(() => db.createSession(userId, 'token-hash-a', NOW, EXPIRES)).toThrow()
+    db.close()
+    const reopened = new Db(dbPath)
+    expect(reopened.getSession('token-hash-a')?.userId).toBe(userId)
+    reopened.close()
+  })
+})
+
+describe('memberForUser (authenticated members)', () => {
+  const NOW = '2026-09-23T00:00:00.000Z'
+
+  it('returns the SAME member row on a second call for the same user (stable across reconnects)', () => {
+    const db = new Db(dbPath)
+    const user = db.createUser('zc', 'zc', 'hash', NOW)
+    const first = db.memberForUser({ id: user.id, displayName: user.displayName }, NOW)
+    const again = db.memberForUser(
+      { id: user.id, displayName: user.displayName },
+      '2026-09-23T01:00:00.000Z',
+    )
+    expect(again.id).toBe(first.id)
+    expect(again.createdAt).toBe(first.createdAt) // original creation time preserved
+    expect(again.userId).toBe(user.id)
+    expect(db.listMembers()).toHaveLength(1)
+    db.close()
+  })
+
+  it('creates distinct member rows for distinct users, even with the same display name', () => {
+    const db = new Db(dbPath)
+    const a = db.createUser('ada', 'Ada', 'hash', NOW)
+    const b = db.createUser('ada2', 'Ada', 'hash', NOW)
+    const ma = db.memberForUser({ id: a.id, displayName: a.displayName }, NOW)
+    const mb = db.memberForUser({ id: b.id, displayName: b.displayName }, NOW)
+    expect(mb.id).not.toBe(ma.id)
+    expect(ma.userId).toBe(a.id)
+    expect(mb.userId).toBe(b.id)
+    expect(db.listMembers()).toHaveLength(2)
+    db.close()
+  })
+
+  it('does NOT adopt a legacy handle-only member row with the same display name', () => {
+    // PINNED BEHAVIOUR: legacy rows (user_id IS NULL) were self-asserted handles
+    // with no verification — claiming one would hand an authenticated user
+    // someone else's history. A new row is created instead.
+    const db = new Db(dbPath)
+    const legacy = db.upsertMember('Ada', '2026-09-01T00:00:00.000Z')
+    expect(legacy.userId).toBeNull()
+    const user = db.createUser('ada', 'Ada', 'hash', NOW)
+
+    const linked = db.memberForUser({ id: user.id, displayName: user.displayName }, NOW)
+    expect(linked.id).not.toBe(legacy.id)
+    expect(linked.userId).toBe(user.id)
+    expect(db.listMembers()).toHaveLength(2)
+    expect(db.listMembers().find((m) => m.id === legacy.id)?.userId).toBeNull()
+    db.close()
+  })
+
+  it('persists the member↔user link across a reopen', () => {
+    const db = new Db(dbPath)
+    const user = db.createUser('zc', 'zc', 'hash', NOW)
+    const member = db.memberForUser({ id: user.id, displayName: user.displayName }, NOW)
+    db.close()
+    const reopened = new Db(dbPath)
+    const again = reopened.memberForUser({ id: user.id, displayName: user.displayName }, NOW)
+    expect(again.id).toBe(member.id)
+    reopened.close()
+  })
+})
+
+describe('kb_changelog (auth: per-edit changelog)', () => {
+  const NOW = '2026-09-23T00:00:00.000Z'
+  const ACTIONS: KbChangeAction[] = [
+    'page.create',
+    'page.rename',
+    'page.move',
+    'page.edit',
+    'page.delete',
+  ]
+
+  it('addChangelogEntry round-trips every action', () => {
+    const db = new Db(dbPath)
+    ACTIONS.forEach((action, i) => {
+      const entry = db.addChangelogEntry({
+        spaceId: 1,
+        pageId: 7,
+        userId: 3,
+        username: 'zc',
+        action,
+        detail: `detail ${i}`,
+        now: NOW,
+      })
+      expect(entry.id).toBeTypeOf('number')
+      expect(entry).toMatchObject({
+        spaceId: 1,
+        pageId: 7,
+        userId: 3,
+        username: 'zc',
+        action,
+        detail: `detail ${i}`,
+        createdAt: NOW,
+      })
+    })
+    expect(db.listChangelog(1, 50).map((e) => e.action).sort()).toEqual([...ACTIONS].sort())
+    db.close()
+  })
+
+  it('keeps a null pageId/userId (a deleted page or a removed user leaves the entry readable)', () => {
+    const db = new Db(dbPath)
+    const entry = db.addChangelogEntry({
+      spaceId: 1,
+      pageId: null,
+      userId: null,
+      username: 'zc',
+      action: 'page.delete',
+      detail: 'Gone page',
+      now: NOW,
+    })
+    expect(entry.pageId).toBeNull()
+    expect(entry.userId).toBeNull()
+    expect(db.listChangelog(1, 10)[0]).toEqual(entry)
+    db.close()
+  })
+
+  it('listChangelog returns NEWEST FIRST and respects the limit', () => {
+    const db = new Db(dbPath)
+    for (let i = 0; i < 5; i++) {
+      db.addChangelogEntry({
+        spaceId: 1,
+        pageId: i,
+        userId: 1,
+        username: 'zc',
+        action: 'page.edit',
+        detail: `entry-${i}`,
+        now: `2026-09-23T00:0${i}:00.000Z`,
+      })
+    }
+    expect(db.listChangelog(1, 50).map((e) => e.detail)).toEqual([
+      'entry-4',
+      'entry-3',
+      'entry-2',
+      'entry-1',
+      'entry-0',
+    ])
+    expect(db.listChangelog(1, 2).map((e) => e.detail)).toEqual(['entry-4', 'entry-3'])
+    db.close()
+  })
+
+  it('is scoped to one space — another space never leaks in', () => {
+    const db = new Db(dbPath)
+    db.addChangelogEntry({
+      spaceId: 1,
+      pageId: 1,
+      userId: 1,
+      username: 'zc',
+      action: 'page.create',
+      detail: 'in space 1',
+      now: NOW,
+    })
+    db.addChangelogEntry({
+      spaceId: 2,
+      pageId: 2,
+      userId: 1,
+      username: 'zc',
+      action: 'page.create',
+      detail: 'in space 2',
+      now: NOW,
+    })
+    expect(db.listChangelog(1, 50).map((e) => e.detail)).toEqual(['in space 1'])
+    expect(db.listChangelog(2, 50).map((e) => e.detail)).toEqual(['in space 2'])
+    expect(db.listChangelog(3, 50)).toEqual([])
+    db.close()
+  })
+
+  it('persists entries across a reopen', () => {
+    const db = new Db(dbPath)
+    db.addChangelogEntry({
+      spaceId: 1,
+      pageId: 1,
+      userId: 1,
+      username: 'zc',
+      action: 'page.create',
+      detail: 'Page',
+      now: NOW,
+    })
+    db.close()
+    const reopened = new Db(dbPath)
+    expect(reopened.listChangelog(1, 10)).toHaveLength(1)
+    reopened.close()
+  })
+})
+
+describe('updatePageBody changelog attribution (throttled page.edit)', () => {
+  const mkPage = (db: Db): { pageId: number; spaceId: number } => {
+    const space = db.listSpaces()[0]
+    const page = db.createPage(space.id, null, 'Notes', 'zc', '2026-09-23T00:00:00.000Z')
+    return { pageId: page.id, spaceId: space.id }
+  }
+  const actor = { userId: 4, username: 'zc' }
+
+  it('writes exactly ONE page.edit entry for a burst of rapid saves (throttled)', () => {
+    const db = new Db(dbPath)
+    const { pageId, spaceId } = mkPage(db)
+    db.updatePageBody(pageId, 'v1', 'zc', '2026-09-23T00:01:00.000Z', actor)
+    db.updatePageBody(pageId, 'v2', 'zc', '2026-09-23T00:01:05.000Z', actor)
+    db.updatePageBody(pageId, 'v3', 'zc', '2026-09-23T00:01:20.000Z', actor)
+    const entries = db.listChangelog(spaceId, 50)
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      spaceId,
+      pageId,
+      userId: 4,
+      username: 'zc',
+      action: 'page.edit',
+      detail: 'Notes', // the page's title
+      createdAt: '2026-09-23T00:01:00.000Z',
+    })
+    expect(db.getPage(pageId)?.body).toBe('v3') // every save still lands
+    db.close()
+  })
+
+  it('writes another entry once the throttle window has passed', () => {
+    const db = new Db(dbPath)
+    const { pageId, spaceId } = mkPage(db)
+    db.updatePageBody(pageId, 'v1', 'zc', '2026-09-23T00:01:00.000Z', actor)
+    db.updatePageBody(pageId, 'v2', 'zc', '2026-09-23T00:01:29.000Z', actor) // inside 30s
+    expect(db.listChangelog(spaceId, 50)).toHaveLength(1)
+    db.updatePageBody(pageId, 'v3', 'zc', '2026-09-23T00:01:30.000Z', actor) // exactly 30s on
+    expect(db.listChangelog(spaceId, 50)).toHaveLength(2)
+    db.close()
+  })
+
+  it('throttles per page — a different page gets its own first entry immediately', () => {
+    const db = new Db(dbPath)
+    const space = db.listSpaces()[0]
+    const a = db.createPage(space.id, null, 'A', 'zc', '2026-09-23T00:00:00.000Z')
+    const b = db.createPage(space.id, null, 'B', 'zc', '2026-09-23T00:00:00.000Z')
+    db.updatePageBody(a.id, 'v1', 'zc', '2026-09-23T00:01:00.000Z', actor)
+    db.updatePageBody(b.id, 'v1', 'zc', '2026-09-23T00:01:01.000Z', actor)
+    expect(db.listChangelog(space.id, 50).map((e) => e.detail)).toEqual(['B', 'A'])
+    db.close()
+  })
+
+  it('WITHOUT an actor: no changelog entry, and the 30s revision throttle is unchanged', () => {
+    const db = new Db(dbPath)
+    const { pageId, spaceId } = mkPage(db)
+    db.updatePageBody(pageId, 'v1', 'zc', '2026-09-23T00:01:00.000Z')
+    expect(db.listPageRevisions(pageId)).toHaveLength(1) // first save always snapshots
+    db.updatePageBody(pageId, 'v2', 'zc', '2026-09-23T00:01:05.000Z') // inside the window
+    expect(db.listPageRevisions(pageId)).toHaveLength(1)
+    db.updatePageBody(pageId, 'v3', 'zc', '2026-09-23T00:01:31.000Z') // past the window
+    expect(db.listPageRevisions(pageId)).toHaveLength(2)
+    expect(db.listChangelog(spaceId, 50)).toEqual([]) // no attribution without an actor
+    db.close()
+  })
+
+  it('with an actor the revision throttle still behaves exactly as before', () => {
+    const db = new Db(dbPath)
+    const { pageId } = mkPage(db)
+    db.updatePageBody(pageId, 'v1', 'zc', '2026-09-23T00:01:00.000Z', actor)
+    expect(db.listPageRevisions(pageId)).toHaveLength(1)
+    db.updatePageBody(pageId, 'v2', 'zc', '2026-09-23T00:01:05.000Z', actor)
+    expect(db.listPageRevisions(pageId)).toHaveLength(1)
+    db.updatePageBody(pageId, 'v3', 'zc', '2026-09-23T00:01:31.000Z', actor)
+    expect(db.listPageRevisions(pageId)).toHaveLength(2)
+    db.close()
+  })
+
+  it('an unknown page id logs nothing and still returns undefined', () => {
+    const db = new Db(dbPath)
+    expect(db.updatePageBody(99999, 'x', 'zc', '2026-09-23T00:01:00.000Z', actor)).toBeUndefined()
+    expect(db.listChangelog(1, 50)).toEqual([])
+    db.close()
   })
 })

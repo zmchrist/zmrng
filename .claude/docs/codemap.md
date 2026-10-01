@@ -14,6 +14,12 @@ zmrng/
 │   │       ├── types.ts        — Task/Phase/WsEvent/usage/WorkspaceLayout/Attachment types (SOURCE OF TRUTH); also `ALLOWED_MEDIA_TYPES`/`MAX_ATTACHMENTS`/`MAX_ATTACHMENT_BYTES` consts for the image/PDF drop-paste feature; the security-gate types (`SecurityPolicy`/`SecurityFinding`/`SecurityStatus`/`SecurityScan`, Slice 1) + the `security` `EventKind` payload variant carrying the findings summary (Slice 2). NB: the scan is a `validating` sub-step — there is deliberately NO `'scanning'` TaskStatus (D6); the lane-viewer types (`LaneSubagent`/`LaneWorker`/`LaneChat`/`LaneTerminal`/`LaneOccupancy`/`LaneSnapshot`) + the `lanes` `WsEvent` variant, in-memory only, never persisted
 │   │       ├── lanes.ts        — `LaneSources` (read-only accessors over TaskManager/ChatManager/TerminalManager), pure `buildLaneSnapshot(sources, at)` assembling the `GET /api/lanes` + `lanes` WS payload, and `LaneEmitter` (coalesces a burst of `notify()` calls into one trailing build+broadcast; `snapshot()` builds immediately for the REST route / `/ws` connect frame; injectable `TimerFns`/delay/clock)
 │   │       ├── runner.ts       — spawn + parse the claude child (stream-json), strip API key; spawns `detached: true` (own process group) so `kill()`/`killGroupSync()` group-signal the WHOLE worker tree (claude + grandchildren) via `process.kill(-pid, …)` instead of the bare pid — otherwise grandchildren orphan to launchd on shutdown; `buildUserMessage(text, attachments?)` builds the multimodal stream-json user turn (image/document blocks before the text block), `sanitizeAttachments(raw)` is the tolerant allow-list/size/count guard shared by the REST routes and `/ws/chat`
+│   │       ├── password.ts     — password hashing ONLY (`hashPassword`/`verifyPassword`), over `node:crypto` scrypt (N=32768, r=8, p=1, 32-byte salt, 64-byte key) with a versioned `scrypt$N$r$p$salt$key` stored string. Deliberately scrypt and not argon2id (D3): argon2 is a node-gyp addon the Tauri sidecar bundler hand-vendors, and the versioned prefix makes a later swap a one-file change. `verifyPassword` never throws — a malformed/unknown-prefix stored hash is `false`. NB `scryptSync` needs an explicit raised `maxmem` at these parameters or it throws
+│   │       ├── session.ts      — pure session-token primitives, no DB: `newToken()` (32 random bytes, base64url), `hashToken()` (sha256 hex — the DB stores only this), `expiryFrom`, `isExpired` (fail-closed on garbage), `shouldRenew`, `SESSION_TTL_MS` (7d) + `SESSION_RENEW_BELOW_MS` (6d — the sliding window, so a fresh session causes no DB write per request)
+│   │       ├── auth.ts         — `AuthService` (login / logout / `resolve(authorization, cookie)` / `resolveSocketIdentity(cookie, helloToken)` / `sweep`), `LoginThrottle` (5 failures per `(username, IP)` per 15 min, in-memory), the cookie builders `sessionCookie`/`clearCookie` (`Secure` only over HTTPS or `ZMRNG_SECURE_COOKIES=1` — never unconditional, browsers DROP a Secure cookie on the VPS's plain-http origin), `parseCookieHeader`/`bearerToken`, and `PROTECTED_PREFIXES`/`isProtectedPath` — the single list of gated routes. An unknown username still runs a full scrypt verify against a dummy hash, so a miss costs what a hit costs
+│   │       ├── authRoutes.ts   — `registerAuth(app, deps)`: the `onRequest` gate (401s a gated path with no session; consults both the raw URL and the route Fastify matched) + `POST /api/auth/login` (sets the httpOnly cookie AND returns the token — two transports, D2), `POST /api/auth/logout`, `GET /api/auth/me`, plus `requireUser(req, reply)` for handlers. A PLAIN FUNCTION, not a `fastify-plugin` — an encapsulated plugin's hook would not cover the parent's routes — which also makes it registerable on a bare `Fastify()` and drivable with `app.inject()` in tests
+│   │       ├── kbRoutes.ts     — `registerKbRoutes(app, deps)`: the whole Knowledge Base REST surface (spaces/folders/pages/revisions CRUD + `GET /api/spaces/:id/changelog`), extracted from `index.ts` for the same testability reason as `authRoutes.ts`. Every write calls `requireUser` and attributes the page to the AUTHENTICATED user — a client-supplied `author` is ignored — and records a `kb_changelog` entry
+│   │       ├── cli/createUser.ts — the account-provisioning CLI (`npm run create-user`). No self-serve signup and no password-reset flow exist, so this is the only way an account is created; re-running it for an existing username RESETS that password (the documented recovery path). Arg parsing / `validatePassword` / `provisionUser` are exported separately from the `process.argv`+TTY entrypoint so tests drive the logic without executing the script
 │   │       ├── securityScan.ts — deterministic security-scan gate PURE core (Slice 1): tolerant `parseSemgrep`/`parseOsv` (never throw), `normalizeFindings` (merges SAST+SCA, captures transitive osv + fixAvailable), `evaluateThreshold(findings, policy) → { verdict, blocking }` (D1 block rule: semgrep ERROR+HIGH OR osv fixAvailable), `formatFindingsForAgent(blocking)` (stable byte-ordered report fed to the fix kickoff). No I/O — see `scanRunner.ts` for the injected process side
 │   │       ├── scanRunner.ts   — injected scan runner seam (Slice 2), mirrors runner.ts's RunnerFactory: `ScanRunnerFactory = (ScanRequest) => Promise<RawScanOutput>`, `defaultScanRunnerFactory` execFiles semgrep + osv-scanner offline/vendored (`--baseline-commit <merge-base>`, `--config <policy.semgrepConfig>`; D4), auto-provisions on first use (D5), throws `ScannerUnavailableError` when a binary is missing/unprovisionable (→ task `blocked`, distinct from a scan rejection → fail-closed red). `ScanRequest.sast` gates SAST: plan flow full SAST+SCA, direct flow SCA-only (D2). All tests inject a FakeScanRunner — the default factory is hand-verified post-merge (real binaries absent on dev)
 │   │       ├── terminal.ts     — TerminalManager: server-owned node-pty sessions (`Map<sessionId, TermSession>`, each recording `shell`/`cwd`/`startedAt` at spawn) for the Workspace terminal (GET /ws/terminal), strips API key under oauth. `attach(sessionId?, cb)` resolve-or-spawns (reattach cancels the grace timer + replays a bounded ring buffer; unknown/omitted id spawns fresh), `write`/`resize` route to the session's PTY, `detach(sessionId)` on socket close keeps the PTY alive and starts a grace timer (`config.terminalGraceMs`) instead of killing it — reaped only if nothing reattaches in time; `snapshot(): LaneTerminal[]` (lane viewer, `attached` derived from `cb !== null`) + an optional trailing `onChange` ctor arg firing on every session-set/attached change
@@ -29,6 +35,7 @@ zmrng/
 │           ├── api.ts          — REST client (incl. `listSecurityScans(id)`, mirrors `getEvents`; `getLanes()` → `GET /api/lanes`, the Lanes panel's boot load — live updates arrive as `lanes` WS frames)
 │           ├── useWs.ts        — auto-reconnect WebSocket hook
 │           ├── types.ts        — MANUAL MIRROR of server/src/types.ts (incl. GridCardId/GridDensity/GridCardStyle/GridInteraction/GridCardGeo/GridState + the `grid?: GridState` field on GlobalUiState — server round-trips it, never validates; also ChatTabMeta/TerminalTabMeta (TerminalTabMeta now carries an optional `sessionId` for terminal reattach) + the `chatTabs?`/`terminalTabs?` fields on GlobalUiState for the Chat/Terminal cards' per-card tab strips — same round-trip-only pattern; also LaneSubagent/LaneWorker/LaneChat/LaneTerminal/LaneOccupancy/LaneSnapshot + the `lanes` WsEvent variant, mirrored from the server for the Lanes panel)
+│           ├── auth.ts        — pure, React-free ORIGIN-KEYED session store (localStorage only): `loadSession`/`saveSession`/`clearSession`/`isSessionExpired`/`authHeaders(origin)`, plus `loginToOrigins(origins, username, password, post)`. Origin-keyed because a session is issued by ONE server and the desktop app talks to two (local sidecar for the KB, VPS for Team) — `loginToOrigins` dedupes the origin list and POSTs the same credentials to each in parallel, so the operator types their password once (D1). Partial failure still stores the origin that succeeded
 │           ├── status.ts       — statusColor() + actorColor() helpers (backed by --status-* / --actor-* tokens)
 │           ├── workspaceLayout.ts — pure reducer for the Workspace mode's per-task Zed-style tab-pane layout (emptyLayout/hydrateLayout/openFile/focusTab/closeTab/openPanel/moveTab/splitWith/setLogMinimized/pruneFileTabs/dropIntent); enforces panes.length ∈ {1,2} and a single split axis; still owned by WorkspaceView, now fed into the Viewers card
 │           ├── gridLayout.ts   — pure, React-free 12-column grid reducer + DOM-free geometry for the Workspace card grid (`COLS=12`, `defaultCards`/`CARD_IDS` 9-card seed, `collide`/`compact`, `applyMove`/`applyResize` under reflow|swap|free interaction modes, `hideCard`/`showCard`/`toggleMinimize`, `normalizeGrid`/`hydrateGrid` tolerant merge, `cellSize`/`cardRectPx`/`contentHeightPx`); geometry is in 12-col CELL units (screen-width-independent). Mirrors the pure-reducer style of workspaceLayout.ts / terminalDock.ts
@@ -75,15 +82,20 @@ zmrng/
 ## Team workspace (POC) — exposure precondition
 The optional **Team** mode tab connects to a VPS-hosted team-workspace server (the
 same server binary, run on a VPS) over ONE multiplexed WebSocket at
-`GET /ws/workspace`. Teammates self-assert a free-text display-name handle (no
-password, no verification — stored as a `members` row) and appear in a live,
-workspace-wide presence roster driven by connection lifecycle plus a periodic
-ping/pong heartbeat. The teammate's display-name handle is a per-user setting
-entered in the Team join form, persisted **server-side** in `zmrng.db` (the
-`settings` kv table, `WorkspaceSettings` = `{ teamHandle }`, read/written over
-`GET`/`PUT /api/settings`). It moved off browser `localStorage`, which was
-unreliable across refresh/app-reopen/rebuild in the desktop shell — the sidecar DB
-lives in the persistent per-user data dir, so the value survives all of those.
+`GET /ws/workspace`. Teammates **log in** (username/password — see the login
+section of `CLAUDE.md`) and appear in a live, workspace-wide presence roster driven
+by connection lifecycle plus a periodic ping/pong heartbeat. Their roster row is
+`members`, now keyed on `user_id` via `Db.memberForUser`, so the row is stable
+across reconnects and renames.
+
+The self-asserted free-text handle this surface used to run on is **gone**: `hello`
+carries no display name (only, for a cross-origin socket, a bearer token), and a
+`message`/`react`/`page.edit` frame that still asserts an `author`/`handle` is
+REJECTED rather than silently re-attributed. An unauthenticated socket is sent
+`{type:'unauthorized'}` and closed before it can read or persist anything.
+`settings.teamHandle` still exists in the schema and in `WorkspaceSettings`
+(migrations are additive-only, so it was not dropped) but nothing reads it any
+more.
 
 The **VPS URL is fixed in code**: `teamConfig.WORKSPACE_URL`
 (`http://100.92.187.96:4500`) alongside the pure `workspaceSocketUrl`/
@@ -138,16 +150,17 @@ message belongs to the channel, persists via the additive `reactions` table
 (`UNIQUE(message_id, handle, emoji)`), and fans the aggregated `{type:'reaction',
 reactions}` frame out to that channel's subscribers. `listMessages` attaches each
 message's aggregated reactions, so scrollback loads with them already applied. Reactor
-identity is the same self-asserted free-text `handle` as message authorship — no
-login/member-id. `TeamView` renders reaction-count pills under each bubble (human and
+identity is the socket's AUTHENTICATED user (its display name), exactly like message
+authorship — the `react` frame carries no handle to spoof. `TeamView` renders reaction-count pills under each bubble (human and
 agent messages alike): click a pill to toggle your own reaction, click the count for a
 "who reacted" popup, or open a curated emoji-picker grid (`emojiSet.ts`'s
 `REACTION_EMOJI`, a static ~40-emoji set — no picker library, no full-Unicode list).
 
-> **POC exposure precondition (Tailscale is the perimeter):** the VPS
+> **POC exposure precondition (Tailscale is still the perimeter):** the VPS
 > workspace port MUST be reachable **only over Tailscale** — firewall it to the
 > tailnet interface, or bind the server to the Tailscale IP. **Never expose it
-> publicly.** Because the handle is self-asserted with no verification, the
-> tailnet membership *is* the access control. This is an operational
-> precondition documented here **only** — there is deliberately **no app-code
-> gate, no server bind change, and no auth** in the T1 scope.
+> publicly.** There IS an app-code login gate now, so tailnet membership is no
+> longer the only access control — but the requirement is unchanged: the traffic
+> is plain HTTP, so credentials cross the network relying on the tailnet's own
+> encryption. TLS is the correct long-term fix and is out of scope. There is
+> still no server bind change in app code.
