@@ -105,6 +105,7 @@ packages/web/src/
   windowTabs.ts   — pure reducers for the Chat/Terminal grid cards' OWN per-card tab strips (each card owns an independent TabsState<T>, not a shared dock): emptyTabs/closeTab/setActiveTab/nextLabel/addTerminalTab/addChatTab/launchChatTab/setChatTabConfig/setChatTabLane/focusChatLane/focusTerminalSession/hydrateTerminalTabs/hydrateChatTabs. Terminal tabs auto-spawn their PTY on add; chat tabs start launched:false until Launch is pressed
   terminalProtocol.ts — pure wire helpers for /ws/terminal (encodeInput/encodeResize/parseServerMsg)
   chatProtocol.ts — pure wire helpers for /ws/chat (encodeStart/encodeInput/encodeInterrupt/parseChatServerMsg)
+  processStrip.ts — pure reducer for the running-process strip above the chat composers (applyProcess/endTurn/visibleRows/withTaskRows/formatElapsed/rowLabel, SLOW_TOOL_MS); rendered by components/ProcessStrip.tsx in ChatPane and WorkerLogPanel
   chatThread.ts   — React-free bubble-thread reducer for the standalone chat pane (emptyThread/pushUser/appendPartial/finalizeAssistant/pushToolNote/endTurn/resetThread)
   attachments.ts  — pure image/PDF drop-paste helpers (mimeToKind/validateFile/fileToAttachment/filesFromPaste/filesFromDrop), mirroring the server's allow-list/size limits
   mobileNav.ts    — pure phone-navigation model (MOBILE_VIEWS / MobileNavState / toggleDrawer / closeDrawer / selectView / modeForView / workspaceViewFor / viewForMode). Below the 768px phone breakpoint the Workspace split collapses to ONE full-screen view at a time, picked from the hamburger drawer
