@@ -652,7 +652,13 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   **`GET /api/lanes`** (→ `emitter.snapshot()`) — everything zmrng is running right now
   (Lanes panel); read-only and in-memory, built on demand from the three live-session
   managers, never persisted. Serves the client's initial load; the same payload streams
-  live as the `lanes` WS frame (see WS below).
+  live as the `lanes` WS frame (see WS below). The panel's per-row **Close** (inline
+  "Close?" confirm) maps to `POST /api/tasks/:id/close-lane` (`TaskManager.closeLane`:
+  kills the worker or dequeues it, parks the task `blocked`, frees the lane;
+  `restartAgent` accepts a lane-closed `blocked` task and restores its phase),
+  `POST /api/lanes/chat/:id/close` (`ChatManager.close`) and
+  `POST /api/lanes/terminal/:id/close` (`TerminalManager.close`); the web then closes
+  the owning chat/terminal tab. Subagent rows have no Close.
   `GET`/`PUT /api/settings` returns/patches the durable per-user `WorkspaceSettings`
   (`{ teamHandle }`) persisted in `zmrng.db` (the `settings` kv table) — the Team
   display-name handle moved here from browser `localStorage`, which was unreliable
