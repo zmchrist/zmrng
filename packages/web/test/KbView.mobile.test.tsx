@@ -38,7 +38,7 @@ afterEach(() => {
 })
 
 async function renderKb() {
-  const r = render(<KbView teamHandle="Ada" onHandleChange={() => {}} active={false} />)
+  const r = render(<KbView user={{ id: 1, username: 'ada', displayName: 'Ada' }} onLogout={() => {}} active={false} />)
   await screen.findByRole('button', { name: 'general' })
   await waitFor(() => expect(getSpaceTree).toHaveBeenCalled())
   return r

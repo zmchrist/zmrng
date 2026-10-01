@@ -419,3 +419,10 @@ non-obvious root cause, or is likely to recur. Template in
   unbounded allocation.
 - **Files:** `packages/server/src/password.ts`
 - **Date Found:** 2026-09-23
+
+### Web tests: "join is not a function" under a production shell
+- **Error:** `TypeError: join is not a function` in `focusRingGuard.test.ts` (any named import from `node:path`/`node:fs` in a web test).
+- **Cause:** Vite reads the node-env variable while resolving the config, before vitest's `test.env` applies. With it set to `production` in the parent shell (VPS/cora orchestrator, stop hook), Node builtins are stubbed as browser-external and expose only `default`.
+- **Solution:** `packages/web/vitest.config.ts` now pins it to `test` at the top. This unmasked a real violation: `LoginPane.module.css` `.input:focus` had `outline: none`.
+- **Files:** `packages/web/vitest.config.ts`, `packages/web/src/components/LoginPane.module.css`
+- **Date Found:** 2026-10-01
