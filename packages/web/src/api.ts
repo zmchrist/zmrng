@@ -99,7 +99,7 @@ export function isAuthError(err: unknown): err is AuthError {
  * Is `origin` this page's own origin? `''` (the same-origin default every
  * non-Team call uses) always is. Decides the credential mode below.
  */
-function isSameOrigin(origin: string): boolean {
+export function isSameOrigin(origin: string): boolean {
   const target = origin.trim().replace(/\/+$/, '')
   if (target === '') return true
   if (typeof location === 'undefined') return false

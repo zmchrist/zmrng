@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent } from 'react'
 import styles from './LoginPane.module.css'
+import { isSameOrigin } from '../api'
 import { loginToOrigins, type LoginPost, type OriginLoginResult } from '../auth'
 import type { LoginRequest, LoginResponse } from '../types'
 
@@ -48,6 +49,11 @@ async function readError(res: Response): Promise<string> {
  * response set the httpOnly `zmrng_session` cookie; the returned body token is
  * what the cross-origin desktop→VPS path stores and sends as a bearer header,
  * since a `SameSite=Strict` cookie can never make that trip (D2).
+ *
+ * Cross-origin MUST use `'omit'`: the server reflects arbitrary origins and so
+ * never sends `access-control-allow-credentials`, which makes the browser
+ * discard a credentialed cross-origin response (Safari: "Load failed") even
+ * though the server accepted the login. Same rule as `send()` in `api.ts`.
  */
 const defaultPost: LoginPost = async (
   origin: string,
@@ -56,7 +62,7 @@ const defaultPost: LoginPost = async (
   const res = await fetch(`${origin}/api/auth/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    credentials: 'include',
+    credentials: isSameOrigin(origin) ? 'include' : 'omit',
     body: JSON.stringify(credentials),
   })
   if (!res.ok) throw new Error(await readError(res))
