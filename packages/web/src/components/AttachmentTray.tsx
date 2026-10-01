@@ -1,4 +1,5 @@
 import styles from './AttachmentTray.module.css'
+import { NavIcon } from './NavIcon'
 import type { Attachment } from '../types'
 
 interface Props {
@@ -42,7 +43,7 @@ export function AttachmentTray({ attachments, onRemove, error }: Props) {
                 aria-label={`Remove ${a.name ?? 'attachment'}`}
                 onClick={() => onRemove(i)}
               >
-                ×
+                <NavIcon name="close" />
               </button>
             </li>
           ))}

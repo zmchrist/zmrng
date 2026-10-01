@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { NavIcon } from './NavIcon'
 import styles from './UpdateBanner.module.css'
 import { api } from '../api'
 import type { Task } from '../types'
@@ -95,7 +96,7 @@ export function UpdateBanner({ tasks, connected, onDismiss }: Props) {
         {busy ? 'Updating…' : confirming ? 'Update anyway' : 'Update'}
       </button>
       <button type="button" className={styles.dismiss} onClick={onDismiss} aria-label="Dismiss">
-        ×
+        <NavIcon name="close" />
       </button>
     </div>
   )

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { NavIcon } from './NavIcon'
 import styles from './ChatPane.module.css'
 import { actorColor } from '../status'
 import { encodeInput, encodeInterrupt, encodeStart, parseChatServerMsg } from '../chatProtocol'
@@ -312,7 +313,7 @@ export function ChatPane({
         </div>
         {hasNew && (
           <button type="button" className={styles.newMsgPill} onClick={scrollToBottom}>
-            ↓ New message
+            <NavIcon name="arrow-down" /> New message
           </button>
         )}
       </div>

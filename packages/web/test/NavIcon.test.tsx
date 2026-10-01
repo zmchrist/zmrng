@@ -12,6 +12,17 @@ const NAMES: NavIconName[] = [
   'terminal',
   'chat',
   'lanes',
+  'smile',
+  'close',
+  'plus',
+  'grip',
+  'chevron-right',
+  'chevron-down',
+  'refresh',
+  'arrow-down',
+  'minus',
+  'square',
+  'tool',
 ]
 
 describe('<NavIcon>', () => {
