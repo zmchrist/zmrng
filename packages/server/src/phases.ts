@@ -736,6 +736,8 @@ export class TaskManager {
       subagents: [],
     }
     this.workerMeta.set(task.id, meta)
+    // A fresh worker owns nothing yet — drop any rows left by a replaced one.
+    this.broadcast({ type: 'process', taskId: task.id, event: { phase: 'reset' } })
     const runner = this.runnerFactory(
       {
         cwd,
@@ -771,6 +773,7 @@ export class TaskManager {
           })
           this.finishSubagent(meta, subagentType, summary, isError)
         },
+        onProcess: (event) => this.broadcast({ type: 'process', taskId: task.id, event }),
         onExit: (code) => this.onExit(task.id, code),
         onSpawnError: (err) => {
           this.fail(task.id, `failed to spawn claude: ${err.message}`)
@@ -1282,6 +1285,7 @@ export class TaskManager {
     if (this.replacing.delete(taskId)) return
     this.runners.delete(taskId)
     this.workerMeta.delete(taskId)
+    this.broadcast({ type: 'process', taskId, event: { phase: 'reset' } })
     this.onLanesChange()
     const task = this.db.getTask(taskId)
     if (!task) return

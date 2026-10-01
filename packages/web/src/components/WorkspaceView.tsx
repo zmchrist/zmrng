@@ -35,6 +35,7 @@ import {
 import type { LaneTarget } from '../laneRows'
 import type { HandoffPrefill } from '../teamHandoff'
 import type { SecurityScan } from '../types'
+import type { ProcRow } from '../processStrip'
 import type { MobileWorkspaceView } from '../mobileNav'
 import { TASKS_PANEL_KEY } from '../mobileTaskPanel'
 import { usePanelSplit } from '../usePanelSplit'
@@ -55,6 +56,8 @@ interface Props {
   events: TaskEvent[]
   /** Persisted security-scan rounds for the selected task (Security panel). */
   securityScans: SecurityScan[]
+  /** Running-process strip rows for the selected task's worker. */
+  processes?: ProcRow[]
   live: string
   tasks: Task[]
   /** Live snapshot of everything zmrng is running (Lanes tab); `null` until the
@@ -123,6 +126,7 @@ export function WorkspaceView({
   task,
   events,
   securityScans,
+  processes,
   live,
   tasks,
   lanes,
@@ -315,6 +319,7 @@ export function WorkspaceView({
               events={events}
               live={live}
               status={status}
+              processes={processes}
               stale={task?.stale}
               onMessage={task ? onMessage : undefined}
             />

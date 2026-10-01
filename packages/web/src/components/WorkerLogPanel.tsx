@@ -4,6 +4,8 @@ import type { Attachment, TaskEvent, TaskStatus } from '../types'
 import { WorkerLog } from './WorkerLog'
 import { ClarifyChat } from './ClarifyChat'
 import { LIVE_STATUSES } from '../status'
+import { ProcessStrip } from './ProcessStrip'
+import type { ProcRow } from '../processStrip'
 
 interface Props {
   events: TaskEvent[]
@@ -15,12 +17,14 @@ interface Props {
   /** True when the worker session was lost to an app restart. Shows a
    *  session-ended notice and disables the composer up front. */
   stale?: boolean
+  /** What the worker is running right now, shown in a strip above the composer. */
+  processes?: ProcRow[]
 }
 
 /** Worker-Log panel: the read-only transcript plus, while the task is in a live
  *  phase, an inline composer that steers the running worker — the same channel
  *  the Tasks-page composer used, now living inside the Workspace log tab. */
-export function WorkerLogPanel({ events, live, status, onMessage, stale }: Props) {
+export function WorkerLogPanel({ events, live, status, onMessage, stale, processes }: Props) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -51,6 +55,7 @@ export function WorkerLogPanel({ events, live, status, onMessage, stale }: Props
   return (
     <div className={styles.panel}>
       <WorkerLog events={events} live={live} thinking={thinking} />
+      {processes && <ProcessStrip rows={processes} />}
       {stale && inLivePhase && (
         <div className={styles.staleNotice}>
           Worker session ended after an app restart — press “Restart agent” in the task

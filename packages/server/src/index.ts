@@ -910,6 +910,7 @@ app.get('/ws/chat', { websocket: true }, (socket: WebSocket) => {
           // Subagent results are intentionally not forwarded — keep the thread
           // to the agent's own turns, tools, and big decisions only.
           onSubagentResult: () => {},
+          onProcess: (event) => send({ type: 'process', event }),
           onResult: (_text, isError) => send({ type: 'result', isError }),
           onExit: (code) => {
             send({ type: 'exit', code })

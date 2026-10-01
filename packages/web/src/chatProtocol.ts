@@ -3,7 +3,15 @@
 // produce exactly the frames the server's `parseChatClientMsg` accepts;
 // `parseChatServerMsg` is a tolerant guard over the server -> client frames.
 
-import type { Attachment, CaveStyle, ChatServerMsg, EffortLevel, WorkflowPreset } from './types'
+import type {
+  Attachment,
+  CaveStyle,
+  ChatServerMsg,
+  EffortLevel,
+  ProcessEvent,
+  ProcessKind,
+  WorkflowPreset,
+} from './types'
 
 /**
  * Encode a client `start` frame — (re)spawn a session with the chosen controls.
@@ -90,7 +98,40 @@ export function parseChatServerMsg(raw: string): ChatServerMsg | undefined {
         : undefined
     case 'error':
       return typeof obj.text === 'string' ? { type: 'error', text: obj.text } : undefined
+    case 'process': {
+      const event = parseProcessEvent(obj.event)
+      return event ? { type: 'process', event } : undefined
+    }
     default:
       return undefined
   }
+}
+
+const PROCESS_KINDS = new Set(['subagent', 'background', 'tool'])
+
+/** Tolerant guard for a `process` frame's `ProcessEvent` payload. */
+export function parseProcessEvent(v: unknown): ProcessEvent | undefined {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
+  const e = v as Record<string, unknown>
+  if (e.phase === 'reset') return { phase: 'reset' }
+  if (typeof e.id !== 'string') return undefined
+  if (e.phase === 'end') {
+    return typeof e.isError === 'boolean' ? { phase: 'end', id: e.id, isError: e.isError } : undefined
+  }
+  if (
+    e.phase === 'start' &&
+    typeof e.kind === 'string' &&
+    PROCESS_KINDS.has(e.kind) &&
+    typeof e.name === 'string' &&
+    typeof e.summary === 'string'
+  ) {
+    return {
+      phase: 'start',
+      id: e.id,
+      kind: e.kind as ProcessKind,
+      name: e.name,
+      summary: e.summary,
+    }
+  }
+  return undefined
 }

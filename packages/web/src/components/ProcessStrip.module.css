@@ -1,0 +1,110 @@
+/* Running-process strip pinned above a chat composer. Frosted-glass tokens only. */
+.strip {
+  list-style: none;
+  margin: 0;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 160px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 4px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--status-executing);
+}
+
+.row[data-status='running'] .dot {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.row[data-status='done'] .dot {
+  background: var(--status-done);
+}
+
+.row[data-status='failed'] .dot {
+  background: var(--status-failed);
+}
+
+.name {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.row[data-status='failed'] .status {
+  color: var(--status-failed);
+}
+
+.elapsed {
+  flex: none;
+  min-width: 4.5em;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row[data-status='running'] .dot {
+    animation: none;
+  }
+}
+
+/* Phones: roomier rows, and the summary drops to its own line so nothing
+   scrolls sideways on a narrow viewport. */
+@media (max-width: 768px) {
+  .row {
+    flex-wrap: wrap;
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  .summary {
+    order: 5;
+    flex-basis: 100%;
+    padding-left: 15px;
+  }
+}

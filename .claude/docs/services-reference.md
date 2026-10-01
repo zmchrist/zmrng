@@ -54,7 +54,17 @@ Wraps one long-lived headless `claude` child process per task.
   with the server even when the 2s force-exit beats the async 5s escalation. Exposed as an
   optional method on the `RunnerLike` seam (test doubles may omit it).
 - **`pendingTasks`** — bounded `Map<tool_use_id, subagent_type>`; prunes on result; capped at 200 entries (oldest evicted) to prevent unbounded growth.
-- Callbacks: `onSession`, `onAssistantText`, `onPartial`, `onResult`, `onToolUse(name, summary, isSubagent, subagentType?)`, `onSubagentResult(subagentType, summary, isError)`, `onExit`, `onSpawnError`.
+- Callbacks: `onSession`, `onAssistantText`, `onPartial`, `onResult`, `onToolUse(name, summary, isSubagent, subagentType?)`, `onSubagentResult(subagentType, summary, isError)`, optional `onProcess(ProcessEvent)`, `onExit`, `onSpawnError`.
+- **`ProcessTracker`** (pure, exported) — feeds `onProcess` for the running-process strip.
+  Pairs every main-agent `tool_use` with its `tool_result` by id and emits
+  `ProcessEvent`s (`start {id, kind: subagent|background|tool, name, summary}` /
+  `end {id, isError}`); subagent-internal calls (`parent_tool_use_id`) are skipped. A
+  `Bash` with `run_in_background` stays running past its immediate result (shell id parsed
+  from `…background with ID: <id>`) until a `KillShell`/`KillBash`/`TaskStop`, a
+  `BashOutput`/`TaskOutput` poll reporting a final `<status>`, or a `system` line with a
+  terminal `status` ends it. Both maps are bounded at 200. `phases.ts` broadcasts each as
+  `WsEvent {type:'process', taskId, event}` (plus a `reset` on worker spawn/exit); the
+  `/ws/chat` route forwards it as `ChatServerMsg {type:'process', event}`. In-memory only.
 - Helpers `asRecord` / `asString` keep parsing typed without `any`. `summarizeTool(name, input)` and `summarizeResult(content)` produce compact one-line summaries.
 
 ### Multimodal attachments (operator image/PDF drop/paste)
@@ -859,6 +869,14 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `clear()`, `error`, and ready-to-spread `onPaste`/`onDrop` handlers (each calls
   `e.preventDefault()` only when it actually found files, so normal text paste/drop is
   untouched).
+- **processStrip.ts** + **components/ProcessStrip.tsx** — the running-process strip pinned
+  above the chat composers (`ChatPane`, and `WorkerLogPanel` above its `ClarifyChat`).
+  Pure reducer: `applyProcess(rows, event, now)` (timing stamped on receipt), `endTurn`
+  (on a `result`, only still-running background shells survive), `visibleRows` (subagents
+  and background shells always; other tools only after `SLOW_TOOL_MS` = 2s, so fast
+  Read/Edit/Grep never flicker), `withTaskRows` (App keeps a per-task map), and
+  `formatElapsed`/`rowLabel`. Rows show name, summary, status, live elapsed (1s tick while
+  any row exists); read-only — the turn-level Stop is the only control. Hidden when empty.
 - **chatThread.ts** — pure, React-free reducer for the chat bubble thread, `ThreadState {
   items: ThreadItem[]; busy: boolean }` (`ThreadItem` is a `user` bubble, a `agent` bubble
   with a `streaming` flag, or a slim `tool` note). `emptyThread()`, `pushUser(state, text)`

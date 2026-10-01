@@ -606,6 +606,26 @@ export interface LaneSnapshot {
   terminals: LaneTerminal[]
 }
 
+// ---- running-process strip (live, in-memory, never persisted) -------------
+
+/**
+ * What a running-process row represents: a subagent (Task/Agent call), a
+ * background shell (`Bash` with `run_in_background`), or any other foreground
+ * tool call (the client shows those only once they turn slow).
+ */
+export type ProcessKind = 'subagent' | 'background' | 'tool'
+
+/**
+ * One lifecycle change of something the agent is running, derived from the
+ * stream-json `tool_use`/`tool_result` pairing (keyed by `tool_use_id`).
+ * `reset` drops every row — sent when the worker process is (re)spawned or exits.
+ * Timing is stamped client-side on receipt, so no server clock crosses the wire.
+ */
+export type ProcessEvent =
+  | { phase: 'start'; id: string; kind: ProcessKind; name: string; summary: string }
+  | { phase: 'end'; id: string; isError: boolean }
+  | { phase: 'reset' }
+
 export type WsEvent =
   | { type: 'snapshot'; tasks: Task[] }
   | { type: 'task'; task: Task }
@@ -614,6 +634,8 @@ export type WsEvent =
   | { type: 'task-removed'; taskId: string }
   /** live lane/session snapshot (Lanes panel); in-memory only, never persisted */
   | { type: 'lanes'; snapshot: LaneSnapshot }
+  /** running-process strip update for a task's worker; in-memory only, never persisted */
+  | { type: 'process'; taskId: string; event: ProcessEvent }
 
 // ---- terminal (bottom-dock PTY) --------------------------------------------
 
@@ -674,6 +696,8 @@ export type ChatServerMsg =
   | { type: 'result'; isError: boolean }
   | { type: 'exit'; code: number | null }
   | { type: 'error'; text: string }
+  /** running-process strip update (see `ProcessEvent`) */
+  | { type: 'process'; event: ProcessEvent }
 
 // ---- team workspace (multiplexed presence socket, GET /ws/workspace) -------
 
