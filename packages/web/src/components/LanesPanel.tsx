@@ -24,6 +24,8 @@ interface Props {
   active: boolean
   /** A row was clicked (or activated from the keyboard): jump to what it is. */
   onOpen?: (target: LaneTarget) => void
+  /** The operator confirmed closing a row: kill its process / dequeue it. */
+  onClose?: (target: LaneTarget) => void | Promise<void>
 }
 
 /** What a row reports as "tokens": the billed in+out totals, cache excluded. */
@@ -34,8 +36,44 @@ function tokens(usage: TaskUsage): string {
 type Open = (target: LaneTarget) => void
 const noop: Open = () => {}
 
+/** Close button with an inline "Close?" confirm step; nothing is killed until confirmed. */
+function CloseButton({ target, onClose, label }: { target: LaneTarget; onClose: Open; label: string }) {
+  const [confirming, setConfirming] = useState(false)
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        className={styles.closeBtn}
+        aria-label={`Close ${label}`}
+        onClick={() => setConfirming(true)}
+      >
+        Close
+      </button>
+    )
+  }
+  return (
+    <span className={styles.confirm} role="group" aria-label={`Confirm close ${label}`}>
+      <span className={styles.note}>Close?</span>
+      <button
+        type="button"
+        className={styles.closeBtn}
+        aria-label={`Confirm close ${label}`}
+        onClick={() => {
+          setConfirming(false)
+          onClose(target)
+        }}
+      >
+        Yes
+      </button>
+      <button type="button" className={styles.closeBtn} aria-label="Cancel close" onClick={() => setConfirming(false)}>
+        No
+      </button>
+    </span>
+  )
+}
+
 /** One task worker plus its subagent child rows, indented beneath it. */
-function Worker({ row, now, onOpen }: { row: WorkerRow; now: number; onOpen: Open }) {
+function Worker({ row, now, onOpen, onClose }: { row: WorkerRow; now: number; onOpen: Open; onClose: Open }) {
   const open = (): void => onOpen({ kind: 'task', taskId: row.taskId })
   return (
     <li className={styles.row}>
@@ -51,6 +89,7 @@ function Worker({ row, now, onOpen }: { row: WorkerRow; now: number; onOpen: Ope
         <span className={styles.tokens}>{tokens(row.usage)} tok</span>
         <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
       </button>
+      <CloseButton target={{ kind: 'task', taskId: row.taskId }} onClose={onClose} label={row.title} />
       {row.subagents.length > 0 && (
         <ul className={styles.subagents}>
           {row.subagents.map((s) => (
@@ -74,7 +113,7 @@ function Worker({ row, now, onOpen }: { row: WorkerRow; now: number; onOpen: Ope
 
 /** One standalone chat session. Labeled `chat` — it belongs to no task, so there
  *  is deliberately no title column to fill. */
-function Chat({ row, now, onOpen }: { row: ChatRow; now: number; onOpen: Open }) {
+function Chat({ row, now, onOpen, onClose }: { row: ChatRow; now: number; onOpen: Open; onClose: Open }) {
   return (
     <li className={styles.row}>
       <button
@@ -91,6 +130,7 @@ function Chat({ row, now, onOpen }: { row: ChatRow; now: number; onOpen: Open })
         <span className={styles.tokens}>{tokens(row.usage)} tok</span>
         <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
       </button>
+      <CloseButton target={{ kind: 'chat', laneId: row.id }} onClose={onClose} label="chat" />
     </li>
   )
 }
@@ -104,7 +144,7 @@ function Chat({ row, now, onOpen }: { row: ChatRow; now: number; onOpen: Open })
  * elapsed-time tick. Every row is a button reporting a `LaneTarget` through
  * `onOpen`; the caller decides where that lands.
  */
-export function LanesPanel({ snapshot, tasks, repos, active, onOpen = noop }: Props) {
+export function LanesPanel({ snapshot, tasks, repos, active, onOpen = noop, onClose = noop }: Props) {
   const [now, setNow] = useState(() => Date.now())
 
   // Only a visible panel pays for the tick; going inactive clears it, as does
@@ -141,7 +181,7 @@ export function LanesPanel({ snapshot, tasks, repos, active, onOpen = noop }: Pr
         {rows.lanes.length > 0 && (
           <ul className={styles.rows}>
             {rows.lanes.map((row) => (
-              <Worker key={row.taskId} row={row} now={now} onOpen={onOpen} />
+              <Worker key={row.taskId} row={row} now={now} onOpen={onOpen} onClose={onClose} />
             ))}
           </ul>
         )}
@@ -160,6 +200,7 @@ export function LanesPanel({ snapshot, tasks, repos, active, onOpen = noop }: Pr
                     <span className={styles.title}>{q.title}</span>
                     <span className={styles.repo}>{q.repoLabel}</span>
                   </button>
+                  <CloseButton target={{ kind: 'task', taskId: q.taskId }} onClose={onClose} label={q.title} />
                 </li>
               ))}
             </ul>
@@ -175,7 +216,7 @@ export function LanesPanel({ snapshot, tasks, repos, active, onOpen = noop }: Pr
           </div>
           <ul className={styles.rows}>
             {rows.clarify.map((row) => (
-              <Worker key={row.taskId} row={row} now={now} onOpen={onOpen} />
+              <Worker key={row.taskId} row={row} now={now} onOpen={onOpen} onClose={onClose} />
             ))}
           </ul>
         </div>
@@ -189,7 +230,7 @@ export function LanesPanel({ snapshot, tasks, repos, active, onOpen = noop }: Pr
           </div>
           <ul className={styles.rows}>
             {rows.chats.map((row) => (
-              <Chat key={row.id} row={row} now={now} onOpen={onOpen} />
+              <Chat key={row.id} row={row} now={now} onOpen={onOpen} onClose={onClose} />
             ))}
           </ul>
         </div>
@@ -215,6 +256,7 @@ export function LanesPanel({ snapshot, tasks, repos, active, onOpen = noop }: Pr
                   {!row.attached && <span className={styles.note}>detached</span>}
                   <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
                 </button>
+                <CloseButton target={{ kind: 'terminal', sessionId: row.id }} onClose={onClose} label="terminal" />
               </li>
             ))}
           </ul>

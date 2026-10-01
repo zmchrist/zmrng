@@ -103,6 +103,24 @@ describe('<LanesPanel>', () => {
     expect(screen.getByText(/1,540/)).toBeInTheDocument()
   })
 
+  it('Close asks for confirmation first and only reports the target once confirmed', () => {
+    const onClose = vi.fn()
+    render(<LanesPanel snapshot={WORKER_SNAPSHOT} tasks={TASKS} repos={REPOS} active onClose={onClose} />)
+    fireEvent.click(screen.getByLabelText('Close Task One'))
+    expect(onClose).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByLabelText('Cancel close'))
+    expect(screen.queryByText('Close?')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Close Task One'))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm close Task One' }))
+    expect(onClose).toHaveBeenCalledWith({ kind: 'task', taskId: 't1' })
+  })
+
+  it('queued rows get a Close button; subagent rows do not', () => {
+    render(<LanesPanel snapshot={WORKER_SNAPSHOT} tasks={TASKS} repos={REPOS} active />)
+    expect(screen.getByLabelText('Close Task Two')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^Close / })).toHaveLength(2)
+  })
+
   it('renders the queued tasks in promotion order under the lane header', () => {
     render(<LanesPanel snapshot={WORKER_SNAPSHOT} tasks={TASKS} repos={REPOS} active />)
     expect(screen.getByText(/queued/i)).toBeInTheDocument()

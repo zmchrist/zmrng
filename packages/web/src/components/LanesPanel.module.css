@@ -213,3 +213,41 @@
   outline: 2px solid var(--focus-color);
   outline-offset: 2px;
 }
+
+.closeBtn {
+  align-self: flex-end;
+  min-height: 1.6rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.closeBtn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.closeBtn:focus-visible {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+.confirm {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 0.35rem;
+}
+
+@media (max-width: 768px) {
+  .closeBtn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
