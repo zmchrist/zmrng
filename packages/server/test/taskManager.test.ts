@@ -337,6 +337,50 @@ describe('TaskManager state machine (fake runner, real temp git repo)', () => {
     expect(status(id)).toBe('executing') // NOT 'failed'
   })
 
+  it('closeLane() kills a live worker, parks it blocked, frees the lane for the queue, and restartAgent restores the phase', async () => {
+    config.maxLanes = 1
+    const a = await startTask('task A')
+    latest().say('ZMRNG_READY')
+    const raPlan = latest()
+    const b = await startTask('task B')
+    latest().say('ZMRNG_READY') // B queued
+    expect(db.getTask(b)!.queued).toBe(true)
+    const before = created.length
+
+    mgr.closeLane(a)
+    expect(raPlan.killed).toBe(true)
+    expect(status(a)).toBe('blocked')
+    expect(mgr.laneSnapshot().workers.some((w) => w.taskId === a)).toBe(false)
+    // A's lane was freed: B left the queue and a plan child spawned.
+    expect(db.getTask(b)!.queued).toBe(false)
+    expect(created.length).toBe(before + 1)
+
+    // A is resumable: restartAgent restores `planning` (queued behind B's lane).
+    await mgr.restartAgent(a)
+    expect(status(a)).toBe('planning')
+  })
+
+  it('closeLane() on a queued task dequeues it and parks it blocked', async () => {
+    config.maxLanes = 1
+    await startTask('task A')
+    latest().say('ZMRNG_READY')
+    const b = await startTask('task B')
+    latest().say('ZMRNG_READY')
+    expect(db.getTask(b)!.queued).toBe(true)
+
+    mgr.closeLane(b)
+    expect(status(b)).toBe('blocked')
+    expect(db.getTask(b)!.queued).toBe(false)
+    expect(mgr.laneSnapshot().execute.queued).not.toContain(b)
+  })
+
+  it('closeLane() rejects a task with no lane to close', async () => {
+    const id = await startTask()
+    mgr.cancel(id)
+    await flush()
+    expect(() => mgr.closeLane(id)).toThrow()
+  })
+
   it('WITHOUT interrupt, an errored execute turn with no PR fails the task', async () => {
     const id = await startTask()
     latest().say('ZMRNG_READY')

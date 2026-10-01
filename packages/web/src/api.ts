@@ -322,6 +322,12 @@ export const api = {
     req<{ ok: true }>(`/api/tasks/${id}/restart`, { method: 'POST' }),
   interrupt: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/interrupt`, { method: 'POST' }),
+  closeTaskLane: (id: string) =>
+    req<{ ok: true }>(`/api/tasks/${id}/close-lane`, { method: 'POST' }),
+  closeChatLane: (id: string) =>
+    req<{ ok: true }>(`/api/lanes/chat/${encodeURIComponent(id)}/close`, { method: 'POST' }),
+  closeTerminalLane: (id: string) =>
+    req<{ ok: true }>(`/api/lanes/terminal/${encodeURIComponent(id)}/close`, { method: 'POST' }),
   done: (id: string) =>
     req<{ ok: true }>(`/api/tasks/${id}/done`, { method: 'POST' }),
   cancel: (id: string) =>
