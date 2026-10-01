@@ -11,39 +11,7 @@
   font-family: var(--font);
 }
 
-/* ---- join state — centered within the card body ---- */
-
-.join {
-  margin: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 420px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  backdrop-filter: var(--glass);
-  -webkit-backdrop-filter: var(--glass);
-}
-
-.joinLabel {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.joinHint {
-  font-size: 13px;
-  color: var(--text-dim);
-  margin: 0;
-}
-
-.joinRow {
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
-}
+/* ---- shared form controls (create-channel + composer) ---- */
 
 .input {
   flex: 1;
@@ -62,8 +30,8 @@
   border-color: var(--accent-line);
 }
 
-.joinBtn,
-.leaveBtn {
+.primaryBtn,
+.logoutBtn {
   padding: 8px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -75,26 +43,26 @@
   transition: border-color var(--transition), background var(--transition);
 }
 
-.joinBtn {
+.primaryBtn {
   background: var(--accent-grad);
   color: var(--accent-ink);
   font-weight: 600;
   border-color: transparent;
 }
 
-.joinBtn:disabled {
+.primaryBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.leaveBtn {
+.logoutBtn {
   padding: 4px 10px;
   font-size: 12px;
   background: transparent;
   color: var(--text-dim);
 }
 
-.leaveBtn:hover {
+.logoutBtn:hover {
   border-color: var(--accent-line);
   color: var(--text);
 }
@@ -102,7 +70,7 @@
 /* ---- connected header ---- */
 
 /* Compact team header strip inside the mode card (below App's persistent
-   title bar): shows the handle + change-name, seamless border-bottom. */
+   title bar): shows who you are signed in as + log out, seamless border-bottom. */
 .teamHead {
   flex: none;
   display: flex;

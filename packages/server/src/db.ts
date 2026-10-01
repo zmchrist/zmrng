@@ -26,6 +26,10 @@ import type {
   KbPage,
   KbPageRevision,
   KbTreeNode,
+  User,
+  Session,
+  KbChangeAction,
+  KbChangeEntry,
 } from './types.js'
 import { GENERAL_CHANNEL_NAME, KB_SEED_SPACES } from './types.js'
 
@@ -93,6 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_task ON chat_messages(task_id, agen
 CREATE TABLE IF NOT EXISTS members (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   display_name TEXT NOT NULL,
+  user_id INTEGER,
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS channels (
@@ -169,6 +174,33 @@ CREATE TABLE IF NOT EXISTS page_revisions (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_page_revisions_page ON page_revisions(page_id, id);
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS kb_changelog (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  space_id INTEGER NOT NULL,
+  page_id INTEGER,
+  user_id INTEGER,
+  username TEXT NOT NULL,
+  action TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kb_changelog_space ON kb_changelog(space_id, id);
 `
 
 interface TaskRow {
@@ -238,6 +270,7 @@ interface ChatMessageRow {
 interface MemberRow {
   id: number
   display_name: string
+  user_id: number | null
   created_at: string
 }
 
@@ -346,6 +379,8 @@ function rowToMember(r: MemberRow): Member {
   return {
     id: r.id,
     displayName: r.display_name,
+    // Legacy handle-only rows predate the column and read back as null.
+    userId: r.user_id ?? null,
     createdAt: r.created_at,
   }
 }
@@ -471,6 +506,70 @@ function rowToPageRevision(r: PageRevisionRow): KbPageRevision {
   }
 }
 
+// ---- auth row interfaces + mappers (users / sessions / kb_changelog) ----
+
+interface UserRow {
+  id: number
+  username: string
+  display_name: string
+  password_hash: string
+  created_at: string
+  updated_at: string
+}
+
+interface SessionRow {
+  id: number
+  user_id: number
+  token_hash: string
+  created_at: string
+  expires_at: string
+}
+
+interface ChangelogRow {
+  id: number
+  space_id: number
+  page_id: number | null
+  user_id: number | null
+  username: string
+  action: string
+  detail: string
+  created_at: string
+}
+
+function rowToUser(r: UserRow): User {
+  return {
+    id: r.id,
+    username: r.username,
+    displayName: r.display_name,
+    passwordHash: r.password_hash,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+function rowToSession(r: SessionRow): Session {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    tokenHash: r.token_hash,
+    createdAt: r.created_at,
+    expiresAt: r.expires_at,
+  }
+}
+
+function rowToChangelogEntry(r: ChangelogRow): KbChangeEntry {
+  return {
+    id: r.id,
+    spaceId: r.space_id,
+    pageId: r.page_id ?? null,
+    userId: r.user_id ?? null,
+    username: r.username,
+    action: r.action as KbChangeAction,
+    detail: r.detail,
+    createdAt: r.created_at,
+  }
+}
+
 /** Fields a caller may patch on a task. Usage accumulators are excluded — use `addUsage`. */
 export type TaskPatch = Partial<
   Pick<
@@ -523,6 +622,7 @@ export class Db {
     this.db.exec(SCHEMA)
     this.ensureColumns()
     this.ensurePageColumns()
+    this.ensureAuthSchema()
     this.seedGeneralChannel()
     this.seedKbSpaces()
   }
@@ -628,6 +728,59 @@ export class Db {
     if (!cols.has('body')) this.db.exec(`ALTER TABLE pages ADD COLUMN body TEXT NOT NULL DEFAULT ''`)
     if (!cols.has('updated_by')) {
       this.db.exec(`ALTER TABLE pages ADD COLUMN updated_by TEXT NOT NULL DEFAULT ''`)
+    }
+  }
+
+  /**
+   * Idempotently bring a PRE-AUTH `zmrng.db` up to the username/password login
+   * schema: the `users` / `sessions` / `kb_changelog` tables and the nullable
+   * `members.user_id` link. Additive only, same policy as `ensureColumns()` —
+   * every table is `CREATE TABLE IF NOT EXISTS`
+   * (belt-and-braces: `SCHEMA` already declares them, so this re-declaration is
+   * a no-op on a fresh DB) and every column is a `PRAGMA table_info`-guarded
+   * `ALTER … ADD COLUMN`. NOTHING here drops, renames or rewrites a row: the
+   * VPS instance redeploys over its live DB, and existing handle-only members,
+   * pages and revisions must survive the upgrade untouched — they simply read
+   * back with a null `user_id`.
+   */
+  private ensureAuthSchema(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+      CREATE TABLE IF NOT EXISTS kb_changelog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        space_id INTEGER NOT NULL,
+        page_id INTEGER,
+        user_id INTEGER,
+        username TEXT NOT NULL,
+        action TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_kb_changelog_space ON kb_changelog(space_id, id);
+    `)
+    const columnsOf = (table: string): Set<string> =>
+      new Set(
+        (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
+          (c) => c.name,
+        ),
+      )
+    if (!columnsOf('members').has('user_id')) {
+      this.db.exec('ALTER TABLE members ADD COLUMN user_id INTEGER')
     }
   }
 
@@ -819,10 +972,16 @@ export class Db {
 
   /**
    * Insert a workspace member by self-asserted display name, or return the
-   * existing row if that name is already taken. Identity is the free-text
-   * display name (no verification) — a re-join with the same name reuses the
-   * original row and its `created_at`, so the members table never grows on
-   * reconnect. Follows the `task_comments` prepared-statement pattern.
+   * existing row if that name is already taken.
+   *
+   * LEGACY — this is the pre-login identity model, and nothing in the running
+   * server calls it any more: `memberForUser` replaced it when a member became
+   * an authenticated user rather than a free-text handle. It is retained
+   * because the rows it created still exist in live databases (the VPS
+   * redeploys over its own `zmrng.db`), it is how the tests construct that
+   * legacy state to prove the migration preserves it, and deleting it would
+   * leave no way to express a handle-only member at all. Do NOT reach for it
+   * from new code.
    */
   upsertMember(displayName: string, now: string): Member {
     const existing = this.db
@@ -835,6 +994,34 @@ export class Db {
     return {
       id: Number(info.lastInsertRowid),
       displayName,
+      userId: null, // handle-only row: no authenticated user behind it
+      createdAt: now,
+    }
+  }
+
+  /**
+   * The member row for an AUTHENTICATED user, created on first use. Keyed on
+   * `members.user_id`, so a reconnect (or a display-name change) always resolves
+   * back to the same row and the roster never grows per session.
+   *
+   * PINNED BEHAVIOUR: it deliberately does NOT claim a legacy handle-only row
+   * (`user_id IS NULL`) that happens to share the display name. Those rows were
+   * self-asserted with no verification, so adopting one would hand a real user
+   * another party's message history — a new row is created instead, and the
+   * legacy row is left exactly as it was (additive-only migration policy).
+   */
+  memberForUser(user: { id: number; displayName: string }, now: string): Member {
+    const existing = this.db
+      .prepare('SELECT * FROM members WHERE user_id = ? ORDER BY id ASC LIMIT 1')
+      .get(user.id) as MemberRow | undefined
+    if (existing) return rowToMember(existing)
+    const info = this.db
+      .prepare('INSERT INTO members (display_name, user_id, created_at) VALUES (?, ?, ?)')
+      .run(user.displayName, user.id, now)
+    return {
+      id: Number(info.lastInsertRowid),
+      displayName: user.displayName,
+      userId: user.id,
       createdAt: now,
     }
   }
@@ -1057,6 +1244,125 @@ export class Db {
       this.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
     })
     run(id)
+  }
+
+  // ===================================================================
+  // auth — users + sessions (username/password login gating KB + Team).
+  // Accounts are provisioned out-of-band by the `create-user` CLI; there is no
+  // self-serve signup here. Only a token's sha256 HASH is ever stored.
+  // ===================================================================
+
+  /**
+   * Insert a provisioned user. `passwordHash` is the versioned scrypt string
+   * from `password.ts` — this layer never sees a plaintext password.
+   *
+   * `users.username` is UNIQUE, so a duplicate throws a better-sqlite3
+   * constraint error rather than silently upserting: callers (the `create-user`
+   * CLI) check `getUserByUsername` first and reset the password instead.
+   */
+  createUser(username: string, displayName: string, passwordHash: string, now: string): User {
+    const info = this.db
+      .prepare(
+        `INSERT INTO users (username, display_name, password_hash, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(username, displayName, passwordHash, now, now)
+    return {
+      id: Number(info.lastInsertRowid),
+      username,
+      displayName,
+      passwordHash,
+      createdAt: now,
+      updatedAt: now,
+    }
+  }
+
+  /**
+   * One user by username, or `undefined`. Exact match on the stored string —
+   * lookup is case-SENSITIVE, so `zc` and `ZC` are different accounts (the CLI
+   * decides what gets stored).
+   */
+  getUserByUsername(username: string): User | undefined {
+    const row = this.db.prepare('SELECT * FROM users WHERE username = ?').get(username) as
+      | UserRow
+      | undefined
+    return row ? rowToUser(row) : undefined
+  }
+
+  /** One user by id, or `undefined` — the session→user resolution path. */
+  getUserById(id: number): User | undefined {
+    const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as
+      | UserRow
+      | undefined
+    return row ? rowToUser(row) : undefined
+  }
+
+  /**
+   * Replace a user's password hash in place (the CLI's documented recovery
+   * path — re-provisioning an existing username resets rather than duplicates).
+   * Bumps `updated_at`; `username`/`display_name`/`created_at` are untouched.
+   * Existing sessions are deliberately NOT swept here — that is the caller's
+   * policy call. Returns the updated user, or `undefined` if the id is unknown.
+   */
+  setUserPassword(id: number, passwordHash: string, now: string): User | undefined {
+    this.db
+      .prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?')
+      .run(passwordHash, now, id)
+    return this.getUserById(id)
+  }
+
+  /**
+   * Persist one session. `tokenHash` is the sha256 of the bearer token, never
+   * the token itself, so a leaked DB yields no usable credential. The column is
+   * UNIQUE — a hash collision/replay surfaces as a constraint error.
+   */
+  createSession(userId: number, tokenHash: string, now: string, expiresAt: string): Session {
+    const info = this.db
+      .prepare(
+        `INSERT INTO sessions (user_id, token_hash, created_at, expires_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(userId, tokenHash, now, expiresAt)
+    return {
+      id: Number(info.lastInsertRowid),
+      userId,
+      tokenHash,
+      createdAt: now,
+      expiresAt,
+    }
+  }
+
+  /**
+   * Resolve a presented token's hash to its session row, or `undefined`.
+   * Expiry is NOT checked here — the caller compares `expiresAt` (see
+   * `session.ts`'s `isExpired`), keeping this layer a pure store.
+   */
+  getSession(tokenHash: string): Session | undefined {
+    const row = this.db.prepare('SELECT * FROM sessions WHERE token_hash = ?').get(tokenHash) as
+      | SessionRow
+      | undefined
+    return row ? rowToSession(row) : undefined
+  }
+
+  /** Extend a session's expiry in place (sliding renewal). `created_at` is kept. */
+  touchSession(id: number, expiresAt: string): void {
+    this.db.prepare('UPDATE sessions SET expires_at = ? WHERE id = ?').run(expiresAt, id)
+  }
+
+  /** Revoke one session by token hash (logout). Unknown hashes are a no-op. */
+  deleteSession(tokenHash: string): void {
+    this.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash)
+  }
+
+  /**
+   * Sweep every session whose `expires_at` is at or behind `now` (an expired
+   * session is already unusable; this just stops the table growing). Returns
+   * how many rows were removed. ISO-8601 UTC strings compare lexicographically,
+   * which is what makes the `<=` comparison valid in SQL.
+   */
+  deleteExpiredSessions(now: string): number {
+    const info = this.db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now)
+    return info.changes
   }
 
   // ===================================================================
@@ -1315,8 +1621,23 @@ export class Db {
    * than `PAGE_REVISION_THROTTLE_MS` — so continuous per-keystroke autosave
    * does not spam a revision on every save, while undo history still survives.
    * Returns the updated page, or `undefined` if it does not exist.
+   *
+   * `actor` (optional) is the AUTHENTICATED identity behind the save. When
+   * given, the same transaction also records a `page.edit` changelog entry,
+   * throttled on its own clock: an entry is written only when the page has no
+   * prior `page.edit` entry, or the newest one is at least
+   * `PAGE_REVISION_THROTTLE_MS` old. That keeps the feed readable under
+   * autosave without coupling it to whether a revision happened to be
+   * snapshotted. Omitting `actor` reproduces the pre-auth behaviour exactly
+   * (body + revision only, no changelog) for callers that have no session.
    */
-  updatePageBody(id: number, body: string, author: string, now: string): KbPage | undefined {
+  updatePageBody(
+    id: number,
+    body: string,
+    author: string,
+    now: string,
+    actor?: { userId: number | null; username: string },
+  ): KbPage | undefined {
     const run = this.db.transaction((): KbPage | undefined => {
       const existing = this.db.prepare('SELECT * FROM pages WHERE id = ?').get(id) as
         | PageRow
@@ -1328,12 +1649,40 @@ export class Db {
       const sinceMs = new Date(last?.created_at ?? existing.updated_at).getTime()
       const dueForSnapshot = !last || new Date(now).getTime() - sinceMs >= PAGE_REVISION_THROTTLE_MS
       if (dueForSnapshot) this.insertPageRevision(existing, now)
+      if (actor && this.dueForEditEntry(id, now)) {
+        this.addChangelogEntry({
+          spaceId: existing.space_id,
+          pageId: id,
+          userId: actor.userId,
+          username: actor.username,
+          action: 'page.edit',
+          detail: existing.title,
+          now,
+        })
+      }
       this.db
         .prepare('UPDATE pages SET body = ?, updated_at = ?, updated_by = ? WHERE id = ?')
         .run(body, now, author, id)
       return this.getPage(id)
     })
     return run()
+  }
+
+  /**
+   * True when a `page.edit` changelog entry is due for this page: none exists
+   * yet, or the newest one is at least `PAGE_REVISION_THROTTLE_MS` old. Keyed
+   * on the changelog's OWN newest entry (not `page_revisions`), so the two
+   * throttles stay independent.
+   */
+  private dueForEditEntry(pageId: number, now: string): boolean {
+    const last = this.db
+      .prepare(
+        `SELECT created_at FROM kb_changelog
+         WHERE page_id = ? AND action = 'page.edit' ORDER BY id DESC LIMIT 1`,
+      )
+      .get(pageId) as { created_at: string } | undefined
+    if (!last) return true
+    return new Date(now).getTime() - new Date(last.created_at).getTime() >= PAGE_REVISION_THROTTLE_MS
   }
 
   /** Every revision of a page, oldest first (id ASC). Backs the History panel. */
@@ -1368,6 +1717,61 @@ export class Db {
       return this.getPage(page.id)
     })
     return run()
+  }
+
+  /**
+   * Append one KB changelog entry. The changelog is a dedicated additive table
+   * (D4) covering the whole page lifecycle — create, rename, move, body-save and
+   * delete — because `page_revisions` only ever sees body saves and dies with
+   * its page. `pageId`/`userId` are nullable on purpose: a deleted page or a
+   * removed user must leave its history readable, which is why `username` is
+   * denormalized onto the row. Append-only — an entry is never rewritten.
+   */
+  addChangelogEntry(input: {
+    spaceId: number
+    pageId: number | null
+    userId: number | null
+    username: string
+    action: KbChangeAction
+    detail: string
+    now: string
+  }): KbChangeEntry {
+    const info = this.db
+      .prepare(
+        `INSERT INTO kb_changelog (space_id, page_id, user_id, username, action, detail, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.spaceId,
+        input.pageId,
+        input.userId,
+        input.username,
+        input.action,
+        input.detail,
+        input.now,
+      )
+    return {
+      id: Number(info.lastInsertRowid),
+      spaceId: input.spaceId,
+      pageId: input.pageId,
+      userId: input.userId,
+      username: input.username,
+      action: input.action,
+      detail: input.detail,
+      createdAt: input.now,
+    }
+  }
+
+  /**
+   * A space's changelog, NEWEST FIRST (id DESC) and capped at `limit` — the
+   * order the feed panel renders. Scoped to one space: entries belonging to
+   * another space are never returned.
+   */
+  listChangelog(spaceId: number, limit: number): KbChangeEntry[] {
+    const rows = this.db
+      .prepare('SELECT * FROM kb_changelog WHERE space_id = ? ORDER BY id DESC LIMIT ?')
+      .all(spaceId, limit) as ChangelogRow[]
+    return rows.map(rowToChangelogEntry)
   }
 
   /** Snapshot the given page's CURRENT body into `page_revisions` (prior-state capture). */

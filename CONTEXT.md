@@ -96,3 +96,49 @@ prompt with zero tool round-trips — and COMPOSES with it: style governs how na
 the workflow directive governs what the session does. `workflow = 'none'` appends nothing.
 _Avoid_: "system prompt" (the directive is one appended block, not the whole prompt);
 "style directive" (orthogonal — style is register, workflow is behavior; both append, ADR-0002 D5).
+
+## Login
+
+**Gated surface** — a surface that requires an authenticated session: the **Knowledge
+Base** and **Team Chat**. The Workspace task orchestrator is deliberately NOT one —
+gating the operator's own tooling buys nothing. The gated set is one list,
+`PROTECTED_PREFIXES` in `auth.ts`; a new gated route goes there, never behind an ad-hoc
+check in a handler.
+_Avoid_: "the app requires login" (two surfaces do, the orchestrator does not);
+"protected route" used loosely (the prefix list is the definition).
+
+**Account** — a provisioned user row (`users`), created only by the `create-user` CLI.
+There is no self-serve signup and no password-reset flow; re-running the CLI for an
+existing username resets that password, and that is the whole recovery story.
+_Avoid_: "sign-up" / "registration" (neither exists); "member" (a `members` row is the
+Team roster projection of an account, not the account).
+
+**Session** — a server-side row (`sessions`) holding the sha256 of a bearer token and an
+expiry, minted by login and destroyed by logout. Deliberately NOT a JWT: revocation and
+expiry would need a server-side list anyway, which is this table with extra steps.
+Slides on activity — renewed once less than six days of its seven-day window remain — so
+it dies only after a genuine week of inactivity.
+_Avoid_: "token" alone (the raw token is the client's credential; the session is the
+server's record of it, and only its hash is stored); "JWT" (explicitly rejected).
+
+**Two transports** — the one session token travels two ways: an `HttpOnly;
+SameSite=Strict` cookie for same-origin browsing, and an `Authorization: Bearer` header
+for the desktop app's cross-origin Team connection to the VPS, which no cookie can reach
+without TLS. The bearer path is the weaker of the two (readable by JS) and is accepted
+because the perimeter is Tailscale-only.
+_Avoid_: "cookie auth" / "token auth" as if choosing one (both exist, by transport, and
+the server resolves bearer first, then cookie).
+
+**Origin-keyed session** — the client stores one session PER SERVER ORIGIN, because a
+session is only meaningful to the server that issued it and the desktop app talks to two
+(local sidecar for the KB, VPS for Team). One submit of the login form POSTs the same
+credentials to every gated origin in parallel, so the operator types their password once.
+_Avoid_: "SSO" / "single sign-on" (there is one LOGIN, not one ACCOUNT — the servers do
+not trust each other, and `create-user` must be run on each host).
+
+**Changelog** — the `kb_changelog` feed: one row per KB page create / rename / move /
+body-save / delete, naming the user who did it, and outliving the page it describes.
+Distinct from **page revisions**, which are restorable body snapshots that only ever see
+body saves and are deleted with their page.
+_Avoid_: "history" (ambiguous between the two — say "revisions" for the restorable
+snapshots, "changelog" for the audit feed).

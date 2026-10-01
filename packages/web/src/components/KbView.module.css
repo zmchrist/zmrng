@@ -551,17 +551,6 @@
   border-color: var(--accent-line);
 }
 
-.addBar {
-  flex: none;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 20px;
-  border-top: 1px solid var(--border);
-  background: var(--surface-strong);
-}
-
 /* ---- page history panel ---- */
 
 .historyPanel {
@@ -650,65 +639,57 @@
   color: var(--text);
 }
 
-/* Inline "set a display name to edit" affordance (#150) — mirrors TeamView's
-   join input styling/tokens. Shown wherever a KB write is gated because no
-   display handle is set; NOT a blocking modal. */
-.handleGate {
+/* ---- changelog panel entries (shares .historyPanel chrome) ---- */
+/* A changelog row is a record, not an action: same two-line shape as a
+   revision row, but rendered as static text rather than a button. */
+.changeEntry {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  gap: 2px;
+  padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--surface);
-  backdrop-filter: var(--glass);
-  -webkit-backdrop-filter: var(--glass);
 }
 
-.handleGateLabel {
-  font-size: 13px;
+/* ---- who you are on this server + the way out ---- */
+
+.account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-strong);
+}
+
+.accountName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text);
 }
 
-.handleGateRow {
-  display: flex;
-  gap: 8px;
-}
-
-.handleGateInput {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 12px;
+.logoutBtn {
+  flex: none;
+  padding: 4px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface-strong);
-  color: var(--text);
+  background: transparent;
+  color: var(--text-dim);
   font-family: var(--font);
-  font-size: 14px;
-  transition: border-color var(--transition);
-}
-
-.handleGateInput:focus {
-  border-color: var(--accent-line);
-}
-
-.handleGateBtn {
-  padding: 8px 14px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: var(--accent-grad);
-  color: var(--accent-ink);
-  font-family: var(--font);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
   cursor: pointer;
-  transition: border-color var(--transition), background var(--transition);
+  transition: border-color var(--transition), color var(--transition);
 }
 
-.handleGateBtn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.logoutBtn:hover {
+  border-color: var(--accent-line);
+  color: var(--text);
 }
 
 /* ---- phone: sidebar stacks above the page detail ------------------------ */
@@ -737,5 +718,11 @@
     left: 8px;
     bottom: 8px;
     width: auto;
+  }
+  /* 44px touch target for the one button a phone user reaches for here. */
+  .logoutBtn {
+    min-height: 44px;
+    padding: 4px 14px;
+    font-size: 14px;
   }
 }

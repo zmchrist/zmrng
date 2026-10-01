@@ -2,6 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { SESSION_TTL_MS } from './session.js'
 import type { AgentTarget, RepoTarget, SecurityPolicy, SecuritySeverity } from './types.js'
 
 /** Expand a leading ~ to the user's home directory. */
@@ -156,6 +157,23 @@ export interface Config {
   workspaceScrollback: number
   /** Per-request timeout (ms) for the team-agent fetch; caps a hung upstream. */
   workspaceAgentTimeoutMs: number
+  /**
+   * Whether the `zmrng_session` login cookie carries the `Secure` attribute
+   * (`ZMRNG_SECURE_COOKIES=1`). NEVER unconditional: the VPS workspace is plain
+   * `http://` on the tailnet, and browsers silently DROP a `Secure` cookie on a
+   * non-HTTPS origin — an unconditional flag would break login there entirely.
+   * The cookie builder also sets it whenever the request itself arrived over
+   * HTTPS, so this flag is the opt-in for a TLS-terminating proxy that forwards
+   * plain http upstream (D2 of .agents/plans/zmrng-login-auth.md).
+   */
+  secureCookies: boolean
+  /**
+   * Lifetime (ms) of a login session (`ZMRNG_SESSION_TTL_MS`, default 7 days —
+   * `SESSION_TTL_MS` in `session.ts`). Sessions slide: an active one renews
+   * once less than 6 days remain, so a session only dies after a genuine week
+   * of inactivity.
+   */
+  sessionTtlMs: number
   /**
    * This instance's HEAD sha (`git rev-parse HEAD` at boot), or '' when it could
    * not be resolved. Advertised in `GET /api/config` so a client can compare it
@@ -700,6 +718,8 @@ function buildConfig(): Config {
     workspaceBotHandle: process.env.ZMRNG_WORKSPACE_BOT_HANDLE?.trim() || '@agent',
     workspaceScrollback: Number(process.env.ZMRNG_WORKSPACE_SCROLLBACK ?? 20),
     workspaceAgentTimeoutMs: Number(process.env.ZMRNG_WORKSPACE_AGENT_TIMEOUT_MS ?? 60000),
+    secureCookies: process.env.ZMRNG_SECURE_COOKIES === '1',
+    sessionTtlMs: Number(process.env.ZMRNG_SESSION_TTL_MS ?? SESSION_TTL_MS),
     headSha: readHeadSha(REPO_ROOT),
     versionPollMs: Number(process.env.ZMRNG_VERSION_POLL_MS ?? 0),
   }

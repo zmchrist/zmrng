@@ -88,10 +88,37 @@ something per-file test hygiene can fix; it needs an upstream fix, not a refacto
   image/document content-block ordering, mixed attachments) and `sanitizeAttachments()`
   (accepts a valid image/PDF, rejects a bad media type, rejects an oversized decoded
   payload, caps the array at `MAX_ATTACHMENTS`, and tolerates non-array/malformed input).
-- **`db.ts`** — temp-file SQLite; `ensureColumns()` migration + idempotency and
+- **`db.ts`** — temp-file SQLite; `ensureColumns()`/`ensureAuthSchema()` migration +
+  idempotency, including an explicit **DATA-LOSS GUARD**: pre-existing task/page/member/
+  message rows must be unchanged after migrating a pre-auth database, because the VPS
+  redeploys in place over its live `zmrng.db`. Also users/sessions/changelog round-trips
+  and `memberForUser`'s stability across reconnects. Plus
   atomic `addUsage()` accumulation. Also covers the additive `stale` column: added
   by `ensureColumns()` on a pre-`stale` schema, idempotent on re-open, and
   `updateTask({ stale: true })` round-trips through `getTask()`.
+- **Auth** — `password.test.ts` (hash→verify round-trip, distinct salts, malformed
+  stored hashes rejected rather than thrown, unicode/empty/very-long passwords),
+  `session.test.ts` (token uniqueness/length, `hashToken` determinism, expiry boundaries,
+  and that a FRESH session does not trigger a renewal write), `auth.test.ts` (login
+  success/failure with the same generic message for a wrong password and an unknown user,
+  the token HASH being what is stored, bearer-over-cookie precedence, expiry/revocation,
+  the sliding renewal, cookie construction with and without `Secure`, throttle lock and
+  release, and `isProtectedPath` for every gated prefix **and** the ungated near-misses).
+- **The login gate** (`authRoutes.test.ts`) — the integration layer. `registerAuth` on a
+  bare `Fastify()` over a temp-file DB, driven with `app.inject()` (no port, no network).
+  Proves the whole credential round trip: login returns a cookie AND a body token, bad
+  credentials 401 with no cookie, a gated route is 401/200/200/401 across no-credential /
+  cookie / bearer / garbage, an ungated route is 200 in every one of those states, an
+  unrouted path under a gated prefix still 401s, logout kills both transports, and
+  repeated failures trip a 429.
+- **KB attribution** (`kb.test.ts`) — the same `inject()` pattern over `registerKbRoutes`.
+  The central claim of the login feature: a client-supplied `author` on create/restore/
+  rename/move/delete is IGNORED and the authenticated user is recorded instead. Plus one
+  changelog entry per action, a delete entry outliving its page, newest-first/space-scoped/
+  limit-clamped reads, and a 401 sweep over all 15 KB routes.
+- **`createUser.test.ts`** — the CLI's exported parse/validate/provision functions against
+  a temp DB; re-provisioning an existing username resets the password rather than
+  duplicating the row. The `process.argv`/TTY entrypoint is never executed.
 - **`config.ts`** — `resolveRegistry()` precedence (`repos.json` → env → legacy),
   auto-scan, and the empty-registry guard (issue #16).
 - **Worker prompts** (`prompts.test.ts`) — the harness contract. `systemPrompt()`,
