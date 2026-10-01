@@ -86,10 +86,11 @@
     background var(--transition);
 }
 .input:focus {
-  outline: none;
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
   border-color: var(--accent-line);
   background: var(--well-strong);
-  box-shadow: var(--focus-ring);
+  box-shadow: none;
 }
 .input::placeholder {
   color: var(--text-faint);
