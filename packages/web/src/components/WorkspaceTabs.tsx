@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type DragEvent, type ReactNode } from 'react'
+import { NavIcon } from './NavIcon'
 import styles from './WorkspaceTabs.module.css'
 import type { AgentSummary, TaskEvent, TaskStatus, WorkspaceLayout, WsPane, WsTab } from '../types'
 import {
@@ -212,7 +213,7 @@ export function WorkspaceTabs({
                     title="Close"
                     onClick={() => onLayoutChange(closeTab(layout, tab.id))}
                   >
-                    ×
+                    <NavIcon name="close" />
                   </button>
                 )}
               </div>

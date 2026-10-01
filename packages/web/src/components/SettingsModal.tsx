@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { NavIcon } from './NavIcon'
 import styles from './SettingsModal.module.css'
 import { usePanelMount } from '../usePanelMount'
 import { api } from '../api'
@@ -136,7 +137,7 @@ export function SettingsModal({
             title="Close"
             onClick={onClose}
           >
-            ×
+            <NavIcon name="close" />
           </button>
         </div>
         <div className={styles.body}>
