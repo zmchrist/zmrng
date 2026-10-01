@@ -5,6 +5,7 @@ import {
   DEFAULT_THEME_MODE,
   getTheme,
   hexToRgba,
+  applyTheme,
   buildThemeVars,
   loadStoredTheme,
   saveStoredTheme,
@@ -71,6 +72,27 @@ describe('buildThemeVars', () => {
     expect(vars['--accent-ink']).toBe('#f5f6fa')
   })
 
+  it('dark mode swaps the bg field and accent-ink to the near-black ink', () => {
+    const vars = buildThemeVars(getTheme('vermilion'), 'dark')
+    expect(vars['--bg']).toBe('#16130f')
+    expect(vars['--accent-ink']).toBe('#16130f')
+    expect(buildThemeVars(getTheme('vermilion'), 'light')['--bg']).toBe('#f7f5f0')
+  })
+
+  it('cobalt uses a lightened accent in dark mode, unchanged in light', () => {
+    expect(buildThemeVars(getTheme('cobalt'), 'dark')['--accent']).toBe('#6b8cff')
+    expect(buildThemeVars(getTheme('cobalt'), 'light')['--accent']).toBe('#1a4dff')
+  })
+
+  it('applyTheme sets data-theme on the root so theme.css switches palettes', () => {
+    applyTheme('vermilion', 'dark')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#16130f')
+    applyTheme('vermilion', 'light')
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#f7f5f0')
+  })
+
   it('single-hue themes emit a flat accent fill, not a gradient', () => {
     for (const theme of THEMES) {
       for (const mode of ['dark', 'light'] as const) {
@@ -97,6 +119,8 @@ describe('theme persistence (localStorage)', () => {
   it('round-trips a saved theme choice', () => {
     saveStoredTheme({ themeId: 'cobalt', mode: 'light' })
     expect(loadStoredTheme()).toEqual({ themeId: 'cobalt', mode: 'light' })
+    saveStoredTheme({ themeId: 'vermilion', mode: 'dark' })
+    expect(loadStoredTheme()).toEqual({ themeId: 'vermilion', mode: 'dark' })
   })
 
   it('falls back to defaults on corrupt stored JSON', () => {
