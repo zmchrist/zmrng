@@ -1,7 +1,8 @@
-// Theme catalog + pure helpers for computing the accent-token overrides that
-// theme.css's :root leaves as the default (orange/dark). Only the accent
-// family of tokens changes per theme/mode — surfaces, borders, and text stay
-// on the base tokens defined in theme.css.
+// Theme catalog + pure helpers for computing the accent + bg token overrides
+// that theme.css's :root leaves as the default (vermilion on light paper). The
+// accent family and --bg are set inline per theme/mode; the rest of the dark
+// palette (surfaces, borders, text, status/actor hues) lives in theme.css under
+// :root[data-theme='dark'], which applyTheme() toggles.
 
 export type ThemeMode = 'dark' | 'light'
 
@@ -17,13 +18,16 @@ export interface AccentPair {
 export interface ThemeDef {
   id: string
   label: string
-  /** flat background field color for this theme */
+  /** flat background field color for this theme (light mode) */
   bg: string
+  /** flat near-black background field for dark mode; defaults to the shared ink */
+  bgDark?: string
   dark: AccentPair
   light: AccentPair
 }
 
 export const DEFAULT_THEME_ID = 'vermilion'
+export const DARK_BG = '#16130f'
 export const DEFAULT_THEME_MODE: ThemeMode = 'light'
 
 // Two themes only: the flat "Vermilion Press" default and its "Cobalt Press"
@@ -42,6 +46,7 @@ export const THEMES: ThemeDef[] = [
     // no second hue — both stops are the same vermilion so --accent-grad reads
     // as a flat fill. No backdrop → the flat paper base shows through.
     bg: '#f7f5f0',
+    bgDark: DARK_BG,
     dark: { accent: '#ff4d1a', accent2: '#ff4d1a' },
     light: { accent: '#ff4d1a', accent2: '#ff4d1a' },
   },
@@ -51,7 +56,9 @@ export const THEMES: ThemeDef[] = [
     // The approved A/B: the same flat Swiss language, weapon swapped to cobalt
     // on cool paper. Single-lever accent change; structure identical.
     bg: '#f5f6fa',
-    dark: { accent: '#1a4dff', accent2: '#1a4dff' },
+    bgDark: '#12141a',
+    // Lightened cobalt: #1a4dff on the dark field is ~2.9:1, under the 4.5:1 text floor.
+    dark: { accent: '#6b8cff', accent2: '#6b8cff' },
     light: { accent: '#1a4dff', accent2: '#1a4dff' },
   },
 ]
@@ -82,15 +89,16 @@ export function buildThemeVars(theme: ThemeDef, mode: ThemeMode): Record<string,
   // multi-stop color themes still build a two-stop gradient.
   const accentGrad =
     pair.accent === gradTo ? pair.accent : `linear-gradient(135deg, ${pair.accent} 0%, ${gradTo} 100%)`
+  const bg = mode === 'dark' ? (theme.bgDark ?? DARK_BG) : theme.bg
   return {
-    '--bg': theme.bg,
+    '--bg': bg,
     '--accent': pair.accent,
     '--accent-2': pair.accent2,
     '--accent-bright': pair.accent2,
     '--accent-soft': hexToRgba(pair.accent, 0.16),
     '--accent-line': hexToRgba(pair.accent, 0.7),
     '--accent-grad': accentGrad,
-    '--accent-ink': theme.bg,
+    '--accent-ink': bg,
   }
 }
 
@@ -127,6 +135,7 @@ export function applyTheme(themeId: string, mode: ThemeMode): void {
   const theme = getTheme(themeId)
   const vars = buildThemeVars(theme, mode)
   const root = document.documentElement
+  root.dataset.theme = mode
   for (const [key, value] of Object.entries(vars)) {
     root.style.setProperty(key, value)
   }

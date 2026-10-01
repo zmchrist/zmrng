@@ -110,6 +110,52 @@
   --tracking-tight: -0.03em;
 }
 
+/* ============================================================================
+   Dark mode — same flat Swiss language on a near-black ink field. Selected by
+   themes.ts applyTheme() via <html data-theme="dark">. Off-white ink replaces
+   the paper; hairlines flip to light-on-dark; accent stays the single weapon.
+   --bg / --accent* are set inline by buildThemeVars. No gradients, glow, blur
+   or shadows. Text >= 7:1, dim text >= 7:1, focus ring >= 3:1 on every surface.
+   ============================================================================ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --surface: #1d1a15;
+  --surface-strong: #26221c;
+  --surface-hover: rgba(242, 239, 232, 0.06);
+  --well: rgba(242, 239, 232, 0.07);
+  --well-strong: rgba(242, 239, 232, 0.12);
+
+  --border: rgba(242, 239, 232, 0.2);
+  --border-strong: rgba(242, 239, 232, 0.5);
+
+  --text: #f2efe8;
+  --text-dim: rgba(242, 239, 232, 0.75);
+  --text-faint: rgba(242, 239, 232, 0.45);
+
+  --status-backlog: rgba(242, 239, 232, 0.55);
+  --status-clarify: #f2efe8;
+  --status-planning: #f2efe8;
+  --status-validating: #f2efe8;
+  --status-review: #f2efe8;
+  --status-building: #f2efe8;
+  --status-done: rgba(242, 239, 232, 0.7);
+  --status-archived: rgba(242, 239, 232, 0.45);
+
+  --actor-frontend-specialist: #f2efe8;
+  --actor-backend-specialist: rgba(242, 239, 232, 0.75);
+  --actor-qa: rgba(242, 239, 232, 0.6);
+  --actor-code-reviewer: rgba(242, 239, 232, 0.5);
+  --actor-doc-updater: rgba(242, 239, 232, 0.75);
+  --actor-general-purpose: rgba(242, 239, 232, 0.6);
+  --actor-default: rgba(242, 239, 232, 0.55);
+
+  /* Light off-white focus outline: >= 12:1 on the ink field and surfaces. */
+  --focus-color: #f2efe8;
+
+  --scrollbar-thumb: rgba(242, 239, 232, 0.3);
+  --scrollbar-thumb-hover: rgba(242, 239, 232, 0.5);
+}
+
 * {
   box-sizing: border-box;
 }
