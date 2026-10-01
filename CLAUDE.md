@@ -32,6 +32,20 @@ scans persist to the additive `security_scans` table and surface read-only in th
 Security panel. Full contract + decisions: `.claude/docs/services-reference.md` and
 `docs/adr/0001-deterministic-security-scan-gate.md`.
 
+**Loop mode (gauntlet loop — a separate, desktop-only tab, NOT a task phase).** The Loop
+tab runs a map of GitHub-issue tickets (an epic's sub-issues) to completion with a
+persistent orchestrator session you chat with: per ticket a fresh builder builds, a fresh
+read-only critic judges a blind A/B against the ticket's bar, then validate → sync docs →
+a serial fold into a per-run integration branch. It has its **own lane pool of 3**
+(`LOOP_MAX_LANES`, shared by all runs, separate from `ZMRNG_MAX_LANES`, never shown in the
+task Lanes tab) and a **load gate** that defers NEW picks while the machine is busy
+(`ZMRNG_LOOP_MAX_LOAD_PER_CORE` default 1.0, `ZMRNG_LOOP_MIN_FREE_MEM_MB` default 2048,
+`ZMRNG_LOOP_PUMP_INTERVAL_MS` default 30000). When every ticket is done there is **one
+final PR** integ → default branch (after the same fail-closed security scan) — **never
+auto-merged**, and `main` is never touched per ticket. Technique credit:
+robonuggets/gauntlet-loop (CC-BY-4.0), after Matt Shumer's "Claude of Duty". Full contract:
+`.claude/docs/services-reference.md` (LoopManager) and `docs/adr/0003-gauntlet-loop.md`.
+
 ## ⚠️ App-only focus (operator directive)
 **All work in this directory targets the desktop APP (`packages/desktop` Tauri shell),
 not the browser "website".** There is one codebase — `packages/web` is the app's
@@ -207,7 +221,7 @@ string interpolation, never `console.log` in server code.
 ## Key services
 Full method signatures, callbacks, wire types, and per-service behavior live in
 **`.claude/docs/services-reference.md`** (server: runner, phases, terminal, chatAgent,
-lanes, db, config, worktree, ws, index; frontend: `packages/web/src/`; team workspace).
+lanes, loop, db, config, worktree, ws, index; frontend: `packages/web/src/`; team workspace).
 Read that file when touching a service — it is the reference, not this file.
 
 ## Commands

@@ -4,7 +4,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
 import { Db } from '../src/db.js'
-import type { KbChangeAction, TaskUsage } from '../src/types.js'
+import type { KbChangeAction, LoopRun, LoopTicket, TaskUsage } from '../src/types.js'
 
 let dir: string
 let dbPath: string
@@ -1464,6 +1464,555 @@ describe('updatePageBody changelog attribution (throttled page.edit)', () => {
     const db = new Db(dbPath)
     expect(db.updatePageBody(99999, 'x', 'zc', '2026-09-23T00:01:00.000Z', actor)).toBeUndefined()
     expect(db.listChangelog(1, 50)).toEqual([])
+    db.close()
+  })
+})
+
+// =====================================================================
+// gauntlet loop (Loop mode) — loop_runs / loop_tickets / loop_events.
+// Additive-only tables (see .agents/plans/gauntlet-loop-tab.md, Persistence).
+// =====================================================================
+
+const LOOP_TABLES = ['loop_runs', 'loop_tickets', 'loop_events']
+
+/** Index names present in the DB file at `p`. */
+function indexNames(p: string): Set<string> {
+  const raw = new Database(p)
+  const names = new Set(
+    (
+      raw.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as {
+        name: string
+      }[]
+    ).map((t) => t.name),
+  )
+  raw.close()
+  return names
+}
+
+const ZERO_USAGE: TaskUsage = { tokensIn: 0, tokensOut: 0, tokensCache: 0, costUsd: 0, turns: 0 }
+
+function mkRun(over: Partial<LoopRun> = {}): LoopRun {
+  return {
+    id: 'run-1',
+    repoId: 'zmrng',
+    epic: 42,
+    title: 'Epic: ship the loop',
+    status: 'draft',
+    prevStatus: null,
+    lanes: 1,
+    integBranch: 'gauntlet/run-1/integ',
+    integWorktree: '/tmp/repo/worktrees/loop-run-1-integ',
+    priority: [],
+    prUrl: null,
+    note: null,
+    usage: { ...ZERO_USAGE },
+    createdAt: '2026-10-01T00:00:00.000Z',
+    updatedAt: '2026-10-01T00:00:00.000Z',
+    ...over,
+  }
+}
+
+function mkTicket(over: Partial<LoopTicket> = {}): LoopTicket {
+  return {
+    runId: 'run-1',
+    number: 7,
+    title: 'Build the map',
+    body: '## Bar\nBeat the reference.',
+    url: 'https://github.com/o/r/issues/7',
+    ghState: 'open',
+    blockedBy: [],
+    bar: 'Beat the reference.',
+    state: 'todo',
+    step: null,
+    round: 0,
+    lastGap: null,
+    branch: null,
+    worktree: null,
+    foldSha: null,
+    question: null,
+    note: null,
+    usage: { ...ZERO_USAGE },
+    startedAt: null,
+    stepStartedAt: null,
+    updatedAt: '2026-10-01T00:00:00.000Z',
+    ...over,
+  }
+}
+
+/** Write a raw column value, bypassing the Db layer (to plant malformed JSON). */
+function rawExec(p: string, sql: string, ...params: unknown[]): void {
+  const raw = new Database(p)
+  raw.prepare(sql).run(...params)
+  raw.close()
+}
+
+describe('ensureLoopSchema migration (pre-loop zmrng.db)', () => {
+  it('creates loop_runs/loop_tickets/loop_events + the events index on an OLD-schema DB', () => {
+    buildPreAuthDb(dbPath)
+    const before = tableNames(dbPath)
+    for (const t of LOOP_TABLES) expect(before.has(t)).toBe(false)
+
+    new Db(dbPath).close() // constructor runs ensureLoopSchema()
+
+    const after = tableNames(dbPath)
+    for (const t of LOOP_TABLES) expect(after.has(t)).toBe(true)
+    expect(indexNames(dbPath).has('loop_events_run')).toBe(true)
+    expect([...tableColumns(dbPath, 'loop_tickets')]).toEqual(
+      expect.arrayContaining(['run_id', 'number', 'blocked_by', 'fold_sha', 'step_started_at']),
+    )
+  })
+
+  it('is idempotent: re-opening the migrated DB does not throw or change the schema', () => {
+    buildPreAuthDb(dbPath)
+    new Db(dbPath).close()
+    const tables1 = [...tableNames(dbPath)].sort()
+    const cols1 = LOOP_TABLES.map((t) => [...tableColumns(dbPath, t)].sort())
+
+    expect(() => new Db(dbPath).close()).not.toThrow()
+
+    for (const t of LOOP_TABLES) expect(tables1).toContain(t)
+    expect([...tableNames(dbPath)].sort()).toEqual(tables1)
+    expect(LOOP_TABLES.map((t) => [...tableColumns(dbPath, t)].sort())).toEqual(cols1)
+  })
+
+  it('DATA-LOSS GUARD: pre-existing task/member/message/page rows are unchanged on an old-schema DB', () => {
+    buildPreAuthDb(dbPath)
+    const watched = ['tasks', 'members', 'messages', 'pages', 'page_revisions']
+    const before = new Map(watched.map((t) => [t, snapshotRows(dbPath, t)]))
+
+    new Db(dbPath).close()
+    new Db(dbPath).close() // a redeploy re-opens repeatedly
+
+    for (const t of watched) {
+      const after = JSON.parse(snapshotRows(dbPath, t)) as Record<string, unknown>[]
+      const original = JSON.parse(before.get(t)!) as Record<string, unknown>[]
+      expect(after).toHaveLength(original.length)
+      original.forEach((row, i) => expect(after[i]).toMatchObject(row))
+    }
+  })
+
+  it('DATA-LOSS GUARD: on a current pre-loop DB every existing table keeps its exact rows AND columns', () => {
+    // Build today's schema populated with real rows, then strip the loop tables
+    // to simulate the DB a live instance has right before this feature lands.
+    const db = new Db(dbPath)
+    db.createTask({
+      id: 't1',
+      title: 'x',
+      body: 'y',
+      model: 'opus',
+      effort: 'high',
+      style: 'normal',
+      flow: 'plan',
+      repoId: 'zmrng',
+      now: '2026-09-30T00:00:00.000Z',
+    })
+    db.addUsage('t1', { tokensIn: 5, tokensOut: 6, tokensCache: 7, costUsd: 0.5, turns: 1 }, 'n1')
+    db.insertEvent('t1', 'operator', { sub: 'assistant', text: 'hello' }, '2026-09-30T00:00:01.000Z')
+    const general = db.listChannels()[0]!
+    db.addMessage(general.id, 'Ada', 'hi team', 'human', '2026-09-30T00:00:02.000Z')
+    db.close()
+    rawExec(dbPath, 'DROP TABLE IF EXISTS loop_events')
+    rawExec(dbPath, 'DROP TABLE IF EXISTS loop_tickets')
+    rawExec(dbPath, 'DROP TABLE IF EXISTS loop_runs')
+
+    const existing = [...tableNames(dbPath)].filter((t) => t !== 'sqlite_sequence')
+    const rowsBefore = new Map(existing.map((t) => [t, snapshotRows(dbPath, t)]))
+    const colsBefore = new Map(existing.map((t) => [t, [...tableColumns(dbPath, t)]]))
+
+    new Db(dbPath).close()
+    new Db(dbPath).close()
+
+    for (const t of LOOP_TABLES) expect(tableNames(dbPath).has(t)).toBe(true)
+    for (const t of existing) {
+      expect(snapshotRows(dbPath, t)).toBe(rowsBefore.get(t))
+      expect([...tableColumns(dbPath, t)]).toEqual(colsBefore.get(t))
+    }
+  })
+})
+
+describe('loop runs', () => {
+  it('insertLoopRun + getLoopRun round-trips every field, including nulls and JSON columns', () => {
+    const db = new Db(dbPath)
+    const run = mkRun({
+      status: 'stale',
+      prevStatus: 'running',
+      lanes: 3,
+      priority: [12, 3, 9],
+      prUrl: null,
+      note: 'boot under a live run',
+      integWorktree: null,
+      usage: { tokensIn: 10, tokensOut: 2, tokensCache: 3, costUsd: 0.25, turns: 4 },
+    })
+    db.insertLoopRun(run)
+    expect(db.getLoopRun('run-1')).toEqual(run)
+    db.close()
+  })
+
+  it('getLoopRun misses cleanly for an unknown id', () => {
+    const db = new Db(dbPath)
+    expect(db.getLoopRun('nope')).toBeUndefined()
+    db.close()
+  })
+
+  it('listLoopRuns puts non-archived runs first, each group newest createdAt first', () => {
+    const db = new Db(dbPath)
+    db.insertLoopRun(mkRun({ id: 'old', createdAt: '2026-10-01T00:00:01.000Z' }))
+    db.insertLoopRun(
+      mkRun({ id: 'arch-new', status: 'archived', createdAt: '2026-10-01T00:00:09.000Z' }),
+    )
+    db.insertLoopRun(mkRun({ id: 'new', status: 'running', createdAt: '2026-10-01T00:00:05.000Z' }))
+    db.insertLoopRun(
+      mkRun({ id: 'arch-old', status: 'archived', createdAt: '2026-10-01T00:00:00.000Z' }),
+    )
+    expect(db.listLoopRuns().map((r) => r.id)).toEqual(['new', 'old', 'arch-new', 'arch-old'])
+    db.close()
+  })
+
+  it('updateLoopRun patches fields, sets updatedAt, and leaves id/createdAt/usage alone', () => {
+    const db = new Db(dbPath)
+    const usage = { tokensIn: 1, tokensOut: 1, tokensCache: 1, costUsd: 1, turns: 1 }
+    db.insertLoopRun(mkRun({ note: 'was set', usage }))
+    const updated = db.updateLoopRun(
+      'run-1',
+      { status: 'running', prevStatus: 'draft', lanes: 2, priority: [5, 4], note: null },
+      '2026-10-01T01:00:00.000Z',
+    )
+    expect(updated).toMatchObject({
+      id: 'run-1',
+      status: 'running',
+      prevStatus: 'draft',
+      lanes: 2,
+      priority: [5, 4],
+      note: null,
+      usage,
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T01:00:00.000Z',
+    })
+    expect(db.getLoopRun('run-1')).toEqual(updated)
+    db.close()
+  })
+
+  it('updateLoopRun treats an undefined field as "no change" and an empty patch as a touch', () => {
+    const db = new Db(dbPath)
+    db.insertLoopRun(mkRun({ note: 'keep me' }))
+    const r = db.updateLoopRun('run-1', { note: undefined }, '2026-10-01T02:00:00.000Z')
+    expect(r?.note).toBe('keep me')
+    expect(r?.updatedAt).toBe('2026-10-01T02:00:00.000Z')
+    expect(db.updateLoopRun('run-1', {}, '2026-10-01T03:00:00.000Z')?.updatedAt).toBe(
+      '2026-10-01T03:00:00.000Z',
+    )
+    db.close()
+  })
+
+  it('updateLoopRun returns undefined for an unknown run', () => {
+    const db = new Db(dbPath)
+    expect(db.updateLoopRun('nope', { status: 'running' }, 'n')).toBeUndefined()
+    db.close()
+  })
+
+  it('malformed priority/usage JSON reads back as the empty value instead of throwing', () => {
+    const db = new Db(dbPath)
+    db.insertLoopRun(mkRun({ id: 'a' }))
+    db.insertLoopRun(mkRun({ id: 'b' }))
+    db.insertLoopRun(mkRun({ id: 'c' }))
+    db.close()
+    rawExec(dbPath, "UPDATE loop_runs SET priority = 'not json', usage = '{bad' WHERE id = 'a'")
+    rawExec(dbPath, `UPDATE loop_runs SET priority = '{"x":1}', usage = '[1,2]' WHERE id = 'b'`)
+    rawExec(
+      dbPath,
+      `UPDATE loop_runs SET priority = '[3,"x",null,2.5,4]', usage = '{"tokensIn":9,"turns":"x"}' WHERE id = 'c'`,
+    )
+
+    const db2 = new Db(dbPath)
+    expect(db2.getLoopRun('a')).toMatchObject({ priority: [], usage: ZERO_USAGE })
+    expect(db2.getLoopRun('b')).toMatchObject({ priority: [], usage: ZERO_USAGE })
+    expect(db2.getLoopRun('c')).toMatchObject({
+      priority: [3, 4],
+      usage: { ...ZERO_USAGE, tokensIn: 9 },
+    })
+    db2.close()
+  })
+
+  it('a run inserted with the column defaults (raw SQL) reads usage {} as zero usage', () => {
+    const db = new Db(dbPath)
+    db.close()
+    rawExec(
+      dbPath,
+      `INSERT INTO loop_runs (id, repo_id, epic, title, status, integ_branch, created_at, updated_at)
+       VALUES ('raw', 'zmrng', 1, 't', 'draft', 'gauntlet/raw/integ', 'c', 'u')`,
+    )
+    const db2 = new Db(dbPath)
+    expect(db2.getLoopRun('raw')).toMatchObject({
+      lanes: 1,
+      priority: [],
+      usage: ZERO_USAGE,
+      prevStatus: null,
+      integWorktree: null,
+      prUrl: null,
+      note: null,
+    })
+    db2.close()
+  })
+
+  it('persists runs across a reopen', () => {
+    const db = new Db(dbPath)
+    db.insertLoopRun(mkRun())
+    db.close()
+    expect(new Db(dbPath).getLoopRun('run-1')).toEqual(mkRun())
+  })
+})
+
+describe('loop tickets', () => {
+  it('upsertLoopTicket inserts, and getLoopTicket round-trips every field including nulls', () => {
+    const db = new Db(dbPath)
+    db.insertLoopRun(mkRun())
+    const t = mkTicket({
+      blockedBy: [3, 5],
+      state: 'waiting',
+      step: 'critic',
+      round: 2,
+      lastGap: 'spacing is off',
+      branch: 'gauntlet/run-1/t7',
+      worktree: '/tmp/repo/worktrees/loop-run-1-t7',
+      foldSha: null,
+      question: 'which bar?',
+      bar: null,
+      usage: { tokensIn: 3, tokensOut: 2, tokensCache: 1, costUsd: 0.1, turns: 1 },
+      startedAt: '2026-10-01T00:00:01.000Z',
+      stepStartedAt: '2026-10-01T00:00:02.000Z',
+    })
+    db.upsertLoopTicket(t)
+    expect(db.getLoopTicket('run-1', 7)).toEqual(t)
+    db.close()
+  })
+
+  it('upsertLoopTicket on an existing (run, number) updates every non-key column, never duplicating', () => {
+    const db = new Db(dbPath)
+    db.upsertLoopTicket(mkTicket())
+    const next = mkTicket({
+      title: 'Renamed',
+      body: 'new body',
+      ghState: 'closed',
+      blockedBy: [1],
+      state: 'done',
+      step: 'fold',
+      round: 3,
+      foldSha: 'abc123',
+      updatedAt: '2026-10-01T05:00:00.000Z',
+    })
+    db.upsertLoopTicket(next)
+    expect(db.listLoopTickets('run-1')).toEqual([next])
+    db.close()
+  })
+
+  it('getLoopTicket misses cleanly for an unknown run or number', () => {
+    const db = new Db(dbPath)
+    db.upsertLoopTicket(mkTicket())
+    expect(db.getLoopTicket('run-1', 8)).toBeUndefined()
+    expect(db.getLoopTicket('run-2', 7)).toBeUndefined()
+    db.close()
+  })
+
+  it('listLoopTickets is ordered by number ascending and scoped to one run', () => {
+    const db = new Db(dbPath)
+    for (const n of [30, 4, 12]) db.upsertLoopTicket(mkTicket({ number: n }))
+    db.upsertLoopTicket(mkTicket({ runId: 'other', number: 1 }))
+    expect(db.listLoopTickets('run-1').map((t) => t.number)).toEqual([4, 12, 30])
+    expect(db.listLoopTickets('other').map((t) => t.number)).toEqual([1])
+    expect(db.listLoopTickets('none')).toEqual([])
+    db.close()
+  })
+
+  it('updateLoopTicket patches fields, sets updatedAt, and leaves the keys and usage alone', () => {
+    const db = new Db(dbPath)
+    const usage = { tokensIn: 2, tokensOut: 2, tokensCache: 2, costUsd: 2, turns: 2 }
+    db.upsertLoopTicket(mkTicket({ question: 'q?', usage }))
+    const t = db.updateLoopTicket(
+      'run-1',
+      7,
+      {
+        state: 'executing',
+        step: 'builder',
+        round: 2,
+        lastGap: 'contrast',
+        blockedBy: [9, 8],
+        question: null,
+        stepStartedAt: '2026-10-01T00:30:00.000Z',
+      },
+      '2026-10-01T01:00:00.000Z',
+    )
+    expect(t).toMatchObject({
+      runId: 'run-1',
+      number: 7,
+      state: 'executing',
+      step: 'builder',
+      round: 2,
+      lastGap: 'contrast',
+      blockedBy: [9, 8],
+      question: null,
+      usage,
+      stepStartedAt: '2026-10-01T00:30:00.000Z',
+      updatedAt: '2026-10-01T01:00:00.000Z',
+    })
+    expect(db.getLoopTicket('run-1', 7)).toEqual(t)
+    db.close()
+  })
+
+  it('updateLoopTicket returns undefined for an unknown ticket', () => {
+    const db = new Db(dbPath)
+    expect(db.updateLoopTicket('run-1', 99, { state: 'done' }, 'n')).toBeUndefined()
+    db.close()
+  })
+
+  it('malformed blocked_by/usage JSON reads back as the empty value', () => {
+    const db = new Db(dbPath)
+    db.upsertLoopTicket(mkTicket())
+    db.close()
+    rawExec(
+      dbPath,
+      "UPDATE loop_tickets SET blocked_by = 'nope', usage = 'null' WHERE run_id = 'run-1' AND number = 7",
+    )
+    const db2 = new Db(dbPath)
+    expect(db2.getLoopTicket('run-1', 7)).toMatchObject({ blockedBy: [], usage: ZERO_USAGE })
+    db2.close()
+  })
+})
+
+describe('loop events', () => {
+  it('insertLoopEvent returns the persisted event, and listLoopEvents round-trips it', () => {
+    const db = new Db(dbPath)
+    const e1 = db.insertLoopEvent(
+      'run-1',
+      null,
+      'chat',
+      { role: 'operator', text: 'go' },
+      '2026-10-01T00:00:01.000Z',
+    )
+    const e2 = db.insertLoopEvent(
+      'run-1',
+      7,
+      'status',
+      { step: 'builder', from: 'todo', to: 'executing' },
+      '2026-10-01T00:00:02.000Z',
+    )
+    expect(e1).toEqual({
+      id: e1.id,
+      runId: 'run-1',
+      ticket: null,
+      kind: 'chat',
+      payload: { role: 'operator', text: 'go' },
+      createdAt: '2026-10-01T00:00:01.000Z',
+    })
+    expect(e2.id).toBeGreaterThan(e1.id)
+    expect(db.listLoopEvents('run-1')).toEqual([e1, e2])
+    db.close()
+  })
+
+  it('returns the MOST RECENT `limit` events, oldest → newest, scoped to one run', () => {
+    const db = new Db(dbPath)
+    for (let i = 1; i <= 6; i++) db.insertLoopEvent('run-1', null, 'chat', { text: `m${i}` }, 'n')
+    db.insertLoopEvent('run-2', null, 'chat', { text: 'other run' }, 'n')
+    expect(db.listLoopEvents('run-1', { limit: 3 }).map((e) => e.payload.text)).toEqual([
+      'm4',
+      'm5',
+      'm6',
+    ])
+    expect(db.listLoopEvents('run-2').map((e) => e.payload.text)).toEqual(['other run'])
+    db.close()
+  })
+
+  it('filters by kind before applying the limit', () => {
+    const db = new Db(dbPath)
+    db.insertLoopEvent('run-1', null, 'chat', { text: 'c1' }, 'n')
+    db.insertLoopEvent('run-1', 7, 'activity', { summary: 'a1' }, 'n')
+    db.insertLoopEvent('run-1', null, 'chat', { text: 'c2' }, 'n')
+    db.insertLoopEvent('run-1', 7, 'activity', { summary: 'a2' }, 'n')
+    db.insertLoopEvent('run-1', null, 'chat', { text: 'c3' }, 'n')
+    expect(
+      db.listLoopEvents('run-1', { kind: 'chat', limit: 2 }).map((e) => e.payload.text),
+    ).toEqual(['c2', 'c3'])
+    expect(db.listLoopEvents('run-1', { kind: 'activity' }).map((e) => e.ticket)).toEqual([7, 7])
+    db.close()
+  })
+
+  it('defaults the limit to 200 and clamps it to 1..1000', () => {
+    const db = new Db(dbPath)
+    const insertMany = (n: number): void => {
+      for (let i = 0; i < n; i++) db.insertLoopEvent('run-1', null, 'activity', { summary: `${i}` }, 'n')
+    }
+    insertMany(1005)
+    const dflt = db.listLoopEvents('run-1')
+    expect(dflt).toHaveLength(200)
+    expect(dflt[dflt.length - 1]?.payload.summary).toBe('1004')
+    expect(db.listLoopEvents('run-1', { limit: 5000 })).toHaveLength(1000)
+    expect(db.listLoopEvents('run-1', { limit: 0 })).toHaveLength(1)
+    expect(db.listLoopEvents('run-1', { limit: -4 })).toHaveLength(1)
+    expect(db.listLoopEvents('run-1', { limit: Number.NaN })).toHaveLength(200)
+    db.close()
+  })
+
+  it('a malformed payload reads back as {} instead of throwing', () => {
+    const db = new Db(dbPath)
+    db.insertLoopEvent('run-1', null, 'chat', { text: 'x' }, 'n')
+    db.insertLoopEvent('run-1', null, 'chat', { text: 'y' }, 'n')
+    db.close()
+    rawExec(dbPath, "UPDATE loop_events SET payload = '{oops' WHERE id = 1")
+    rawExec(dbPath, "UPDATE loop_events SET payload = '[1]' WHERE id = 2")
+    const db2 = new Db(dbPath)
+    expect(db2.listLoopEvents('run-1').map((e) => e.payload)).toEqual([{}, {}])
+    db2.close()
+  })
+})
+
+describe('addLoopUsage', () => {
+  const delta: TaskUsage = { tokensIn: 100, tokensOut: 20, tokensCache: 5, costUsd: 0.01, turns: 1 }
+
+  it('adds to the run AND the ticket, leaving other tickets untouched', () => {
+    const db = new Db(dbPath)
+    db.insertLoopRun(mkRun())
+    db.upsertLoopTicket(mkTicket({ number: 7 }))
+    db.upsertLoopTicket(mkTicket({ number: 8 }))
+    db.addLoopUsage('run-1', 7, delta, '2026-10-01T01:00:00.000Z')
+    db.addLoopUsage('run-1', 7, delta, '2026-10-01T02:00:00.000Z')
+    expect(db.getLoopRun('run-1')).toMatchObject({
+      usage: { tokensIn: 200, tokensOut: 40, tokensCache: 10, costUsd: 0.02, turns: 2 },
+      updatedAt: '2026-10-01T02:00:00.000Z',
+    })
+    expect(db.getLoopTicket('run-1', 7)).toMatchObject({
+      usage: { tokensIn: 200, tokensOut: 40, tokensCache: 10, costUsd: 0.02, turns: 2 },
+      updatedAt: '2026-10-01T02:00:00.000Z',
+    })
+    expect(db.getLoopTicket('run-1', 8)?.usage).toEqual(ZERO_USAGE)
+    db.close()
+  })
+
+  it('with a null ticket only the run accumulates (orchestrator usage)', () => {
+    const db = new Db(dbPath)
+    db.insertLoopRun(mkRun())
+    db.upsertLoopTicket(mkTicket())
+    db.addLoopUsage('run-1', null, delta, 'n')
+    expect(db.getLoopRun('run-1')?.usage.tokensIn).toBe(100)
+    expect(db.getLoopTicket('run-1', 7)?.usage).toEqual(ZERO_USAGE)
+    db.close()
+  })
+
+  it('does not lose counts under many rapid increments, and recovers from a malformed stored value', () => {
+    const db = new Db(dbPath)
+    db.insertLoopRun(mkRun())
+    db.upsertLoopTicket(mkTicket())
+    db.close()
+    rawExec(dbPath, "UPDATE loop_runs SET usage = 'garbage' WHERE id = 'run-1'")
+    const db2 = new Db(dbPath)
+    for (let i = 0; i < 50; i++) db2.addLoopUsage('run-1', 7, delta, 'n')
+    expect(db2.getLoopRun('run-1')?.usage).toMatchObject({ tokensIn: 5000, turns: 50 })
+    expect(db2.getLoopTicket('run-1', 7)?.usage).toMatchObject({ tokensIn: 5000, turns: 50 })
+    db2.close()
+  })
+
+  it('is a silent no-op for an unknown run or ticket', () => {
+    const db = new Db(dbPath)
+    expect(() => db.addLoopUsage('nope', 3, delta, 'n')).not.toThrow()
+    expect(db.getLoopRun('nope')).toBeUndefined()
     db.close()
   })
 })

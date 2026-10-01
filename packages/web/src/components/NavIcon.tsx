@@ -28,6 +28,7 @@ export type NavIconName =
   | 'minus'
   | 'square'
   | 'tool'
+  | 'loop'
 
 const SHAPES: Record<NavIconName, ReactNode> = {
   // Simple outline speech bubble with a tail.
@@ -105,6 +106,15 @@ const SHAPES: Record<NavIconName, ReactNode> = {
   square: <rect x="6" y="6" width="12" height="12" rx="1.8" />,
   // Wrench (tool call).
   tool: <path d="M14.7 6.3a4 4 0 0 0 4.9 4.9L11 19.8a2.1 2.1 0 0 1-3-3Z" />,
+  // Two chasing arrows closing a circle (the gauntlet loop).
+  loop: (
+    <>
+      <path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3L19.5 9" />
+      <path d="M19.5 4.5V9H15" />
+      <path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3L4.5 15" />
+      <path d="M4.5 19.5V15H9" />
+    </>
+  ),
 }
 
 interface Props {

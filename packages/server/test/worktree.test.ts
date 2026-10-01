@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync, symlinkSyn
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
-import { createWorktree, listWorktreeFiles, selfUpdate } from '../src/worktree.js'
+import { createWorktree, gitIn, listWorktreeFiles, selfUpdate } from '../src/worktree.js'
 import type { WorktreeFileNode } from '../src/types.js'
 
 let dir: string
@@ -252,5 +252,118 @@ describe('createWorktree', () => {
     expect(second.branch).toBe(first.branch)
     const log = execFileSync('git', ['-C', second.worktreePath, 'log', '--oneline']).toString()
     expect(log).toContain('wip on branch')
+  })
+
+  // ---- optional { branch, base, dir } override (gauntlet loop) ----
+
+  /** Trimmed stdout of a git command in `cwd`. */
+  const out = (cwd: string, args: string[]): string =>
+    execFileSync('git', ['-C', cwd, ...args]).toString().trim()
+
+  /** Commit a new file on the repo's current branch; returns the new HEAD sha. */
+  const commit = (cwd: string, file: string): string => {
+    writeFileSync(path.join(cwd, file), `${file}\n`)
+    git(cwd, ['add', '-A'])
+    git(cwd, ['commit', '-q', '-m', `add ${file}`])
+    return out(cwd, ['rev-parse', 'HEAD'])
+  }
+
+  it('an empty override object keeps the default name, dir, and base exactly', async () => {
+    const wt = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'task-1234abcd', 'Add mobile design', {})
+    expect(wt).toEqual({
+      branch: 'feat/zmrng/add-mobile-design-task-123',
+      worktreePath: path.join(wtDir(), 'task-123'),
+    })
+    expect(out(wt.worktreePath, ['rev-parse', 'HEAD'])).toBe(out(repo, ['rev-parse', DEFAULT_BRANCH]))
+  })
+
+  it('cuts the given branch off the given base sha in the given dir', async () => {
+    const baseSha = out(repo, ['rev-parse', 'HEAD'])
+    const tip = commit(repo, 'later.txt') // the default branch moves past the base
+    expect(tip).not.toBe(baseSha)
+
+    const wt = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'run-abcdef1234', 'ignored title', {
+      branch: 'gauntlet/run-abcd/t7',
+      base: baseSha,
+      dir: 'loop-run-abcd-t7',
+    })
+
+    expect(wt).toEqual({
+      branch: 'gauntlet/run-abcd/t7',
+      worktreePath: path.join(wtDir(), 'loop-run-abcd-t7'),
+    })
+    expect(out(wt.worktreePath, ['rev-parse', 'HEAD'])).toBe(baseSha)
+    expect(out(wt.worktreePath, ['branch', '--show-current'])).toBe('gauntlet/run-abcd/t7')
+    expect(out(repo, ['worktree', 'list', '--porcelain'])).toContain(realpathSync(wt.worktreePath))
+    expect(out(repo, ['branch', '--list', 'feat/zmrng/*'])).toBe('') // no default-named branch
+  })
+
+  it('a branch override without a base still cuts from the default branch', async () => {
+    const tip = commit(repo, 'tip.txt')
+    const wt = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'run-abcdef1234', 't', {
+      branch: 'gauntlet/run-abcd/integ',
+    })
+    expect(wt.branch).toBe('gauntlet/run-abcd/integ')
+    expect(out(wt.worktreePath, ['branch', '--show-current'])).toBe('gauntlet/run-abcd/integ')
+    expect(wt.worktreePath).toBe(path.join(wtDir(), 'run-abcd')) // default dir name
+    expect(out(wt.worktreePath, ['rev-parse', 'HEAD'])).toBe(tip)
+  })
+
+  it('a base override can be another branch tip (e.g. the integ branch)', async () => {
+    git(repo, ['branch', 'integ'])
+    const integTip = out(repo, ['rev-parse', 'integ'])
+    commit(repo, 'only-on-trunk.txt')
+    const wt = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'run-1', 't', {
+      branch: 'gauntlet/r/t3',
+      base: 'integ',
+      dir: 't3',
+    })
+    expect(out(wt.worktreePath, ['rev-parse', 'HEAD'])).toBe(integTip)
+  })
+
+  it('overrides stay idempotent: reuse the registered dir, then reattach the existing branch', async () => {
+    const opts = { branch: 'gauntlet/run-abcd/t9', base: out(repo, ['rev-parse', 'HEAD']), dir: 'loop-t9' }
+    const first = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'run-abcdef1234', 't', opts)
+    expect(first).toEqual({ branch: 'gauntlet/run-abcd/t9', worktreePath: path.join(wtDir(), 'loop-t9') })
+    const wip = commit(first.worktreePath, 'wip.txt')
+
+    const reused = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'run-abcdef1234', 't', opts)
+    expect(reused).toEqual(first)
+    expect(out(reused.worktreePath, ['rev-parse', 'HEAD'])).toBe(wip)
+
+    git(repo, ['worktree', 'remove', '--force', first.worktreePath])
+    const reattached = await createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'run-abcdef1234', 't', opts)
+    expect(reattached).toEqual(first)
+    // The existing branch is reattached with its commit, NOT recut from `base`.
+    expect(out(reattached.worktreePath, ['rev-parse', 'HEAD'])).toBe(wip)
+  })
+
+  it('rejects a dir override that is not a plain directory name, creating nothing', async () => {
+    for (const dir of ['', '.', '..', 'a/b', '../escape', 'a\\b']) {
+      await expect(
+        createWorktree(repo, DEFAULT_BRANCH, wtDir(), 'run-1', 't', { branch: 'gauntlet/x', dir }),
+      ).rejects.toThrow(/directory name/)
+    }
+    expect(out(repo, ['branch', '--list', 'gauntlet/*'])).toBe('')
+  })
+})
+
+describe('gitIn', () => {
+  let repo: string
+
+  beforeEach(() => {
+    repo = initRepo()
+  })
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('runs git inside cwd and resolves its trimmed stdout', async () => {
+    expect(await gitIn(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe(DEFAULT_BRANCH)
+    expect(await gitIn(repo, ['status', '--porcelain'])).toBe('')
+  })
+
+  it('rejects when git exits non-zero', async () => {
+    await expect(gitIn(repo, ['rev-parse', '--verify', 'no-such-ref'])).rejects.toThrow()
   })
 })

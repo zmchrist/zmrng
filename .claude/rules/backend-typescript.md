@@ -29,7 +29,13 @@ packages/server/src/
   terminal.ts  — TerminalManager: server-owned node-pty sessions (keyed by id) for the Workspace terminal; attach/detach survive a transient socket drop within a grace window
   chatAgent.ts — ChatManager: standalone chat `claude` Runners (GET /ws/chat), same RunnerFactory seam as TaskManager
   phases.ts    — phase state machine + system/kickoff prompts + lane queue
-  worktree.ts  — git worktree create/remove per task
+  loop.ts      — LoopManager: the Loop mode (gauntlet loop) engine — own lane pool (LOOP_MAX_LANES=3, separate from config.maxLanes), load gate, fresh claude child per ticket step, serial fold mutex, final scan + one final PR, persistent per-run orchestrator; same RunnerFactory seam as TaskManager/ChatManager
+  loopMap.ts   — pure Loop decision logic (bar/blocked-by parsing, frontier + pick order, verdict mapping, round fuse); no IO
+  loopPrompts.ts — Loop prompt contract + GAUNTLET_* control-token parsing (reuses styleDirective/PR_BODY_TEMPLATE/PR_RE from phases.ts)
+  loopGithub.ts — the LoopGitHub seam over `gh api` (sub-issues → epic task-list fallback; blocked_by → "Blocked by #N" fallback)
+  loopLoad.ts  — machine-load probe (available memory, not os.freemem(); load per core) feeding the lane-count advice and the new-pick gate
+  loopRoutes.ts — registerLoopRoutes(): the ungated /api/loop/* REST surface (plain function over a narrow manager interface, like kbRoutes)
+  worktree.ts  — git worktree create/remove per task (createWorktree takes an optional {branch, base, dir} override; exports gitIn)
   ws.ts        — WebSocket broadcast hub
 ```
 
@@ -54,7 +60,9 @@ spawn('claude', args, { cwd, env })
 `claude` launched inside the Workspace terminal is Max-OAuth-only too. `chatAgent.ts`'s
 `ChatManager` does **not** repeat the strip — it spawns through the same `RunnerFactory`
 seam as `TaskManager` (`Runner`'s own constructor already strips the key), so it is
-Max-OAuth-only by construction.
+Max-OAuth-only by construction. `loop.ts`'s `LoopManager` (every ticket step, the final-PR
+agent and the per-run orchestrator) is Max-OAuth-only the same way — never spawn a Loop
+child outside that seam.
 
 ### Attachment sanitization — trust nothing from the client
 Any request/frame field that can carry an operator's image/PDF attachment
@@ -81,7 +89,12 @@ is ignored everywhere, and the workspace socket REJECTS a frame that still asser
 Register route modules as PLAIN FUNCTIONS on the app instance (`registerAuth`,
 `registerKbRoutes`), not as `fastify-plugin` plugins — an encapsulated plugin's
 `onRequest` hook would not cover the parent's routes, and it is what lets a test attach
-them to a bare `Fastify()` and drive them with `app.inject()`.
+them to a bare `Fastify()` and drive them with `app.inject()`. `registerLoopRoutes` follows
+the same shape; the Loop surface (`/api/loop/*`) is deliberately UNGATED like the Workspace
+orchestrator — its main caller is a run's own orchestrator `curl`ing loopback — so it
+validates every body itself (400 before the manager is touched) instead of relying on a
+gate. Bodyless Loop POSTs must be called with no JSON content-type
+(`FST_ERR_CTP_EMPTY_JSON_BODY`).
 
 Never make the session cookie unconditionally `Secure`: browsers silently DROP a `Secure`
 cookie on a plain-http origin, and the VPS workspace is plain http on the tailnet.

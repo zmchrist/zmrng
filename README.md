@@ -293,6 +293,9 @@ pm2 startup                   # follow the printed command to survive reboots
 | `ZMRNG_PORT` | `4500` | Fastify port |
 | `ZMRNG_MODEL` | `opus` | Default model for new tasks (opus \| sonnet) |
 | `ZMRNG_MAX_LANES` | `2` | Max concurrent autonomous (plan→PR) tasks |
+| `ZMRNG_LOOP_MAX_LOAD_PER_CORE` | `1.0` | Loop mode: no NEW ticket is picked while the 1-minute load average per core exceeds this |
+| `ZMRNG_LOOP_MIN_FREE_MEM_MB` | `2048` | Loop mode: no NEW ticket is picked while available memory is below this many MB |
+| `ZMRNG_LOOP_PUMP_INTERVAL_MS` | `30000` | Loop mode: how often a deferred pick is re-checked |
 | `ZMRNG_DATA_DIR` | repo root | Writable dir for db + worktrees + `config/` (desktop sets this) |
 | `ZMRNG_WEB_DIST` | `packages/web/dist` | Built UI dir the server serves (desktop sets this) |
 

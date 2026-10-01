@@ -64,6 +64,11 @@ describe('mobileNav', () => {
     expect(viewForMode('tasks')).toBe('tasks')
   })
 
+  it('has no phone view for the desktop-only Loop mode and lands it on Tasks', () => {
+    expect(viewForMode('loop')).toBe('tasks')
+    expect(MOBILE_VIEWS.map((v) => v.id)).not.toContain('loop')
+  })
+
   it('labels a view for the top bar crumb', () => {
     expect(mobileViewLabel('kb')).toBe('KB')
     expect(mobileViewLabel('team')).toBe('Team chat')

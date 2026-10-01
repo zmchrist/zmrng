@@ -10,6 +10,7 @@ import {
   resolveHarnessDir,
   resolveAgents,
   resolveSecurityPolicy,
+  resolveLoopConfig,
   mergeSecurityPolicy,
   RegistryError,
   type RegistryEnv,
@@ -386,5 +387,59 @@ describe('resolveAgents', () => {
     writeFileSync(path.join(dir, 'agents.json'), '{ not json')
     const agents = resolveAgents({ configDir: dir, env: { ZMRNG_AGENTS: 'e:E:https://e/v1' } })
     expect(agents.map((a) => a.id)).toEqual(['e'])
+  })
+})
+
+describe('resolveLoopConfig (gauntlet loop load gate + pump cadence)', () => {
+  const DEFAULTS = { loopMaxLoadPerCore: 1.0, loopMinFreeMemMb: 2048, loopPumpIntervalMs: 30000 }
+
+  it('applies the defaults when env is empty', () => {
+    expect(resolveLoopConfig({})).toEqual(DEFAULTS)
+  })
+
+  it('reads valid overrides, including a fractional load per core', () => {
+    expect(
+      resolveLoopConfig({
+        ZMRNG_LOOP_MAX_LOAD_PER_CORE: '0.75',
+        ZMRNG_LOOP_MIN_FREE_MEM_MB: ' 4096 ',
+        ZMRNG_LOOP_PUMP_INTERVAL_MS: '5000',
+      }),
+    ).toEqual({ loopMaxLoadPerCore: 0.75, loopMinFreeMemMb: 4096, loopPumpIntervalMs: 5000 })
+  })
+
+  it('falls back to the default for a non-numeric, blank, or non-finite value', () => {
+    for (const bad of ['abc', '', '   ', '1.5x', 'NaN', 'Infinity', '-Infinity']) {
+      expect(
+        resolveLoopConfig({
+          ZMRNG_LOOP_MAX_LOAD_PER_CORE: bad,
+          ZMRNG_LOOP_MIN_FREE_MEM_MB: bad,
+          ZMRNG_LOOP_PUMP_INTERVAL_MS: bad,
+        }),
+      ).toEqual(DEFAULTS)
+    }
+  })
+
+  it('falls back to the default for 0 or a negative value, so a typo cannot disable the gate', () => {
+    for (const bad of ['0', '-1', '-0.5']) {
+      expect(
+        resolveLoopConfig({
+          ZMRNG_LOOP_MAX_LOAD_PER_CORE: bad,
+          ZMRNG_LOOP_MIN_FREE_MEM_MB: bad,
+          ZMRNG_LOOP_PUMP_INTERVAL_MS: bad,
+        }),
+      ).toEqual(DEFAULTS)
+    }
+  })
+
+  it('resolves each field independently (one bad value never sinks the others)', () => {
+    expect(
+      resolveLoopConfig({ ZMRNG_LOOP_MAX_LOAD_PER_CORE: '2', ZMRNG_LOOP_MIN_FREE_MEM_MB: 'nope' }),
+    ).toEqual({ ...DEFAULTS, loopMaxLoadPerCore: 2 })
+  })
+
+  it('the resolved config carries the three positive loop fields', () => {
+    expect(config.loopMaxLoadPerCore).toBeGreaterThan(0)
+    expect(config.loopMinFreeMemMb).toBeGreaterThan(0)
+    expect(config.loopPumpIntervalMs).toBeGreaterThan(0)
   })
 })

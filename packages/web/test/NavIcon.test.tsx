@@ -23,6 +23,7 @@ const NAMES: NavIconName[] = [
   'minus',
   'square',
   'tool',
+  'loop',
 ]
 
 describe('<NavIcon>', () => {

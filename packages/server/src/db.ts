@@ -30,6 +30,15 @@ import type {
   Session,
   KbChangeAction,
   KbChangeEntry,
+  LoopRun,
+  LoopRunStatus,
+  LoopTicket,
+  LoopTicketState,
+  LoopStep,
+  LoopGhState,
+  LoopEvent,
+  LoopEventKind,
+  LoopEventPayload,
 } from './types.js'
 import { GENERAL_CHANNEL_NAME, KB_SEED_SPACES } from './types.js'
 
@@ -40,6 +49,71 @@ import { GENERAL_CHANNEL_NAME, KB_SEED_SPACES } from './types.js'
  * still preserving undo history (see `Db.updatePageBody`).
  */
 const PAGE_REVISION_THROTTLE_MS = 30_000
+
+/** `listLoopEvents` page size when the caller passes no (or a non-finite) limit. */
+const LOOP_EVENTS_DEFAULT_LIMIT = 200
+/** Hard ceiling on one `listLoopEvents` page. */
+const LOOP_EVENTS_MAX_LIMIT = 1000
+
+/**
+ * The gauntlet-loop (Loop mode) tables. Declared ONCE and used twice: appended
+ * to `SCHEMA` for a fresh DB, and re-run by `ensureLoopSchema()` for an existing
+ * one. Additive only — three new tables and an index; no existing table is
+ * touched. JSON columns (`priority`, `blocked_by`, `usage`, `payload`) are parsed
+ * defensively on read; enum columns store the TypeScript literal verbatim.
+ */
+const LOOP_SCHEMA = `
+CREATE TABLE IF NOT EXISTS loop_runs (
+  id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  epic INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL,
+  prev_status TEXT,
+  lanes INTEGER NOT NULL DEFAULT 1,
+  integ_branch TEXT NOT NULL,
+  integ_worktree TEXT,
+  priority TEXT NOT NULL DEFAULT '[]',
+  pr_url TEXT,
+  note TEXT,
+  usage TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS loop_tickets (
+  run_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  url TEXT NOT NULL,
+  gh_state TEXT NOT NULL,
+  blocked_by TEXT NOT NULL DEFAULT '[]',
+  bar TEXT,
+  state TEXT NOT NULL,
+  step TEXT,
+  round INTEGER NOT NULL DEFAULT 0,
+  last_gap TEXT,
+  branch TEXT,
+  worktree TEXT,
+  fold_sha TEXT,
+  question TEXT,
+  note TEXT,
+  usage TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT,
+  step_started_at TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (run_id, number)
+);
+CREATE TABLE IF NOT EXISTS loop_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  ticket INTEGER,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS loop_events_run ON loop_events(run_id, id);
+`
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -201,7 +275,7 @@ CREATE TABLE IF NOT EXISTS kb_changelog (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_kb_changelog_space ON kb_changelog(space_id, id);
-`
+${LOOP_SCHEMA}`
 
 interface TaskRow {
   id: string
@@ -570,6 +644,179 @@ function rowToChangelogEntry(r: ChangelogRow): KbChangeEntry {
   }
 }
 
+// ---- gauntlet loop row interfaces + mappers (loop_runs / loop_tickets / loop_events) ----
+
+interface LoopRunRow {
+  id: string
+  repo_id: string
+  epic: number
+  title: string
+  status: string
+  prev_status: string | null
+  lanes: number
+  integ_branch: string
+  integ_worktree: string | null
+  priority: string
+  pr_url: string | null
+  note: string | null
+  usage: string
+  created_at: string
+  updated_at: string
+}
+
+interface LoopTicketRow {
+  run_id: string
+  number: number
+  title: string
+  body: string
+  url: string
+  gh_state: string
+  blocked_by: string
+  bar: string | null
+  state: string
+  step: string | null
+  round: number
+  last_gap: string | null
+  branch: string | null
+  worktree: string | null
+  fold_sha: string | null
+  question: string | null
+  note: string | null
+  usage: string
+  started_at: string | null
+  step_started_at: string | null
+  updated_at: string
+}
+
+interface LoopEventRow {
+  id: number
+  run_id: string
+  ticket: number | null
+  kind: string
+  payload: string
+  created_at: string
+}
+
+/** Parse a JSON column; `undefined` for malformed text. Never throws. */
+function parseJsonColumn(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+/** A JSON object column as a record; anything else (array, null, malformed) is `{}`. */
+function objectColumn(text: string): Record<string, unknown> {
+  const v = parseJsonColumn(text)
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {}
+}
+
+/** A JSON issue-number list (`priority`, `blocked_by`); non-integers dropped, malformed → []. */
+function intListColumn(text: string): number[] {
+  const v = parseJsonColumn(text)
+  return Array.isArray(v) ? v.filter((n): n is number => Number.isInteger(n)) : []
+}
+
+/** A JSON `TaskUsage` column; malformed → zero usage, a missing/bad field → 0. */
+function usageColumn(text: string): TaskUsage {
+  const r = objectColumn(text)
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  return {
+    tokensIn: num(r.tokensIn),
+    tokensOut: num(r.tokensOut),
+    tokensCache: num(r.tokensCache),
+    costUsd: num(r.costUsd),
+    turns: num(r.turns),
+  }
+}
+
+/** Serialize exactly the five `TaskUsage` counters (no stray keys reach the column). */
+function usageJson(u: TaskUsage): string {
+  return JSON.stringify({
+    tokensIn: u.tokensIn,
+    tokensOut: u.tokensOut,
+    tokensCache: u.tokensCache,
+    costUsd: u.costUsd,
+    turns: u.turns,
+  })
+}
+
+function sumUsage(a: TaskUsage, b: TaskUsage): TaskUsage {
+  return {
+    tokensIn: a.tokensIn + b.tokensIn,
+    tokensOut: a.tokensOut + b.tokensOut,
+    tokensCache: a.tokensCache + b.tokensCache,
+    costUsd: a.costUsd + b.costUsd,
+    turns: a.turns + b.turns,
+  }
+}
+
+function rowToLoopRun(r: LoopRunRow): LoopRun {
+  return {
+    id: r.id,
+    repoId: r.repo_id,
+    epic: r.epic,
+    title: r.title,
+    status: r.status as LoopRunStatus,
+    prevStatus: (r.prev_status as LoopRunStatus | null) ?? null,
+    lanes: r.lanes,
+    integBranch: r.integ_branch,
+    integWorktree: r.integ_worktree,
+    priority: intListColumn(r.priority),
+    prUrl: r.pr_url,
+    note: r.note,
+    usage: usageColumn(r.usage),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+function rowToLoopTicket(r: LoopTicketRow): LoopTicket {
+  return {
+    runId: r.run_id,
+    number: r.number,
+    title: r.title,
+    body: r.body,
+    url: r.url,
+    ghState: r.gh_state as LoopGhState,
+    blockedBy: intListColumn(r.blocked_by),
+    bar: r.bar,
+    state: r.state as LoopTicketState,
+    step: (r.step as LoopStep | null) ?? null,
+    round: r.round,
+    lastGap: r.last_gap,
+    branch: r.branch,
+    worktree: r.worktree,
+    foldSha: r.fold_sha,
+    question: r.question,
+    note: r.note,
+    usage: usageColumn(r.usage),
+    startedAt: r.started_at,
+    stepStartedAt: r.step_started_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+function rowToLoopEvent(r: LoopEventRow): LoopEvent {
+  return {
+    id: r.id,
+    runId: r.run_id,
+    ticket: r.ticket ?? null,
+    kind: r.kind as LoopEventKind,
+    payload: objectColumn(r.payload) as LoopEventPayload,
+    createdAt: r.created_at,
+  }
+}
+
+/** `listLoopEvents` limit: default when absent/non-finite, else clamped to 1..MAX. */
+function clampLoopEventLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) return LOOP_EVENTS_DEFAULT_LIMIT
+  return Math.min(LOOP_EVENTS_MAX_LIMIT, Math.max(1, Math.floor(limit)))
+}
+
 /** Fields a caller may patch on a task. Usage accumulators are excluded — use `addUsage`. */
 export type TaskPatch = Partial<
   Pick<
@@ -608,6 +855,69 @@ const COLUMN_BY_FIELD: Record<keyof TaskPatch, string> = {
   blockedReason: 'blocked_reason',
 }
 
+/** Fields a caller may patch on a Loop run. Usage is excluded — use `addLoopUsage`. */
+export type LoopRunPatch = Partial<Omit<LoopRun, 'id' | 'createdAt' | 'updatedAt' | 'usage'>>
+
+const LOOP_RUN_COLUMN_BY_FIELD: Record<keyof LoopRunPatch, string> = {
+  repoId: 'repo_id',
+  epic: 'epic',
+  title: 'title',
+  status: 'status',
+  prevStatus: 'prev_status',
+  lanes: 'lanes',
+  integBranch: 'integ_branch',
+  integWorktree: 'integ_worktree',
+  priority: 'priority',
+  prUrl: 'pr_url',
+  note: 'note',
+}
+
+/** Fields a caller may patch on a Loop ticket. Usage is excluded — use `addLoopUsage`. */
+export type LoopTicketPatch = Partial<
+  Omit<LoopTicket, 'runId' | 'number' | 'updatedAt' | 'usage'>
+>
+
+const LOOP_TICKET_COLUMN_BY_FIELD: Record<keyof LoopTicketPatch, string> = {
+  title: 'title',
+  body: 'body',
+  url: 'url',
+  ghState: 'gh_state',
+  blockedBy: 'blocked_by',
+  bar: 'bar',
+  state: 'state',
+  step: 'step',
+  round: 'round',
+  lastGap: 'last_gap',
+  branch: 'branch',
+  worktree: 'worktree',
+  foldSha: 'fold_sha',
+  question: 'question',
+  note: 'note',
+  startedAt: 'started_at',
+  stepStartedAt: 'step_started_at',
+}
+
+/**
+ * `SET` assignments + bound params for a loop-table patch. Column names come ONLY
+ * from the fixed field→column map (an unknown key is ignored, never interpolated),
+ * an `undefined` field means "unchanged" (`null` clears), and an array — the
+ * issue-number JSON columns — is serialized.
+ */
+function loopPatchAssignments(
+  patch: object,
+  columns: Readonly<Record<string, string>>,
+): { sets: string[]; params: Record<string, unknown> } {
+  const sets: string[] = []
+  const params: Record<string, unknown> = {}
+  for (const [field, value] of Object.entries(patch)) {
+    if (value === undefined || !Object.hasOwn(columns, field)) continue
+    const col = columns[field]
+    sets.push(`${col} = @${col}`)
+    params[col] = Array.isArray(value) ? JSON.stringify(value) : value
+  }
+  return { sets, params }
+}
+
 export class Db {
   private db: Database.Database
 
@@ -623,6 +933,7 @@ export class Db {
     this.ensureColumns()
     this.ensurePageColumns()
     this.ensureAuthSchema()
+    this.ensureLoopSchema()
     this.seedGeneralChannel()
     this.seedKbSpaces()
   }
@@ -782,6 +1093,17 @@ export class Db {
     if (!columnsOf('members').has('user_id')) {
       this.db.exec('ALTER TABLE members ADD COLUMN user_id INTEGER')
     }
+  }
+
+  /**
+   * Idempotently bring a PRE-LOOP `zmrng.db` up to the gauntlet-loop schema: the
+   * `loop_runs` / `loop_tickets` / `loop_events` tables and their index. Additive
+   * only, same policy as `ensureColumns()` — every statement is `CREATE … IF NOT
+   * EXISTS` (belt-and-braces: `SCHEMA` already carries `LOOP_SCHEMA`, so this is
+   * a no-op on a fresh DB) and NO existing table is altered or rewritten.
+   */
+  private ensureLoopSchema(): void {
+    this.db.exec(LOOP_SCHEMA)
   }
 
   createTask(input: {
@@ -1825,5 +2147,228 @@ export class Db {
       else roots.push(node)
     }
     return roots
+  }
+
+  // ===================================================================
+  // gauntlet loop (Loop mode) — runs, tickets, events. Owned by LoopManager
+  // (loop.ts). See .agents/plans/gauntlet-loop-tab.md, "Persistence".
+  // ===================================================================
+
+  insertLoopRun(run: LoopRun): void {
+    this.db
+      .prepare(
+        `INSERT INTO loop_runs (id, repo_id, epic, title, status, prev_status, lanes, integ_branch,
+           integ_worktree, priority, pr_url, note, usage, created_at, updated_at)
+         VALUES (@id, @repoId, @epic, @title, @status, @prevStatus, @lanes, @integBranch,
+           @integWorktree, @priority, @prUrl, @note, @usage, @createdAt, @updatedAt)`,
+      )
+      .run({
+        id: run.id,
+        repoId: run.repoId,
+        epic: run.epic,
+        title: run.title,
+        status: run.status,
+        prevStatus: run.prevStatus,
+        lanes: run.lanes,
+        integBranch: run.integBranch,
+        integWorktree: run.integWorktree,
+        priority: JSON.stringify(run.priority),
+        prUrl: run.prUrl,
+        note: run.note,
+        usage: usageJson(run.usage),
+        createdAt: run.createdAt,
+        updatedAt: run.updatedAt,
+      })
+  }
+
+  getLoopRun(id: string): LoopRun | undefined {
+    const row = this.db.prepare('SELECT * FROM loop_runs WHERE id = ?').get(id) as
+      | LoopRunRow
+      | undefined
+    return row ? rowToLoopRun(row) : undefined
+  }
+
+  /** Every run: non-archived first, then newest `createdAt` first within each group. */
+  listLoopRuns(): LoopRun[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM loop_runs
+         ORDER BY (status = 'archived') ASC, created_at DESC, rowid DESC`,
+      )
+      .all() as LoopRunRow[]
+    return rows.map(rowToLoopRun)
+  }
+
+  /** Patch a run and stamp `updated_at = now`; `undefined` when the run is unknown. */
+  updateLoopRun(id: string, patch: LoopRunPatch, now: string): LoopRun | undefined {
+    const { sets, params } = loopPatchAssignments(patch, LOOP_RUN_COLUMN_BY_FIELD)
+    sets.push('updated_at = @updated_at')
+    this.db
+      .prepare(`UPDATE loop_runs SET ${sets.join(', ')} WHERE id = @id`)
+      .run({ ...params, id, updated_at: now })
+    return this.getLoopRun(id)
+  }
+
+  /**
+   * Insert a ticket, or overwrite EVERY non-key column of an existing
+   * `(run_id, number)` row — including `usage`, so a caller re-upserting a known
+   * ticket must carry its current usage (e.g. spread the row read back).
+   */
+  upsertLoopTicket(t: LoopTicket): void {
+    this.db
+      .prepare(
+        `INSERT INTO loop_tickets (run_id, number, title, body, url, gh_state, blocked_by, bar, state,
+           step, round, last_gap, branch, worktree, fold_sha, question, note, usage, started_at,
+           step_started_at, updated_at)
+         VALUES (@runId, @number, @title, @body, @url, @ghState, @blockedBy, @bar, @state,
+           @step, @round, @lastGap, @branch, @worktree, @foldSha, @question, @note, @usage, @startedAt,
+           @stepStartedAt, @updatedAt)
+         ON CONFLICT(run_id, number) DO UPDATE SET
+           title = excluded.title,
+           body = excluded.body,
+           url = excluded.url,
+           gh_state = excluded.gh_state,
+           blocked_by = excluded.blocked_by,
+           bar = excluded.bar,
+           state = excluded.state,
+           step = excluded.step,
+           round = excluded.round,
+           last_gap = excluded.last_gap,
+           branch = excluded.branch,
+           worktree = excluded.worktree,
+           fold_sha = excluded.fold_sha,
+           question = excluded.question,
+           note = excluded.note,
+           usage = excluded.usage,
+           started_at = excluded.started_at,
+           step_started_at = excluded.step_started_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run({
+        runId: t.runId,
+        number: t.number,
+        title: t.title,
+        body: t.body,
+        url: t.url,
+        ghState: t.ghState,
+        blockedBy: JSON.stringify(t.blockedBy),
+        bar: t.bar,
+        state: t.state,
+        step: t.step,
+        round: t.round,
+        lastGap: t.lastGap,
+        branch: t.branch,
+        worktree: t.worktree,
+        foldSha: t.foldSha,
+        question: t.question,
+        note: t.note,
+        usage: usageJson(t.usage),
+        startedAt: t.startedAt,
+        stepStartedAt: t.stepStartedAt,
+        updatedAt: t.updatedAt,
+      })
+  }
+
+  getLoopTicket(runId: string, n: number): LoopTicket | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM loop_tickets WHERE run_id = ? AND number = ?')
+      .get(runId, n) as LoopTicketRow | undefined
+    return row ? rowToLoopTicket(row) : undefined
+  }
+
+  /** A run's tickets, ordered by issue number ascending. */
+  listLoopTickets(runId: string): LoopTicket[] {
+    const rows = this.db
+      .prepare('SELECT * FROM loop_tickets WHERE run_id = ? ORDER BY number ASC')
+      .all(runId) as LoopTicketRow[]
+    return rows.map(rowToLoopTicket)
+  }
+
+  /** Patch a ticket and stamp `updated_at = now`; `undefined` when the ticket is unknown. */
+  updateLoopTicket(
+    runId: string,
+    n: number,
+    patch: LoopTicketPatch,
+    now: string,
+  ): LoopTicket | undefined {
+    const { sets, params } = loopPatchAssignments(patch, LOOP_TICKET_COLUMN_BY_FIELD)
+    sets.push('updated_at = @updated_at')
+    this.db
+      .prepare(`UPDATE loop_tickets SET ${sets.join(', ')} WHERE run_id = @run_id AND number = @number`)
+      .run({ ...params, run_id: runId, number: n, updated_at: now })
+    return this.getLoopTicket(runId, n)
+  }
+
+  insertLoopEvent(
+    runId: string,
+    ticket: number | null,
+    kind: LoopEventKind,
+    payload: LoopEventPayload,
+    now: string,
+  ): LoopEvent {
+    const info = this.db
+      .prepare(
+        'INSERT INTO loop_events (run_id, ticket, kind, payload, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(runId, ticket, kind, JSON.stringify(payload), now)
+    return { id: Number(info.lastInsertRowid), runId, ticket, kind, payload, createdAt: now }
+  }
+
+  /**
+   * A run's MOST RECENT `limit` events (default 200, clamped to 1..1000),
+   * optionally of one `kind`, returned oldest → newest — the order a transcript
+   * renders, mirroring `listMessages`' newest-page-ascending read.
+   */
+  listLoopEvents(runId: string, opts: { limit?: number; kind?: LoopEventKind } = {}): LoopEvent[] {
+    const limit = clampLoopEventLimit(opts.limit)
+    const rows = (
+      opts.kind === undefined
+        ? this.db
+            .prepare(
+              `SELECT * FROM (
+                 SELECT * FROM loop_events WHERE run_id = ? ORDER BY id DESC LIMIT ?
+               ) ORDER BY id ASC`,
+            )
+            .all(runId, limit)
+        : this.db
+            .prepare(
+              `SELECT * FROM (
+                 SELECT * FROM loop_events WHERE run_id = ? AND kind = ? ORDER BY id DESC LIMIT ?
+               ) ORDER BY id ASC`,
+            )
+            .all(runId, opts.kind, limit)
+    ) as LoopEventRow[]
+    return rows.map(rowToLoopEvent)
+  }
+
+  /**
+   * Atomically add a usage delta to the run and, when `ticket` is non-null, to
+   * that ticket too — one IMMEDIATE transaction (the write lock is taken before
+   * the read), so the JSON read-modify-write can never lose a concurrent count;
+   * the loop analogue of `addUsage`'s `col = col + delta`. A malformed stored
+   * value restarts from zero rather than throwing; an unknown run/ticket is a
+   * silent no-op. Both rows get `updated_at = now`.
+   */
+  addLoopUsage(runId: string, ticket: number | null, delta: TaskUsage, now: string): void {
+    const apply = this.db.transaction(() => {
+      const run = this.db.prepare('SELECT usage FROM loop_runs WHERE id = ?').get(runId) as
+        | { usage: string }
+        | undefined
+      if (run) {
+        this.db
+          .prepare('UPDATE loop_runs SET usage = ?, updated_at = ? WHERE id = ?')
+          .run(usageJson(sumUsage(usageColumn(run.usage), delta)), now, runId)
+      }
+      if (ticket === null) return
+      const t = this.db
+        .prepare('SELECT usage FROM loop_tickets WHERE run_id = ? AND number = ?')
+        .get(runId, ticket) as { usage: string } | undefined
+      if (t) {
+        this.db
+          .prepare('UPDATE loop_tickets SET usage = ?, updated_at = ? WHERE run_id = ? AND number = ?')
+          .run(usageJson(sumUsage(usageColumn(t.usage), delta)), now, runId, ticket)
+      }
+    })
+    apply.immediate()
   }
 }

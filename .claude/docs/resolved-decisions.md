@@ -133,3 +133,30 @@ that revisits one of these.
   the app instance rather than `fastify-plugin` plugins — an encapsulated plugin's `onRequest`
   hook would not cover the parent's routes — which is also what makes the gate and the KB
   attribution testable with `app.inject()` against a bare `Fastify()`.
+
+- Gauntlet Loop (the **Loop** tab; ADR `docs/adr/0003-gauntlet-loop.md`, plan
+  `.agents/plans/gauntlet-loop-tab.md`; technique credit robonuggets/gauntlet-loop, CC-BY-4.0,
+  after Matt Shumer's "Claude of Duty") — D1–D7 are settled, don't re-open them:
+  - **D1** — a separate `LoopManager` (`loop.ts`), NOT Task rows: the gauntlet needs a fresh
+    context per step, a round fuse, serial folds and no per-ticket PR; bending `TaskManager`
+    would rewrite the highest-value state machine. `phases.ts` is only imported from.
+  - **D2** — the orchestrator acts through loopback REST via `curl` tool calls (validated,
+    `app.inject()`-tested routes), not control tokens in prose and not MCP (deferred).
+  - **D3** — Loop lanes have their OWN pool: `LOOP_MAX_LANES = 3` across ALL Loop runs,
+    separate from `config.maxLanes`, never shown in the task Lanes tab (the operator overruled
+    the first draft's shared cap and accepted 8+ `claude` processes in the worst case).
+  - **D4** — a per-run integration branch (`gauntlet/<run8>/integ`), serial folds under a
+    mutex, the SERVER pushes integ only after a machine-asserted fold, then ONE final PR →
+    default branch. Never auto-merged; `main` is never touched per ticket.
+  - **D5** — blind binary A/B with server-randomized labels; a tie or unparseable answer is a
+    LOSE; `MAX_ROUNDS = 6` parks the ticket `needs-human`; a ticket with no bar is never picked.
+  - **D6** — the final PR passes the existing deterministic security scan, fail-closed to a
+    `blocked` run; deliberately NO automatic security-fix rounds (add a fix ticket or fix by hand).
+  - **D7** — the orchestrator picks the lane count from real load (`GET /api/loop/load`) and
+    the server hard-gates NEW picks on it (`ZMRNG_LOOP_MAX_LOAD_PER_CORE`,
+    `ZMRNG_LOOP_MIN_FREE_MEM_MB`); it only defers, never kills in-flight work. Memory is
+    *available* memory (`MemAvailable` / macOS free+inactive+speculative+purgeable), never
+    `os.freemem()`, which under-reports on macOS.
+  - Scope also settled: Loop is desktop-only (the phone shell never shows it); one run is open
+    in the view at a time; the layout is fixed; issues already closed on GitHub start `done`;
+    a live run reboots `stale` and is resumed manually (mirroring Restart-agent).

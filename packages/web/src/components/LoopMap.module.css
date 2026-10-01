@@ -1,0 +1,192 @@
+/* Loop tab — the ticket map (layered DAG). Tokens only; node coordinates are
+   inline (computed by loopMap.ts), everything else lives here. */
+.map {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-strong);
+  font-size: 0.85rem;
+}
+
+.title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.bar {
+  flex: 1;
+  max-width: 14rem;
+  height: 4px;
+  background: var(--well-strong);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  background: var(--status-done);
+  transition: width var(--transition);
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.empty {
+  padding: 0.9rem;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.canvas {
+  position: relative;
+}
+
+.edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.edges line {
+  stroke: var(--border-strong);
+  stroke-width: 1.4;
+}
+
+.edges line[data-done] {
+  stroke: var(--status-done);
+}
+
+.node {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+
+.node[data-state='executing'],
+.node[data-state='reviewing'],
+.node[data-state='validating'],
+.node[data-state='finishing'],
+.node[data-state='folding'],
+.node[data-state='waiting'] {
+  border-color: var(--accent-line);
+}
+
+.node[data-state='needs-human'] {
+  border-color: var(--status-blocked);
+}
+
+.node[data-state='skipped'] {
+  opacity: 0.6;
+}
+
+/* The read-only checkbox. Color follows the glyph; the mark inherits it. */
+.glyph {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border: 1.5px solid currentColor;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+}
+
+.glyph[data-glyph='checked'] {
+  color: var(--status-done);
+}
+
+.glyph[data-glyph='active'] {
+  color: var(--status-executing);
+}
+
+.glyph[data-glyph='warn'] {
+  color: var(--status-blocked);
+}
+
+.glyph[data-glyph='skipped'] {
+  color: var(--status-archived);
+}
+
+.mark {
+  width: 12px;
+  height: 12px;
+}
+
+.nodeBody {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.nodeTitle {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nodeTitle:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.nodeMeta {
+  display: flex;
+  gap: 0.4rem;
+  min-width: 0;
+  font-size: 0.7rem;
+}
+
+.nodeState {
+  flex: none;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.nodeNote {
+  min-width: 0;
+  color: var(--status-blocked);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
