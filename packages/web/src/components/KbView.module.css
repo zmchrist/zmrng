@@ -175,7 +175,6 @@
 }
 
 .search:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -198,7 +197,6 @@
 }
 
 .select:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -289,7 +287,6 @@
 }
 
 .createInlineInput:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -551,7 +548,6 @@
 }
 
 .bodyTextarea:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -694,7 +690,6 @@
 }
 
 .handleGateInput:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 

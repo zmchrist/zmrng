@@ -15,7 +15,6 @@
   font-size: 12px;
 }
 .agentSelect:focus {
-  outline: none;
   border-color: var(--accent);
 }
 
@@ -189,7 +188,6 @@
   resize: vertical;
 }
 .input:focus {
-  outline: none;
   border-color: var(--accent);
 }
 
