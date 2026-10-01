@@ -209,6 +209,7 @@
 
 .rowMain:focus-visible,
 .subRow:focus-visible {
-  outline: 1px solid var(--accent);
+  /* 2px --focus-color like the global ring; 1px --accent measured 3.32:1 (2.4.13). */
+  outline: 2px solid var(--focus-color);
   outline-offset: 2px;
 }

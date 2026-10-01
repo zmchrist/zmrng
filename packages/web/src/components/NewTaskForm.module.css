@@ -47,10 +47,8 @@
 }
 .input:focus,
 .textarea:focus {
-  outline: none;
   border-color: var(--accent-line);
   background: var(--well-strong);
-  box-shadow: var(--focus-ring);
 }
 .input::placeholder,
 .textarea::placeholder {
@@ -104,9 +102,7 @@
   background-color: var(--surface-hover);
 }
 .select:focus {
-  outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
 }
 /* the OS-rendered open list — tint it to smoke so it isn't a white slab */
 .select option {

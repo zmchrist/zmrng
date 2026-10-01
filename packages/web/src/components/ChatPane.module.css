@@ -47,9 +47,7 @@
   background-color: var(--surface-hover);
 }
 .select:focus {
-  outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
 }
 .select:disabled {
   opacity: 0.5;
@@ -193,7 +191,6 @@
   transition: var(--transition);
 }
 .input:focus {
-  outline: none;
   border-color: var(--accent);
 }
 

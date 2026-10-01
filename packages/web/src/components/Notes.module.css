@@ -84,7 +84,6 @@
   font-family: var(--font-mono);
 }
 .input:focus {
-  outline: none;
   border-color: var(--accent);
 }
 
