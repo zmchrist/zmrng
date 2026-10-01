@@ -18,6 +18,8 @@ import {
   type ThreadState,
 } from '../chatThread'
 import { ThinkingDots } from './ThinkingDots'
+import { ProcessStrip } from './ProcessStrip'
+import { applyProcess, endTurn as endProcessTurn, type ProcRow } from '../processStrip'
 import type { CaveStyle, EffortLevel, ModelAlias, RepoTarget, WorkflowPreset } from '../types'
 
 interface Props {
@@ -92,6 +94,7 @@ export function ChatPane({
   // conversation back up, without showing the prefix in the displayed bubble.
   const primedRef = useRef(saved.length > 0)
   const [draft, setDraft] = useState('')
+  const [processes, setProcesses] = useState<ProcRow[]>([])
   const files = useAttachments()
   const wsRef = useRef<WebSocket | null>(null)
   // Latest onLane without re-running the socket effect (which would respawn).
@@ -128,10 +131,17 @@ export function ChatPane({
         case 'lane':
           onLaneRef.current?.(msg.laneId)
           break
+        case 'process':
+          setProcesses((rows) => applyProcess(rows, msg.event, Date.now()))
+          break
         case 'result':
+          setThread((s) => endTurn(s))
+          setProcesses((rows) => endProcessTurn(rows))
+          break
         case 'exit':
         case 'error':
           setThread((s) => endTurn(s))
+          setProcesses([])
           break
         // 'ready' — session established; nothing to render.
       }
@@ -184,6 +194,7 @@ export function ChatPane({
     primedRef.current = false
     setSaved([])
     setThread(emptyThread())
+    setProcesses([])
     saveChatThread(id, [])
   }, [id])
 
@@ -317,6 +328,8 @@ export function ChatPane({
           </button>
         )}
       </div>
+
+      <ProcessStrip rows={processes} />
 
       <div
         className={styles.composer}

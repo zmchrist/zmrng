@@ -8,6 +8,8 @@ import {
   type Attachment,
   type AttachmentKind,
   type EffortLevel,
+  type ProcessEvent,
+  type ProcessKind,
   type TaskUsage,
 } from './types.js'
 
@@ -173,6 +175,141 @@ export function buildUserMessage(text: string, attachments?: Attachment[]): obje
   return { type: 'user', message: { role: 'user', content } }
 }
 
+// ---- running-process tracking (the chat surfaces' process strip) -----------
+
+const SUBAGENT_TOOLS = new Set(['Task', 'Agent'])
+/** Tools that stop a background shell, keyed by the shell id in their input. */
+const SHELL_KILL_TOOLS = new Set(['KillShell', 'KillBash', 'TaskStop'])
+/** Tools that poll a background shell; their result reports its status. */
+const SHELL_POLL_TOOLS = new Set(['BashOutput', 'TaskOutput'])
+/** `Bash` with `run_in_background` answers with the shell id it was given. */
+const BG_SHELL_ID_RE = /background with ID:\s*([\w-]+)/i
+const SHELL_STATUS_RE = /<status>\s*(completed|failed|killed)\s*<\/status>/i
+const SYSTEM_DONE_STATUSES = new Set(['completed', 'failed', 'killed', 'stopped'])
+/** Bound on each tracking map, so a long session can never grow it without limit. */
+const MAX_TRACKED = 200
+
+/** Full text of a tool_result `content` (string, or array of text blocks). */
+function resultText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((b) => {
+      const rb = asRecord(b)
+      return rb && rb.type === 'text' ? (asString(rb.text) ?? '') : ''
+    })
+    .join('')
+}
+
+function boundedSet<V>(map: Map<string, V>, key: string, value: V): void {
+  if (map.size >= MAX_TRACKED) {
+    const oldest = map.keys().next().value
+    if (oldest !== undefined) map.delete(oldest)
+  }
+  map.set(key, value)
+}
+
+interface OpenTool {
+  kind: ProcessKind
+  /** For a shell kill/poll tool: the background shell id it targets. */
+  shellTarget?: string
+  kills?: boolean
+}
+
+/**
+ * Pure stream-json -> `ProcessEvent` translator behind the running-process
+ * strip. Pairs every main-agent `tool_use` with its `tool_result` by id; a
+ * background `Bash` stays running past its (immediate) result until a kill
+ * tool, a poll reporting a final `<status>`, or a system notification ends it.
+ * Subagent-internal tool calls (`parent_tool_use_id` set) are skipped — the
+ * subagent's own row already covers them.
+ */
+export class ProcessTracker {
+  private open = new Map<string, OpenTool>()
+  /** background shell id -> the row id (the spawning tool_use id). */
+  private shells = new Map<string, string>()
+
+  fromAssistant(obj: Record<string, unknown>): ProcessEvent[] {
+    if (asString(obj.parent_tool_use_id)) return []
+    const content = asRecord(obj.message)?.content
+    if (!Array.isArray(content)) return []
+    const out: ProcessEvent[] = []
+    for (const block of content) {
+      const rb = asRecord(block)
+      if (!rb || rb.type !== 'tool_use') continue
+      const name = asString(rb.name)
+      const id = asString(rb.id)
+      if (!name || !id) continue
+      const input = asRecord(rb.input)
+      const kind: ProcessKind = SUBAGENT_TOOLS.has(name)
+        ? 'subagent'
+        : name === 'Bash' && input?.run_in_background === true
+          ? 'background'
+          : 'tool'
+      const entry: OpenTool = { kind }
+      if (SHELL_KILL_TOOLS.has(name) || SHELL_POLL_TOOLS.has(name)) {
+        entry.shellTarget =
+          asString(input?.shell_id) ?? asString(input?.bash_id) ?? asString(input?.task_id)
+        entry.kills = SHELL_KILL_TOOLS.has(name)
+      }
+      boundedSet(this.open, id, entry)
+      const label = kind === 'subagent' ? (asString(input?.subagent_type) ?? name) : name
+      out.push({ phase: 'start', id, kind, name: label, summary: summarizeTool(name, input) })
+    }
+    return out
+  }
+
+  fromUser(obj: Record<string, unknown>): ProcessEvent[] {
+    if (asString(obj.parent_tool_use_id)) return []
+    const content = asRecord(obj.message)?.content
+    if (!Array.isArray(content)) return []
+    const out: ProcessEvent[] = []
+    for (const block of content) {
+      const rb = asRecord(block)
+      if (!rb || rb.type !== 'tool_result') continue
+      const id = asString(rb.tool_use_id)
+      const entry = id ? this.open.get(id) : undefined
+      if (!id || !entry) continue
+      this.open.delete(id)
+      const isError = rb.is_error === true
+      const text = resultText(rb.content)
+      if (entry.kind === 'background' && !isError) {
+        const shellId = BG_SHELL_ID_RE.exec(text)?.[1]
+        // Keep the row running until the shell itself ends. Without an id to
+        // follow it by, end it now rather than leave an unkillable ghost row.
+        if (shellId) {
+          boundedSet(this.shells, shellId, id)
+          continue
+        }
+      }
+      out.push({ phase: 'end', id, isError })
+      if (entry.shellTarget) {
+        if (entry.kills) out.push(...this.endShell(entry.shellTarget, false))
+        else {
+          const status = SHELL_STATUS_RE.exec(text)?.[1]?.toLowerCase()
+          if (status) out.push(...this.endShell(entry.shellTarget, status !== 'completed'))
+        }
+      }
+    }
+    return out
+  }
+
+  /** A `system` line announcing a background task's end (newer CLI versions). */
+  fromSystem(obj: Record<string, unknown>): ProcessEvent[] {
+    const status = asString(obj.status)?.toLowerCase()
+    if (!status || !SYSTEM_DONE_STATUSES.has(status)) return []
+    const shellId = asString(obj.task_id) ?? asString(obj.shell_id) ?? asString(obj.bash_id)
+    return shellId ? this.endShell(shellId, status === 'failed') : []
+  }
+
+  private endShell(shellId: string, isError: boolean): ProcessEvent[] {
+    const rowId = this.shells.get(shellId)
+    if (!rowId) return []
+    this.shells.delete(shellId)
+    return [{ phase: 'end', id: rowId, isError }]
+  }
+}
+
 export interface RunnerCallbacks {
   onSession(sessionId: string): void
   onAssistantText(text: string): void
@@ -180,6 +317,8 @@ export interface RunnerCallbacks {
   onResult(text: string, isError: boolean, usage: ResultUsage | undefined): void
   onToolUse(name: string, summary: string, isSubagent: boolean, subagentType?: string): void
   onSubagentResult(subagentType: string, summary: string, isError: boolean): void
+  /** Running-process strip updates (optional — only the chat surfaces listen). */
+  onProcess?(event: ProcessEvent): void
   onExit(code: number | null, signal: NodeJS.Signals | null): void
   onSpawnError(err: Error): void
 }
@@ -217,6 +356,7 @@ export class Runner {
   private static readonly SIGKILL_GRACE_MS = 5000
   /** tool_use_id → subagent_type, for matching a Task spawn to its tool_result. */
   private pendingTasks = new Map<string, string>()
+  private processes = new ProcessTracker()
 
   constructor(opts: SpawnOptions, private cb: RunnerCallbacks) {
     // Strip ANTHROPIC_API_KEY so claude authenticates with the operator's Max
@@ -313,14 +453,20 @@ export class Runner {
         const text = assistantText(obj)
         if (text.trim()) this.cb.onAssistantText(text)
         this.handleToolUse(obj)
+        this.emitProcesses(this.processes.fromAssistant(obj))
         return
       }
       case 'user': {
         this.handleToolResult(obj)
+        this.emitProcesses(this.processes.fromUser(obj))
         return
       }
       case 'result': {
         this.cb.onResult(asString(obj.result) ?? '', obj.is_error === true, parseUsage(obj))
+        return
+      }
+      case 'system': {
+        this.emitProcesses(this.processes.fromSystem(obj))
         return
       }
       default:
@@ -329,6 +475,10 @@ export class Runner {
         // under `--dangerously-skip-permissions` no control responder is required.
         return
     }
+  }
+
+  private emitProcesses(events: ProcessEvent[]): void {
+    for (const e of events) this.cb.onProcess?.(e)
   }
 
   /** Walk an `assistant` message for `tool_use` blocks (main tools + Task spawns). */
