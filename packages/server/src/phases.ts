@@ -1366,8 +1366,15 @@ export class TaskManager {
    * the lane-holding phases acquire a lane or queue behind the cap.
    */
   async restartAgent(taskId: string): Promise<void> {
-    const task = this.db.getTask(taskId)
+    let task = this.db.getTask(taskId)
     if (!task) throw new Error('task not found')
+    // A lane-closed task is `blocked` with no runner; restore the phase it was in.
+    if (task.status === 'blocked' && !this.runners.has(taskId)) {
+      const from = this.blockedFrom.get(taskId) ?? 'executing'
+      this.blockedFrom.delete(taskId)
+      this.transition(taskId, from, 'restarting after lane close')
+      task = this.db.getTask(taskId) ?? task
+    }
     const resumable =
       task.status === 'clarify' ||
       task.status === 'planning' ||
@@ -1564,6 +1571,46 @@ export class TaskManager {
       sub: 'status',
       note: 'Stop — interrupting the worker; it will wait for your next message',
     })
+  }
+
+  /**
+   * Close a task's lane from the Lanes panel: a queued task is dequeued, a live
+   * worker's `claude` process is killed (freeing its execute lane for the next
+   * queued task), and either way the task parks in `blocked`. It stays
+   * resumable via `restartAgent`, which restores the phase it was in.
+   */
+  closeLane(taskId: string): void {
+    const task = this.db.getTask(taskId)
+    if (!task) throw new Error('task not found')
+    const live: TaskStatus[] = ['clarify', 'planning', 'executing', 'validating', 'blocked']
+    if (!live.includes(task.status)) {
+      throw new Error(`task in status '${task.status}' has no lane to close`)
+    }
+    const qi = this.executeQueue.indexOf(taskId)
+    const queued = qi >= 0
+    if (queued) {
+      this.executeQueue.splice(qi, 1)
+      this.resuming.delete(taskId)
+      this.onLanesChange()
+    }
+    const runner = this.runners.get(taskId)
+    if (!queued && !runner && !this.executeLanes.has(taskId)) {
+      throw new Error('task has no live lane or session to close')
+    }
+    if (runner) {
+      this.replacing.add(taskId)
+      runner.kill()
+    }
+    this.runners.delete(taskId)
+    this.workerMeta.delete(taskId)
+    this.interrupting.delete(taskId)
+    this.pendingAttachments.delete(taskId)
+    const from = task.status === 'blocked' ? (this.blockedFrom.get(taskId) ?? 'executing') : task.status
+    this.transition(taskId, 'blocked', 'lane closed by operator')
+    this.blockedFrom.set(taskId, from)
+    if (task.queued) this.patch(taskId, { queued: false })
+    this.freeLane(taskId)
+    this.onLanesChange()
   }
 
   /** Resume a `blocked` task after the operator has resolved the blocking condition. */

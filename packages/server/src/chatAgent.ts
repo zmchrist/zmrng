@@ -342,6 +342,22 @@ export class ChatManager {
     return this.sessions.get(session)?.id
   }
 
+  /** Kill one live session by its Lanes row id. Returns false if unknown. */
+  close(id: string): boolean {
+    for (const [session, meta] of this.sessions) {
+      if (meta.id !== id) continue
+      this.sessions.delete(session)
+      try {
+        session.kill()
+      } catch {
+        // already exited
+      }
+      this.onChange()
+      return true
+    }
+    return false
+  }
+
   /** Kill and forget every tracked session (graceful shutdown). */
   killAll(): void {
     for (const session of this.sessions.keys()) {

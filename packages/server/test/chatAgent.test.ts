@@ -524,3 +524,17 @@ describe('ChatManager onChange (lane emitter notify seam)', () => {
     expect(mgr.snapshot()[0].id).toMatch(/^[0-9a-f-]{36}$/)
   })
 })
+
+describe('ChatManager.close', () => {
+  it('kills the session by lane id, drops it from the snapshot, and reports unknown ids', () => {
+    const mgr = new ChatManager(factory, chatIds())
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
+    mgr.create({ model: 'sonnet', effort: 'medium', style: 'normal' }, noopCallbacks())
+    const [first] = mgr.snapshot()
+    expect(mgr.close(first.id)).toBe(true)
+    expect(created[0].killCount).toBe(1)
+    expect(created[1].killCount).toBe(0)
+    expect(mgr.snapshot().map((r) => r.id)).not.toContain(first.id)
+    expect(mgr.close('nope')).toBe(false)
+  })
+})

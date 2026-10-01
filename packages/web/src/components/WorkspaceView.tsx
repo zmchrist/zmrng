@@ -25,7 +25,9 @@ import { TerminalCard } from './TerminalCard'
 import { WorkerLogPanel } from './WorkerLogPanel'
 import { SecurityPanel } from './SecurityPanel'
 import { LanesPanel } from './LanesPanel'
+import { removeChatThread } from '../chatPersistence'
 import {
+  closeTab,
   focusChatLane,
   focusTerminalSession,
   type ChatTabState,
@@ -230,6 +232,32 @@ export function WorkspaceView({
     [onSelect, chatTabs, onChatTabsChange, terminalTabs, onTerminalTabsChange, mobileView, onMobileViewChange],
   )
 
+  // A confirmed Lanes "Close": kill the process server-side, then drop the
+  // owning chat/terminal tab. Task rows just park in `blocked` (the WS pushes it).
+  const closeLane = useCallback(
+    async (target: LaneTarget) => {
+      try {
+        if (target.kind === 'task') {
+          await api.closeTaskLane(target.taskId)
+        } else if (target.kind === 'chat') {
+          await api.closeChatLane(target.laneId)
+          const tab = chatTabs.tabs.find((t) => t.laneId === target.laneId)
+          if (tab) {
+            removeChatThread(tab.id)
+            onChatTabsChange(closeTab(chatTabs, tab.id))
+          }
+        } else {
+          await api.closeTerminalLane(target.sessionId)
+          const tab = terminalTabs.tabs.find((t) => t.sessionId === target.sessionId)
+          if (tab) onTerminalTabsChange(closeTab(terminalTabs, tab.id))
+        }
+      } catch {
+        // Row stays; the next lanes frame reflects reality.
+      }
+    },
+    [chatTabs, onChatTabsChange, terminalTabs, onTerminalTabsChange],
+  )
+
   const status = task?.status ?? null
 
   // Phone shell: one view fills the screen, driven by the hamburger drawer
@@ -399,6 +427,7 @@ export function WorkspaceView({
               repos={repos}
               active={activeTab === 'lanes'}
               onOpen={openLane}
+              onClose={closeLane}
             />
           </div>
         </div>

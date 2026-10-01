@@ -728,6 +728,29 @@ app.post('/api/tasks/:id/interrupt', (req, reply) => {
   }
 })
 
+// Lanes panel "Close": kill the worker (or dequeue it) and park the task `blocked`.
+app.post('/api/tasks/:id/close-lane', (req, reply) => {
+  const { id } = req.params as { id: string }
+  try {
+    manager.closeLane(id)
+    return { ok: true }
+  } catch (err) {
+    return reply.code(400).send({ error: errMsg(err) })
+  }
+})
+
+app.post('/api/lanes/chat/:id/close', (req, reply) => {
+  const { id } = req.params as { id: string }
+  if (!chats.close(id)) return reply.code(404).send({ error: 'chat session not found' })
+  return { ok: true }
+})
+
+app.post('/api/lanes/terminal/:id/close', (req) => {
+  const { id } = req.params as { id: string }
+  terminals.close(id)
+  return { ok: true }
+})
+
 app.post('/api/tasks/:id/done', async (req, reply) => {
   const { id } = req.params as { id: string }
   try {
