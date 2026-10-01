@@ -20,6 +20,7 @@
     "test": "npm run test --workspaces --if-present",
     "test:watch": "concurrently -n server,web -c blue,green \"npm run test:watch -w @zmrng/server\" \"npm run test:watch -w @zmrng/web\"",
     "start": "npm run start -w packages/server",
+    "create-user": "npm run create-user -w @zmrng/server --",
     "bundle:sidecar": "npm run bundle:sidecar -w @zmrng/desktop",
     "desktop:dev": "npm run tauri -w @zmrng/desktop -- dev",
     "desktop:build": "npm run build && npm run bundle:sidecar && npm run tauri -w @zmrng/desktop -- build"

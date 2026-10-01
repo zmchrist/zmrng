@@ -21,10 +21,12 @@ import { listWorktreeFiles, selfUpdate } from './worktree.js'
 import { startVersionPoller } from './versionPoller.js'
 import { readWorktreeFile, writeWorktreeFile, listNotes, WorktreeFileError } from './files.js'
 import { runPreflight } from './preflight.js'
+import { AuthService } from './auth.js'
+import { registerAuth } from './authRoutes.js'
+import { registerKbRoutes } from './kbRoutes.js'
 import { parseStreamedText } from './chat.js'
 import { readUiState, writeUiState } from './uiState.js'
-import { resolvePageTitle, buildPageBody } from './kbFromMessage.js'
-import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE, PROTECTED_SPACE_NAME } from './types.js'
+import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE } from './types.js'
 import type {
   WsEvent,
   EffortLevel,
@@ -41,11 +43,7 @@ import type {
   ChatServerMsg,
   WsWorkspaceServerMsg,
   WorkspaceMember,
-  Space,
-  KbTreeNode,
-  KbFolder,
-  KbPage,
-  KbPageRevision,
+  PublicUser,
 } from './types.js'
 
 function errMsg(e: unknown): string {
@@ -185,11 +183,20 @@ await app.register(websocket)
 // from. Without permissive CORS those cross-origin fetches are blocked and the
 // Team tab silently falls back to (or fails against) the wrong server. The
 // workspace port is Tailscale-perimeter only (see CLAUDE.md), so reflecting any
-// origin is acceptable here; there are no cookies/credentials to protect.
+// origin is acceptable here.
+//
+// It stays acceptable AFTER the login gate specifically because the
+// cross-origin path authenticates with an `Authorization: Bearer` header rather
+// than a cookie: `access-control-allow-credentials` is never sent, so a hostile
+// origin reflected here cannot ride the operator's session (the session cookie
+// is `SameSite=Strict` and never leaves its own site). Reflecting arbitrary
+// origins WITH credentials would be a serious vulnerability — do not add that
+// header. The only change the gate required is allowing `authorization`
+// through preflight.
 app.addHook('onRequest', (req, reply, done) => {
   reply.header('access-control-allow-origin', req.headers.origin ?? '*')
   reply.header('access-control-allow-methods', 'GET,POST,PUT,DELETE,OPTIONS')
-  reply.header('access-control-allow-headers', 'content-type')
+  reply.header('access-control-allow-headers', 'content-type, authorization')
   reply.header('vary', 'origin')
   if (req.method === 'OPTIONS') {
     reply.code(204).send()
@@ -197,6 +204,26 @@ app.addHook('onRequest', (req, reply, done) => {
   }
   done()
 })
+
+// ---- auth (login gate for the KB + Team surfaces) ----
+// Registered AFTER the CORS hook so an OPTIONS preflight is answered before the
+// gate ever sees it. The Workspace task orchestrator is deliberately NOT gated —
+// only `/api/spaces`, `/api/pages`, `/api/folders`, `/api/page-revisions`,
+// `/api/channels` and `/api/auth/{me,logout}` sit behind a session
+// (`isProtectedPath` in auth.ts is the single list).
+const auth = new AuthService(db, config.sessionTtlMs)
+registerAuth(app, {
+  auth,
+  secureCookies: config.secureCookies,
+  sessionTtlMs: config.sessionTtlMs,
+})
+// One sweep at boot clears sessions that lapsed while the server was down;
+// `AuthService.resolve` also drops an expired row the moment it sees one, so
+// there is no background timer to keep the process alive.
+{
+  const swept = auth.sweep()
+  if (swept > 0) app.log.info({ swept }, 'expired sessions swept')
+}
 
 // ---- REST ----
 
@@ -488,369 +515,19 @@ app.get('/api/channels/:id/messages', (req): Message[] => {
 
 // ===================================================================
 // Knowledge Base (KB) — spaces / folders / pages (T1 #140, single-field editor)
-// Server-side data foundation. A page is ONE continuous plaintext/markdown
-// field — there is no block model. REST covers spaces/folders/pages CRUD +
-// page history; the live body autosave itself flows over the workspace
-// WebSocket's `page.edit`/`page.update` frames (see `PageManager.savePage`),
-// mirroring how channel messages are REST-scrollback + socket-live. Every
-// path/body param is validated (never trust the wire); an unknown
-// space/folder/page/revision id is a 404. Structured Pino logging only.
+// The whole KB REST surface lives in `kbRoutes.ts` and is registered here, on
+// THIS instance (a plain function, not an encapsulated plugin) so the auth
+// gate's `onRequest` hook above still covers it and `requireUser` sees the
+// `req.authUser` it sets. It is a separate module so the KB surface — and with
+// it the claim that every write is attributed to the authenticated session,
+// never to a client-supplied `author` — is integration-testable with
+// `app.inject()` against a bare Fastify, which importing this file could never
+// be (it opens the real DB and spawns managers at import time).
 // ===================================================================
-
-/** Parse a `:id`-style route param to a positive integer, or null if invalid. */
-function kbId(raw: unknown): number | null {
-  const n = Number(raw)
-  return Number.isInteger(n) && n > 0 ? n : null
-}
-
-/** Trimmed non-empty string, or undefined (rejects blanks / non-strings). */
-function kbName(raw: unknown): string | undefined {
-  if (typeof raw !== 'string') return undefined
-  const t = raw.trim()
-  return t.length > 0 ? t : undefined
-}
-
-/**
- * Read a nullable folder/parent id from a request body. Returns `null` for an
- * explicit null / omitted value (= space root), a positive int when valid, or
- * `undefined` to signal "invalid" so the route can 400.
- */
-function kbNullableId(raw: unknown): number | null | undefined {
-  if (raw === null || raw === undefined) return null
-  const n = Number(raw)
-  return Number.isInteger(n) && n > 0 ? n : undefined
-}
-
-// All KB spaces (the three seeded POC spaces + any created later). Always 200.
-app.get('/api/spaces', (): Space[] => db.listSpaces())
-
-// Create a KB space (name only — user-created spaces are not repo-scoped).
-// 400 blank name; 409 duplicate name (the `spaces.name` column is UNIQUE, so we
-// reject the duplicate here rather than let the INSERT throw a 500).
-app.post('/api/spaces', (req, reply): Space | undefined => {
-  const body = req.body as { name?: unknown } | undefined
-  const name = kbName(body?.name)
-  if (!name) {
-    reply.code(400).send({ error: 'name is required' })
-    return undefined
-  }
-  if (db.listSpaces().some((s) => s.name === name)) {
-    reply.code(409).send({ error: 'a space with that name already exists' })
-    return undefined
-  }
-  const space = db.createSpace(name, new Date().toISOString())
-  app.log.info({ spaceId: space.id }, 'kb space created')
-  return space
-})
-
-// Delete a space and EVERYTHING inside it (folders, pages, page revisions).
-// 404 unknown space; 403 the protected `zmrng` space, which can never be deleted.
-app.delete('/api/spaces/:id', (req, reply) => {
-  const id = kbId((req.params as { id: string }).id)
-  const space = id !== null ? db.getSpace(id) : undefined
-  if (!space) {
-    return reply.code(404).send({ error: 'space not found' })
-  }
-  if (space.name === PROTECTED_SPACE_NAME) {
-    return reply.code(403).send({ error: `the ${PROTECTED_SPACE_NAME} space cannot be deleted` })
-  }
-  db.deleteSpace(space.id)
-  app.log.info({ spaceId: space.id }, 'kb space deleted')
-  return reply.code(204).send()
-})
-
-// A space's KB tree (folders + pages), FileTree-shaped. 404 on unknown space.
-app.get('/api/spaces/:id/tree', (req, reply): KbTreeNode[] | undefined => {
-  const spaceId = kbId((req.params as { id: string }).id)
-  if (spaceId === null || !db.getSpace(spaceId)) {
-    reply.code(404).send({ error: 'space not found' })
-    return undefined
-  }
-  return db.spaceTree(spaceId)
-})
-
-// One page (its whole body is the page — no separate blocks). 404 on unknown page.
-app.get('/api/pages/:id', (req, reply): KbPage | undefined => {
-  const pageId = kbId((req.params as { id: string }).id)
-  const page = pageId !== null ? db.getPage(pageId) : undefined
-  if (!page) {
-    reply.code(404).send({ error: 'page not found' })
-    return undefined
-  }
-  return page
-})
-
-// Create a folder in a space. 404 unknown space; 400 blank name / bad parentId.
-app.post('/api/spaces/:id/folders', (req, reply): KbFolder | undefined => {
-  const spaceId = kbId((req.params as { id: string }).id)
-  if (spaceId === null || !db.getSpace(spaceId)) {
-    reply.code(404).send({ error: 'space not found' })
-    return undefined
-  }
-  const body = req.body as { name?: unknown; parentId?: unknown } | undefined
-  const name = kbName(body?.name)
-  if (!name) {
-    reply.code(400).send({ error: 'name is required' })
-    return undefined
-  }
-  const parentId = kbNullableId(body?.parentId)
-  if (parentId === undefined) {
-    reply.code(400).send({ error: 'invalid parentId' })
-    return undefined
-  }
-  if (parentId !== null && !db.getFolder(parentId)) {
-    reply.code(404).send({ error: 'parent folder not found' })
-    return undefined
-  }
-  if (parentId !== null && db.getFolder(parentId)?.spaceId !== spaceId) {
-    reply.code(400).send({ error: 'parent folder belongs to a different space' })
-    return undefined
-  }
-  const folder = db.createFolder(spaceId, parentId, name, new Date().toISOString())
-  app.log.info({ folderId: folder.id, spaceId }, 'kb folder created')
-  return folder
-})
-
-// Rename and/or move a folder. 404 unknown folder; 400 nothing-to-do / bad args.
-app.patch('/api/folders/:id', (req, reply): KbFolder | undefined => {
-  const id = kbId((req.params as { id: string }).id)
-  if (id === null || !db.getFolder(id)) {
-    reply.code(404).send({ error: 'folder not found' })
-    return undefined
-  }
-  const body = req.body as { name?: unknown; parentId?: unknown } | undefined
-  let result: KbFolder | undefined = db.getFolder(id)
-  if (body?.name !== undefined) {
-    const name = kbName(body.name)
-    if (!name) {
-      reply.code(400).send({ error: 'invalid name' })
-      return undefined
-    }
-    result = db.renameFolder(id, name)
-  }
-  if (body && 'parentId' in body) {
-    const parentId = kbNullableId(body.parentId)
-    if (parentId === undefined) {
-      reply.code(400).send({ error: 'invalid parentId' })
-      return undefined
-    }
-    if (parentId !== null && !db.getFolder(parentId)) {
-      reply.code(404).send({ error: 'parent folder not found' })
-      return undefined
-    }
-    if (parentId !== null && db.getFolder(parentId)?.spaceId !== db.getFolder(id)?.spaceId) {
-      reply.code(400).send({ error: 'parent folder belongs to a different space' })
-      return undefined
-    }
-    result = db.moveFolder(id, parentId)
-    // Fan a tree-structure convergence frame only when the re-parent actually
-    // took effect (moveFolder returns the folder unchanged on a rejected cycle),
-    // so every client viewing this space refetches its tree without a reload.
-    if (result && result.parentId === parentId) {
-      hub.broadcastRoom(
-        'workspace',
-        JSON.stringify({ type: 'space.tree', spaceId: result.spaceId } satisfies WsWorkspaceServerMsg),
-      )
-    }
-  }
-  app.log.info({ folderId: id }, 'kb folder updated')
-  return result
-})
-
-// Delete a folder. 404 on unknown folder.
-app.delete('/api/folders/:id', (req, reply) => {
-  const id = kbId((req.params as { id: string }).id)
-  if (id === null || !db.getFolder(id)) {
-    return reply.code(404).send({ error: 'folder not found' })
-  }
-  db.deleteFolder(id)
-  app.log.info({ folderId: id }, 'kb folder deleted')
-  return reply.code(204).send()
-})
-
-// Create a page in a space. 404 unknown space/folder; 400 blank title/author.
-// A fresh page starts with an empty body — the notepad-style single field is
-// ready to type into immediately, no separate "add content" step.
-app.post('/api/spaces/:id/pages', (req, reply): KbPage | undefined => {
-  const spaceId = kbId((req.params as { id: string }).id)
-  if (spaceId === null || !db.getSpace(spaceId)) {
-    reply.code(404).send({ error: 'space not found' })
-    return undefined
-  }
-  const body = req.body as { title?: unknown; author?: unknown; folderId?: unknown } | undefined
-  const title = kbName(body?.title)
-  const author = kbName(body?.author)
-  if (!title || !author) {
-    reply.code(400).send({ error: 'title and author are required' })
-    return undefined
-  }
-  const folderId = kbNullableId(body?.folderId)
-  if (folderId === undefined) {
-    reply.code(400).send({ error: 'invalid folderId' })
-    return undefined
-  }
-  if (folderId !== null && !db.getFolder(folderId)) {
-    reply.code(404).send({ error: 'folder not found' })
-    return undefined
-  }
-  if (folderId !== null && db.getFolder(folderId)?.spaceId !== spaceId) {
-    reply.code(400).send({ error: 'folder belongs to a different space' })
-    return undefined
-  }
-  const page = db.createPage(spaceId, folderId, title, author, new Date().toISOString())
-  app.log.info({ pageId: page.id, spaceId }, 'kb page created')
-  return page
-})
-
-// Promote a team-channel message into a durable KB page (T4, #154). Looks up the
-// message + its channel server-side and creates a NORMAL page in space :id whose
-// body carries the message body + a canonical, SERVER-BUILT provenance line
-// (channel name + message id). Provenance is never trusted from the client.
-// 404 unknown space/message/folder; 400 blank/invalid ids or cross-space folder.
-app.post('/api/spaces/:id/pages/from-message', (req, reply): KbPage | undefined => {
-  const spaceId = kbId((req.params as { id: string }).id)
-  if (spaceId === null || !db.getSpace(spaceId)) {
-    reply.code(404).send({ error: 'space not found' })
-    return undefined
-  }
-  const body = req.body as
-    | { messageId?: unknown; folderId?: unknown; title?: unknown }
-    | undefined
-  const messageId = kbId(body?.messageId)
-  if (messageId === null) {
-    reply.code(400).send({ error: 'messageId is required' })
-    return undefined
-  }
-  const message = db.getMessage(messageId)
-  if (!message) {
-    reply.code(404).send({ error: 'message not found' })
-    return undefined
-  }
-  const channel = db.getChannel(message.channelId)
-  if (!channel) {
-    reply.code(404).send({ error: 'channel not found' })
-    return undefined
-  }
-  const folderId = kbNullableId(body?.folderId)
-  if (folderId === undefined) {
-    reply.code(400).send({ error: 'invalid folderId' })
-    return undefined
-  }
-  if (folderId !== null && !db.getFolder(folderId)) {
-    reply.code(404).send({ error: 'folder not found' })
-    return undefined
-  }
-  if (folderId !== null && db.getFolder(folderId)?.spaceId !== spaceId) {
-    reply.code(400).send({ error: 'folder belongs to a different space' })
-    return undefined
-  }
-  // Title is an editable label (client value wins, else derived server-side).
-  // The page author is the canonical message author.
-  const title = resolvePageTitle(kbName(body?.title), message.body)
-  const now = new Date().toISOString()
-  const page = db.createPage(
-    spaceId,
-    folderId,
-    title,
-    message.author,
-    now,
-    buildPageBody(message.body, channel.name, message.id),
-  )
-  app.log.info(
-    { pageId: page.id, spaceId, messageId, channelId: channel.id },
-    'kb page created from message',
-  )
-  return page
-})
-
-// Rename and/or move a page. 404 unknown page; 400 bad args.
-app.patch('/api/pages/:id', (req, reply): KbPage | undefined => {
-  const id = kbId((req.params as { id: string }).id)
-  if (id === null || !db.getPage(id)) {
-    reply.code(404).send({ error: 'page not found' })
-    return undefined
-  }
-  const body = req.body as { title?: unknown; folderId?: unknown } | undefined
-  const now = new Date().toISOString()
-  let result: KbPage | undefined = db.getPage(id)
-  if (body?.title !== undefined) {
-    const title = kbName(body.title)
-    if (!title) {
-      reply.code(400).send({ error: 'invalid title' })
-      return undefined
-    }
-    result = db.updatePage(id, title, now)
-  }
-  if (body && 'folderId' in body) {
-    const folderId = kbNullableId(body.folderId)
-    if (folderId === undefined) {
-      reply.code(400).send({ error: 'invalid folderId' })
-      return undefined
-    }
-    if (folderId !== null && !db.getFolder(folderId)) {
-      reply.code(404).send({ error: 'folder not found' })
-      return undefined
-    }
-    if (folderId !== null && db.getFolder(folderId)?.spaceId !== db.getPage(id)?.spaceId) {
-      reply.code(400).send({ error: 'folder belongs to a different space' })
-      return undefined
-    }
-    result = db.movePage(id, folderId, now)
-    // Fan a tree-structure convergence frame so every client viewing this space
-    // refetches its tree without a reload (mirrors the folder-move fan-out).
-    if (result && result.folderId === folderId) {
-      hub.broadcastRoom(
-        'workspace',
-        JSON.stringify({ type: 'space.tree', spaceId: result.spaceId } satisfies WsWorkspaceServerMsg),
-      )
-    }
-  }
-  app.log.info({ pageId: id }, 'kb page updated')
-  return result
-})
-
-// Delete a page (and its revisions). 404 on unknown page.
-app.delete('/api/pages/:id', (req, reply) => {
-  const id = kbId((req.params as { id: string }).id)
-  if (id === null || !db.getPage(id)) {
-    return reply.code(404).send({ error: 'page not found' })
-  }
-  db.deletePage(id)
-  app.log.info({ pageId: id }, 'kb page deleted')
-  return reply.code(204).send()
-})
-
-// Every revision of a page, oldest first — backs the History panel's undo
-// affordance. 404 on unknown page.
-app.get('/api/pages/:id/revisions', (req, reply): KbPageRevision[] | undefined => {
-  const id = kbId((req.params as { id: string }).id)
-  if (id === null || !db.getPage(id)) {
-    reply.code(404).send({ error: 'page not found' })
-    return undefined
-  }
-  return db.listPageRevisions(id)
-})
-
-// Restore a revision back onto its page (itself recording a revision). 404/400.
-app.post('/api/page-revisions/:id/restore', (req, reply): KbPage | undefined => {
-  const id = kbId((req.params as { id: string }).id)
-  if (id === null) {
-    reply.code(404).send({ error: 'revision not found' })
-    return undefined
-  }
-  const body = req.body as { author?: unknown } | undefined
-  const author = kbName(body?.author)
-  if (!author) {
-    reply.code(400).send({ error: 'author is required' })
-    return undefined
-  }
-  const page = db.restorePageRevision(id, author, new Date().toISOString())
-  if (!page) {
-    reply.code(404).send({ error: 'revision not found' })
-    return undefined
-  }
-  app.log.info({ revisionId: id, pageId: page.id }, 'kb revision restored')
-  return page
+registerKbRoutes(app, {
+  db,
+  broadcast: (frame) => hub.broadcastRoom('workspace', JSON.stringify(frame)),
+  log: app.log,
 })
 
 
@@ -1287,13 +964,20 @@ const WORKSPACE_HEARTBEAT_MS = 30000
 // sees origin/main move ahead of this instance's HEAD. Held in memory only (no
 // DB); '' until the poller reports one. Read on connect to seed late joiners.
 let latestKnownVersionSha = ''
-app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
+app.get('/ws/workspace', { websocket: true }, (socket: WebSocket, req) => {
   hub.join('workspace', socket)
   let joined = false
   // The socket's roster identity, established by its `hello`. Page presence
   // (T2) attaches this member to each page.subscribe so the per-page viewer set
-  // carries display names; page frames before `hello` are ignored (no identity).
+  // carries display names.
   let member: WorkspaceMember | undefined
+  // The socket's AUTHENTICATED identity. Every message, reaction and page edit
+  // is attributed to this, never to a wire field — a client can no longer post
+  // under a name it chose. Resolved on `hello` from either the bearer token in
+  // that frame (the cross-origin desktop→VPS path, which has no cookie it can
+  // send) or the session cookie the browser attached to the HTTP handshake.
+  let user: PublicUser | undefined
+  const handshakeCookie = req.headers.cookie
 
   const send = (msg: WsWorkspaceServerMsg): void => {
     try {
@@ -1322,6 +1006,15 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
     }
   }, WORKSPACE_HEARTBEAT_MS)
 
+  /**
+   * Tell a socket with no usable session why it is being dropped, then drop it.
+   * The client clears that origin's stored session and re-shows the login pane.
+   */
+  const denyUnauthenticated = (): void => {
+    send({ type: 'unauthorized' })
+    socket.close()
+  }
+
   const cleanup = (): void => {
     clearInterval(heartbeat)
     hub.leaveAll(socket)
@@ -1335,6 +1028,7 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
       joined = false
       member = undefined
     }
+    user = undefined
   }
 
   socket.on('message', (raw) => {
@@ -1342,28 +1036,59 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
       const msg = parseWorkspaceClientMsg(String(raw))
       if (!msg) return
       if (msg.type === 'hello') {
-        const joinedMember = workspace.join(socket, msg.displayName)
+        const resolved = auth.resolveSocketIdentity(handshakeCookie, msg.token)
+        if (!resolved) {
+          app.log.info({ bearer: msg.token !== undefined }, 'workspace socket rejected — no session')
+          denyUnauthenticated()
+          return
+        }
+        user = resolved
+        const joinedMember = workspace.join(socket, resolved)
         joined = true
         // Capture the roster identity for page presence (viewers are live sockets,
         // so `online` is always true).
         member = { id: joinedMember.id, displayName: joinedMember.displayName, online: true }
-      } else if (msg.type === 'ping') {
+        // Seed the now-authenticated socket with the current roster, so a late
+        // joiner immediately sees who is already present. This deliberately
+        // happens AFTER authentication — an anonymous socket learns nothing
+        // about the workspace, not even who is in it.
+        send({ type: 'roster', members: workspace.roster() })
+        // Boot safety-net seed (WS-B / D3): if the poller already knows of a
+        // newer origin/main sha than this instance is running, tell this client
+        // immediately so a late joiner learns about the update without waiting
+        // for the next live broadcast.
+        if (latestKnownVersionSha && latestKnownVersionSha !== config.headSha) {
+          send({ type: 'new-version', sha: latestKnownVersionSha })
+        }
+        return
+      }
+      if (msg.type === 'ping') {
         send({ type: 'pong' })
-      } else if (msg.type === 'subscribe') {
+        return
+      }
+      // Every remaining frame needs an established session. A socket that never
+      // said `hello` — or whose `hello` failed to authenticate — can neither
+      // read a channel's live feed nor persist a single thing.
+      if (!user) {
+        denyUnauthenticated()
+        return
+      }
+      if (msg.type === 'subscribe') {
         channels.subscribe(socket, msg.channelId)
       } else if (msg.type === 'unsubscribe') {
         channels.unsubscribe(socket, msg.channelId)
       } else if (msg.type === 'react') {
         // Toggle the reactor's emoji on the message and fan the updated set out
         // live to that channel's subscribers. Best-effort: an unknown/mismatched
-        // message is a no-op inside react(). The reactor handle is self-asserted
-        // (same trust model as a message author).
-        channels.react(msg.channelId, msg.messageId, msg.handle, msg.emoji)
+        // message is a no-op inside react(). The reactor is the socket's
+        // AUTHENTICATED user — the frame carries no handle to spoof.
+        channels.react(msg.channelId, msg.messageId, user.displayName, msg.emoji)
       } else if (msg.type === 'message') {
         // Persist + fan out live to subscribed sockets only (no history replay).
         // A socket post is always `human` — the `agent` kind is server-controlled
-        // (set by the T4 agent path below), never trusted from a client frame.
-        const stored = channels.post(msg.channelId, msg.author, msg.body, 'human')
+        // (set by the T4 agent path below), never trusted from a client frame —
+        // and its author is the socket's authenticated user, not a wire field.
+        const stored = channels.post(msg.channelId, user.displayName, msg.body, 'human')
         // T4: an @mention of the bot handle triggers the ONE shared team agent
         // asynchronously — the socket handler never blocks on (or crashes from)
         // the agent path. `handleMention` is best-effort and never throws; the
@@ -1381,20 +1106,19 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
         }
       } else if (msg.type === 'page.subscribe') {
         // Register interest in a page's live whole-body fan-out + viewer
-        // presence. Requires an established roster identity (from `hello`); a
-        // page frame before `hello` is ignored (no member to attribute
-        // presence to).
+        // presence, using the roster identity established by `hello`.
         if (member) pages.subscribe(socket, msg.pageId, member)
       } else if (msg.type === 'page.unsubscribe') {
         pages.unsubscribe(socket, msg.pageId)
       } else if (msg.type === 'page.edit') {
         // Autosave the page's whole body and fan a `page.update` out live to
         // that page's subscribers. A socket `page.edit` is ALWAYS a human
-        // author — the parser already carries the self-asserted author. An
-        // unknown page is a no-op inside savePage().
-        const stored = pages.savePage(msg.pageId, msg.body, msg.author)
+        // author, and that author is the socket's authenticated user — which
+        // also feeds the throttled `page.edit` changelog entry. An unknown page
+        // is a no-op inside savePage().
+        const stored = pages.savePage(msg.pageId, msg.body, user)
         app.log.info(
-          { pageId: msg.pageId, saved: stored !== undefined },
+          { pageId: msg.pageId, saved: stored !== undefined, username: user.username },
           'kb page.edit',
         )
       }
@@ -1405,18 +1129,6 @@ app.get('/ws/workspace', { websocket: true }, (socket: WebSocket) => {
   })
   socket.on('close', cleanup)
   socket.on('error', cleanup)
-
-  // Seed the fresh socket with the current roster before it says hello, so a
-  // late joiner immediately sees who is already present.
-  send({ type: 'roster', members: workspace.roster() })
-
-  // Boot safety-net seed (WS-B / D3): if the poller already knows of a newer
-  // origin/main sha than this instance is running, tell this client immediately
-  // so a late joiner learns about the update without waiting for the next live
-  // broadcast. Unifies the seed + live-push into ONE client mechanism.
-  if (latestKnownVersionSha && latestKnownVersionSha !== config.headSha) {
-    send({ type: 'new-version', sha: latestKnownVersionSha })
-  }
 })
 
 // ---- static (production) ----

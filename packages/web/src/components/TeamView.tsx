@@ -1,6 +1,6 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styles from './TeamView.module.css'
-import type { Channel, Message, RepoTarget, WorkspaceMember, Space } from '../types'
+import type { Channel, Message, PublicUser, RepoTarget, WorkspaceMember, Space } from '../types'
 import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN } from '../types'
 import {
   mentionCandidates,
@@ -23,7 +23,8 @@ import { emptyRoster, applyWorkspaceMsg } from '../roster'
 import { emptyThread, appendMessage, loadScrollback, applyReaction } from '../channelThread'
 import { REACTION_EMOJI } from '../emojiSet'
 import { useAutoScroll } from '../useAutoScroll'
-import { api } from '../api'
+import { api, isAuthError } from '../api'
+import { clearSession, loadSession } from '../auth'
 import { buildHandoffPrefill, type HandoffPrefill } from '../teamHandoff'
 import { resolveDefaultSpace, deriveKbTitle } from '../kbFromMessage'
 import { collectFolders, type KbFolderOption } from '../kbTree'
@@ -41,11 +42,15 @@ import { ThinkingDots } from './ThinkingDots'
 import { formatMessageTime } from '../teamTime'
 
 interface Props {
-  /** The teammate's persisted display-name handle (server-side
-   *  WorkspaceSettings). Seeds the roster identity; empty ⇒ show the join form. */
-  teamHandle: string
-  /** Persist an edit to the handle (server-side, durable). Called on join/leave. */
-  onHandleChange: (handle: string) => void
+  /** The authenticated user for the TEAM origin (the VPS). Their `displayName`
+   *  IS the identity here — the roster entry, the "connected as" label, the
+   *  "is this reaction mine" check. It can no longer be asserted over the wire:
+   *  the server stamps every post/reaction from the socket's own session. */
+  user: PublicUser
+  /** The session for the Team origin is gone — logged out, a 401, or an
+   *  `unauthorized` frame. App re-reads the stored session and shows the login
+   *  pane in place of this view. */
+  onLogout: () => void
   /** The shared team-agent bot handle (default `@agent`), surfaced via
    *  GET /api/config so the `@`-mention autocomplete + highlighter know the
    *  agent's name. Visual only — the server reply trigger is unchanged. */
@@ -99,18 +104,23 @@ function channelLabel(name: string): string {
 
 /**
  * The Team mode surface: connects to the configured VPS team-workspace server
- * over ONE multiplexed WebSocket, self-asserts a free-text display-name handle,
- * lists channels, opens one, renders its messages (scrollback via REST + live
- * NEW messages via the socket), and posts to it via a composer. Human and agent
- * messages render distinguishably (box 6). Local task execution is untouched.
+ * over ONE multiplexed WebSocket as the AUTHENTICATED user, lists channels,
+ * opens one, renders its messages (scrollback via REST + live NEW messages via
+ * the socket), and posts to it via a composer. Human and agent messages render
+ * distinguishably (box 6). Local task execution is untouched.
+ *
+ * App only mounts this once the Team origin holds a session, so there is no
+ * unauthenticated branch in here — and no self-asserted handle anywhere: the
+ * server attributes every post, reaction and presence entry from the session
+ * behind the socket.
  *
  * This is connection glue (like WorkspaceGrid) — the wire protocol, roster +
  * channel-thread reducers, and config resolution it composes are each
  * unit-tested in isolation.
  */
 function TeamViewComponent({
-  teamHandle,
-  onHandleChange,
+  user,
+  onLogout,
   botHandle,
   repos,
   onSendToZmrng,
@@ -119,11 +129,10 @@ function TeamViewComponent({
   onChannelRead,
   active,
 }: Props) {
-  // The roster identity is the persisted handle prop itself — no local copy, so
-  // an async settings load (or a save elsewhere) flows straight through without
-  // a setState-in-effect sync. Join/leave lift the change up via onHandleChange.
-  const handle = teamHandle
-  const [draft, setDraft] = useState('')
+  // The roster identity is the AUTHENTICATED user's display name — no local
+  // copy and nothing to type. The server derives the same name from the
+  // socket's session, so this is what the thread will show us as.
+  const handle = user.displayName
   const [roster, setRoster] = useState<WorkspaceMember[]>(emptyRoster)
   const [connected, setConnected] = useState(false)
   const [channels, setChannels] = useState<Channel[]>([])
@@ -182,7 +191,7 @@ function TeamViewComponent({
     saveOpenChannelId(openId)
   }, [openId])
   // Keep the latest `onNewVersion` readable inside the stable socket closure
-  // (the socket effect only re-runs on handle/url change), mirroring openIdRef.
+  // (the socket effect only re-runs when the tab activates), like openIdRef.
   const onNewVersionRef = useRef(onNewVersion)
   useEffect(() => {
     onNewVersionRef.current = onNewVersion
@@ -213,6 +222,53 @@ function TeamViewComponent({
     if (newest > 0) onChannelReadRef.current?.(openId, newest)
   }, [active, openId, thread])
 
+  // Keep the latest `onLogout` readable inside the stable socket closure and
+  // the passive load effects without re-running either on a new prop identity.
+  const onLogoutRef = useRef(onLogout)
+  useEffect(() => {
+    onLogoutRef.current = onLogout
+  }, [onLogout])
+
+  /**
+   * Forget this origin's session and hand the surface back to the login pane.
+   * The store is what App gates on, so dropping it is what actually re-gates:
+   * an `unauthorized` socket frame arrives while the stored session still looks
+   * live by its clock, and telling App to re-read without clearing would just
+   * re-render this same view behind a dead socket.
+   *
+   * Stable for the component's lifetime (it reads the CURRENT `onLogout`
+   * through its ref), so the socket + load effects depend on it without ever
+   * tearing down on a new prop identity.
+   */
+  const gateAgain = useCallback((): void => {
+    clearSession(HTTP_ORIGIN)
+    onLogoutRef.current()
+  }, [])
+
+  /**
+   * One REST failure handler for this surface: an expired/absent session hands
+   * the view back to the login pane rather than rendering a raw error, and
+   * returns true so the caller skips its own error text.
+   */
+  const handledAuthError = useCallback(
+    (err: unknown): boolean => {
+      if (!isAuthError(err)) return false
+      gateAgain()
+      return true
+    },
+    [gateAgain],
+  )
+
+  /** Revoke the session server-side, then re-gate the surface. */
+  const signOut = (): void => {
+    void api
+      .logout(HTTP_ORIGIN)
+      // A dead session 401s and an unreachable server throws; either way this
+      // client logs out locally — a logout button must always log you out.
+      .catch(() => undefined)
+      .then(() => gateAgain())
+  }
+
   /** Send a pre-encoded frame if the socket is live (dropped otherwise). */
   const sendFrame = (data: string): void => {
     const ws = wsRef.current
@@ -225,7 +281,7 @@ function TeamViewComponent({
   // ws, clears timers, nulls wsRef, setConnected(false)) — so leaving the tab
   // tears the socket down; returning re-runs the effect and connects fresh.
   useEffect(() => {
-    if (!active || !handle) return
+    if (!active) return
     let closed = false
     let ws: WebSocket | null = null
     let ping: ReturnType<typeof setInterval> | undefined
@@ -241,7 +297,11 @@ function TeamViewComponent({
       wsRef.current = ws
       ws.onopen = () => {
         setConnected(true)
-        ws?.send(encodeHello(handle))
+        // Identity has left the wire: the server derives it from the session.
+        // A cross-origin socket has no cookie it can send (D2), so the stored
+        // bearer token rides the `hello` frame; same-origin it is absent and
+        // the handshake cookie is what authenticates.
+        ws?.send(encodeHello(loadSession(HTTP_ORIGIN)?.token))
         ping = setInterval(() => {
           if (ws?.readyState === WebSocket.OPEN) ws.send(encodePing())
         }, PING_MS)
@@ -263,6 +323,13 @@ function TeamViewComponent({
           }
         } else if (msg.type === 'channels') {
           setChannels(msg.channels)
+        } else if (msg.type === 'unauthorized') {
+          // The handshake presented no valid session (it expired, or another
+          // tab logged out). The server closes the socket; stop reconnecting
+          // and hand the surface back to the login pane instead of looping.
+          closed = true
+          gateAgain()
+          ws?.close()
         } else if (msg.type === 'new-version') {
           // Bubble UP to App — it owns `tasks` (for the D3a phase-gate) and the
           // global update banner. TeamView just relays the signal.
@@ -289,11 +356,11 @@ function TeamViewComponent({
       setConnected(false)
       setRoster(emptyRoster())
     }
-  }, [handle, active])
+  }, [active, gateAgain])
 
   // ---- load the channel list once connected; default to the first channel ----
   useEffect(() => {
-    if (!handle || !connected) return
+    if (!connected) return
     let cancelled = false
     api
       .listChannels(HTTP_ORIGIN)
@@ -302,13 +369,15 @@ function TeamViewComponent({
         setChannels(list)
         setOpenId((cur) => resolveOpenChannelId(cur, list))
       })
-      .catch(() => {
-        // transient failure — the socket stays live; a reconnect retries this
+      .catch((err: unknown) => {
+        // A dead session re-gates the surface; anything else is transient — the
+        // socket stays live and a reconnect retries this.
+        if (!cancelled) handledAuthError(err)
       })
     return () => {
       cancelled = true
     }
-  }, [handle, connected])
+  }, [connected, handledAuthError])
 
   // ---- open a channel: REST scrollback + subscribe to live fan-out ----
   // The thread is reset in the channel-switch handlers (not here) to keep this
@@ -322,15 +391,17 @@ function TeamViewComponent({
       .then((page) => {
         if (!cancelled) setThread((prev) => loadScrollback(prev, page))
       })
-      .catch(() => {
-        // scrollback failed — live messages still flow once subscribed
+      .catch((err: unknown) => {
+        // scrollback failed — live messages still flow once subscribed, unless
+        // the session itself is gone, which re-gates the surface.
+        if (!cancelled) handledAuthError(err)
       })
     sendFrame(encodeSubscribe(openId))
     return () => {
       cancelled = true
       sendFrame(encodeUnsubscribe(openId))
     }
-  }, [connected, openId])
+  }, [connected, openId, handledAuthError])
 
   /** Switch the open channel, clearing the previous channel's thread. On the
    *  phone this also navigates from the list pane into the thread pane. */
@@ -343,22 +414,6 @@ function TeamViewComponent({
     setWhoFor(null)
     setAwaitingAgent(false)
     setOpenId(id)
-  }
-
-  const onJoin = (e: React.FormEvent) => {
-    e.preventDefault()
-    const name = draft.trim()
-    if (!name) return
-    onHandleChange(name)
-  }
-
-  const onLeave = () => {
-    onHandleChange('')
-    setDraft('')
-    setOpenId(null)
-    setPane('list')
-    setThread(emptyThread())
-    setAwaitingAgent(false)
   }
 
   // ---- `@`-mention autocomplete (visual only; the agent trigger is server-side) ----
@@ -447,7 +502,7 @@ function TeamViewComponent({
     // Posted human message returns via the channel fan-out (we are subscribed),
     // so it appears in the thread through the live socket — no optimistic append.
     scrollToBottom()
-    sendFrame(encodeMessage(openId, handle, body))
+    sendFrame(encodeMessage(openId, body))
     // If the message mentions the agent, expect a reply — show the dots until it
     // lands. Word-boundary match mirrors the server's @agent reply trigger.
     if (
@@ -467,7 +522,7 @@ function TeamViewComponent({
    */
   const toggleReaction = (messageId: number, emoji: string): void => {
     if (openId === null || !connected) return
-    sendFrame(encodeReact(openId, messageId, handle, emoji))
+    sendFrame(encodeReact(openId, messageId, emoji))
     setPickerFor(null)
   }
 
@@ -507,7 +562,9 @@ function TeamViewComponent({
       )
       openChannelId(created.id)
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : 'Failed to create channel')
+      if (!handledAuthError(err)) {
+        setCreateError(err instanceof Error ? err.message : 'Failed to create channel')
+      }
     } finally {
       setCreateBusy(false)
     }
@@ -523,8 +580,8 @@ function TeamViewComponent({
     try {
       const tree = await api.getSpaceTree(spaceId)
       setKbFolders(collectFolders(tree))
-    } catch {
-      setKbFolders([])
+    } catch (err) {
+      if (!handledAuthError(err)) setKbFolders([])
     }
   }
 
@@ -545,7 +602,9 @@ function TeamViewComponent({
       setKbSpaceId(sid)
       if (sid !== null) await loadKbFolders(sid)
     } catch (err) {
-      setKbError(err instanceof Error ? err.message : 'Failed to load KB spaces')
+      if (!handledAuthError(err)) {
+        setKbError(err instanceof Error ? err.message : 'Failed to load KB spaces')
+      }
     }
   }
 
@@ -574,7 +633,9 @@ function TeamViewComponent({
       setKbFor(null)
       onOpenKbPage?.(page.spaceId, page.id)
     } catch (err) {
-      setKbError(err instanceof Error ? err.message : 'Failed to create page')
+      if (!handledAuthError(err)) {
+        setKbError(err instanceof Error ? err.message : 'Failed to create page')
+      }
     } finally {
       setKbBusy(false)
     }
@@ -582,36 +643,6 @@ function TeamViewComponent({
 
   /** Close the KB picker without promoting. */
   const closeKbPicker = (): void => setKbFor(null)
-
-  if (!handle) {
-    return (
-      <div className={styles.team}>
-        <form className={styles.join} onSubmit={onJoin}>
-          <label className={styles.joinLabel} htmlFor="team-handle">
-            Pick a display name
-          </label>
-          <p className={styles.joinHint}>
-            A free-text handle — no password. You&apos;ll appear in the team roster.
-          </p>
-          <div className={styles.joinRow}>
-            <input
-              id="team-handle"
-              className={styles.input}
-              type="text"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="e.g. Ada"
-              maxLength={MAX_DISPLAY_NAME_LEN}
-              autoFocus
-            />
-            <button type="submit" className={styles.joinBtn} disabled={!draft.trim()}>
-              Join
-            </button>
-          </div>
-        </form>
-      </div>
-    )
-  }
 
   const onlineCount = roster.filter((m) => m.online).length
   const openChannel = channels.find((c) => c.id === openId) ?? null
@@ -631,8 +662,13 @@ function TeamViewComponent({
             aria-hidden="true"
           />
           {connected ? 'connected' : 'connecting…'} as <strong>{handle}</strong>
-          <button type="button" className={styles.leaveBtn} onClick={onLeave} title="Change name">
-            change name
+          <button
+            type="button"
+            className={styles.logoutBtn}
+            onClick={signOut}
+            title="Log out of the team workspace"
+          >
+            log out
           </button>
         </span>
       </div>
@@ -703,7 +739,7 @@ function TeamViewComponent({
               {createError && <span className={styles.createError}>{createError}</span>}
               <button
                 type="submit"
-                className={styles.joinBtn}
+                className={styles.primaryBtn}
                 disabled={!newName.trim() || createBusy}
               >
                 {createBusy ? 'Creating…' : 'Create channel'}
@@ -947,7 +983,7 @@ function TeamViewComponent({
                 </div>
                 <button
                   type="submit"
-                  className={styles.joinBtn}
+                  className={styles.primaryBtn}
                   disabled={!composer.trim() || !connected}
                 >
                   Send

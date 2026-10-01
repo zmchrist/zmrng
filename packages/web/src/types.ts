@@ -684,6 +684,13 @@ export type ChatServerMsg =
 export interface Member {
   id: number
   displayName: string
+  /**
+   * The authenticated `users.id` this member row belongs to, or `null` for a
+   * legacy handle-only row created before login existed (`upsertMember`).
+   * `memberForUser` keys on this column and deliberately never claims a legacy
+   * null row — an unverified handle must not hand its history to a real user.
+   */
+  userId: number | null
   createdAt: string
 }
 
@@ -754,12 +761,21 @@ export interface Message {
  * design — frames are channel-tagged by `type`, never one socket per resource.
  */
 export type WsWorkspaceClientMsg =
-  | { type: 'hello'; displayName: string }
+  // `hello` no longer carries a display name: identity is the socket's
+  // AUTHENTICATED session, never a self-asserted string. Same-origin sockets
+  // ride the `zmrng_session` handshake cookie; a cross-origin socket (the
+  // desktop's Team connection to the VPS) passes its bearer `token` here
+  // instead, because no cookie can make that trip without TLS (D2).
+  | { type: 'hello'; token?: string }
   | { type: 'ping' }
   | { type: 'subscribe'; channelId: number }
   | { type: 'unsubscribe'; channelId: number }
-  | { type: 'message'; channelId: number; author: string; body: string }
-  | { type: 'react'; channelId: number; messageId: number; emoji: string; handle: string }
+  // Neither `message` nor `react` carries an author/handle any more — the server
+  // derives both from the socket's authenticated session. A frame that still
+  // asserts one is REJECTED outright rather than silently ignored, so an
+  // outdated client fails loudly instead of posting under the wrong name.
+  | { type: 'message'; channelId: number; body: string }
+  | { type: 'react'; channelId: number; messageId: number; emoji: string }
   // ---- KB real-time sync (T2, #144) — mirror of server types ----
   | { type: 'page.subscribe'; pageId: number }
   | { type: 'page.unsubscribe'; pageId: number }
@@ -767,7 +783,6 @@ export type WsWorkspaceClientMsg =
       type: 'page.edit'
       pageId: number
       body: string
-      author: string
     }
 
 /**
@@ -782,6 +797,10 @@ export type WsWorkspaceClientMsg =
 export type WsWorkspaceServerMsg =
   | { type: 'roster'; members: WorkspaceMember[] }
   | { type: 'pong' }
+  // Sent to a socket that presented no usable session (or whose session has
+  // expired) immediately before the server closes it. The client clears that
+  // origin's stored session and re-shows the login pane.
+  | { type: 'unauthorized' }
   | { type: 'message'; message: Message }
   | { type: 'channels'; channels: Channel[] }
   | { type: 'reaction'; channelId: number; messageId: number; reactions: ReactionSummary[] }
@@ -797,9 +816,14 @@ export type WsWorkspaceServerMsg =
   | { type: 'space.tree'; spaceId: number }
 
 /**
- * Max length of a self-asserted display-name handle, measured after trimming.
- * The client clamps to this before sending `hello`; the server rejects any
- * over-cap frame. Mirror of `packages/server/src/types.ts`.
+ * Max length of a display name, measured after trimming.
+ *
+ * It used to bound the self-asserted handle the client clamped before sending
+ * `hello`. `hello` no longer carries a name — identity is the authenticated
+ * session — so the bound now lives where a display name actually enters the
+ * system: the `create-user` CLI rejects an over-long `--display-name`. Here it
+ * survives only as an input `maxLength` for name fields.
+ * Mirror of `packages/server/src/types.ts`.
  */
 export const MAX_DISPLAY_NAME_LEN = 64
 
@@ -974,6 +998,123 @@ export interface WorkspaceSettings {
    *  Tailscale-reachable VPS, so there is nothing per-user to persist. */
   teamHandle: string
 }
+
+// ---- auth (username/password login gating the KB + Team surfaces) ----
+
+/**
+ * A provisioned application user. Accounts are created out-of-band by the
+ * `create-user` CLI (`src/cli/createUser.ts`) — there is deliberately no
+ * self-serve signup and no password-reset flow. `passwordHash` is the versioned
+ * `scrypt$N$r$p$salt$key` string produced by `password.ts`; it NEVER leaves the
+ * server, so every client-facing payload carries `PublicUser` instead.
+ */
+export interface User {
+  id: number
+  username: string
+  displayName: string
+  passwordHash: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** The client-visible projection of a `User` — never carries the password hash. */
+export interface PublicUser {
+  id: number
+  username: string
+  displayName: string
+}
+
+/**
+ * One server-side session row. Sessions are server-side by decision (not JWTs):
+ * logout and expiry are then a row delete rather than a revocation list. Only
+ * the sha256 `tokenHash` is stored, so a leaked database yields no usable bearer
+ * token.
+ */
+export interface Session {
+  id: number
+  userId: number
+  tokenHash: string
+  createdAt: string
+  expiresAt: string
+}
+
+/** `POST /api/auth/login` request body. */
+export interface LoginRequest {
+  username: string
+  password: string
+}
+
+/**
+ * `POST /api/auth/login` response. The same token is ALSO set as the
+ * `zmrng_session` httpOnly cookie; it is returned in the body because the
+ * desktop app's CROSS-ORIGIN Team connection to the VPS cannot carry a
+ * `SameSite=Strict` cookie and must fall back to an `Authorization: Bearer`
+ * header (D2 of `.agents/plans/zmrng-login-auth.md`).
+ */
+export interface LoginResponse {
+  user: PublicUser
+  token: string
+  expiresAt: string
+}
+
+/** `GET /api/auth/me` — who the caller is on THIS origin. */
+export interface AuthState {
+  user: PublicUser
+}
+
+/**
+ * What one KB changelog entry records. `page_revisions` only ever sees body
+ * saves, so the changelog is a dedicated additive table covering the whole
+ * lifecycle — create, rename, move, body-save and delete (D4).
+ */
+export type KbChangeAction =
+  | 'page.create'
+  | 'page.rename'
+  | 'page.move'
+  | 'page.edit'
+  | 'page.delete'
+
+/**
+ * One entry in a space's per-edit changelog. `userId` is nullable so an entry
+ * survives the user row being removed; `username` is denormalized for the same
+ * reason (the feed still reads correctly). `pageId` is nullable because a
+ * deleted page's row is gone while its changelog entry remains.
+ */
+export interface KbChangeEntry {
+  id: number
+  spaceId: number
+  pageId: number | null
+  userId: number | null
+  username: string
+  action: KbChangeAction
+  /** Human-readable context for the action (page title, rename/move detail). */
+  detail: string
+  createdAt: string
+}
+
+/**
+ * Name of the session cookie set by `POST /api/auth/login`. `HttpOnly` +
+ * `SameSite=Strict` + `Path=/`; `Secure` only over HTTPS or with
+ * `ZMRNG_SECURE_COOKIES=1` (the VPS is plain http on the tailnet, and browsers
+ * silently DROP a `Secure` cookie there).
+ */
+export const SESSION_COOKIE_NAME = 'zmrng_session'
+
+/**
+ * Minimum length of a provisioned password, enforced by the `create-user` CLI
+ * at provisioning time (never at login — the login path must not leak policy).
+ * The one floor worth having: it stops a one-character password without
+ * composition rules that push people toward worse passwords.
+ */
+export const MIN_PASSWORD_LEN = 8
+
+/** Max length of a username / password accepted by the CLI and the login route. */
+export const MAX_USERNAME_LEN = 64
+export const MAX_PASSWORD_LEN = 1024
+
+/** Default page size for `GET /api/spaces/:id/changelog` and its hard cap. */
+export const DEFAULT_CHANGELOG_PAGE = 50
+export const MAX_CHANGELOG_PAGE = 200
 
 // ---- preflight (advisory auth presence probe) ----
 

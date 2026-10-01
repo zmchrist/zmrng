@@ -14,7 +14,13 @@ drives **other** repos; it is the conductor, not the orchestra.
 - **No shared package** — `packages/server/src/types.ts` is the source of truth, manually
   mirrored into `packages/web/src/types.ts`.
 - **Frosted-glass UI** — translucent surfaces + backdrop blur, design tokens only.
-- **No cloud, no test framework yet** — validation is typecheck + lint + build.
+- **No cloud.** Validation is typecheck + lint + test + build; both workspaces run Vitest.
+- **Login gates the Knowledge Base and Team Chat, not the orchestrator.** Accounts are
+  CLI-provisioned (`npm run create-user`), passwords are scrypt-hashed, and sessions are
+  server-side rows rather than JWTs. The Workspace task surface stays open — a login wall
+  in front of the operator's own tooling buys nothing. One login covers both gated
+  surfaces, but a session belongs to the server that issued it, so an account must be
+  provisioned on each host.
 - **Caveman narration by default** for workers (per-task `style`); code/commits/PRs are
   always normal English.
 - **Multi-target** — a repo registry (`config/repos.json` → env → legacy) lets each task
