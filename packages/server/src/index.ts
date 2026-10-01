@@ -24,6 +24,10 @@ import { runPreflight } from './preflight.js'
 import { AuthService } from './auth.js'
 import { registerAuth } from './authRoutes.js'
 import { registerKbRoutes } from './kbRoutes.js'
+import { LoopManager } from './loop.js'
+import { registerLoopRoutes } from './loopRoutes.js'
+import { ghLoopGitHub } from './loopGithub.js'
+import { defaultLoadProbe } from './loopLoad.js'
 import { parseStreamedText } from './chat.js'
 import { readUiState, writeUiState } from './uiState.js'
 import { DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE } from './types.js'
@@ -125,6 +129,24 @@ const emitter = new LaneEmitter(
 // state and offers Restart instead of pretending the worker is alive. Runs after
 // the emitter exists, since its patches notify it.
 manager.reconcileOrphans()
+// Loop mode (gauntlet loop, ADR-0003): its own lane pool, separate from the task
+// execute-lane cap, so it never reads `manager`'s lanes or the Lanes emitter. Its
+// orchestrator sessions drive it by curl-ing the /api/loop routes over loopback,
+// hence `apiBase` is this server's own port. Boot reconciliation marks any run
+// left live by the previous process `stale`, mirroring the task pipeline.
+const loop = new LoopManager(db, (e: WsEvent) => hub.broadcast(e), {
+  runnerFactory: defaultRunnerFactory,
+  github: ghLoopGitHub(),
+  load: defaultLoadProbe({
+    maxLoadPerCore: config.loopMaxLoadPerCore,
+    minFreeMemMb: config.loopMinFreeMemMb,
+  }),
+  scanFactory: defaultScanRunnerFactory,
+  apiBase: `http://127.0.0.1:${config.port}`,
+  pumpIntervalMs: config.loopPumpIntervalMs,
+  log: app.log,
+})
+loop.reconcileOrphans()
 // Team-workspace presence: every join/leave re-broadcasts the full roster to the
 // 'workspace' room. The broadcast sink mirrors TaskManager's hub injection.
 const workspace = new WorkspaceManager(db, (frame: WsWorkspaceServerMsg) =>
@@ -529,6 +551,10 @@ registerKbRoutes(app, {
   broadcast: (frame) => hub.broadcastRoom('workspace', JSON.stringify(frame)),
   log: app.log,
 })
+
+// Loop mode REST surface (/api/loop/*) — ungated like the Workspace orchestrator;
+// a plain function so it is integration-testable with app.inject().
+registerLoopRoutes(app, { loop })
 
 
 // Directory listing (not contents) of a task's worktree, for the Workspace file
@@ -1182,6 +1208,7 @@ function shutdown(signal: string): void {
   shuttingDown = true
   app.log.info({ signal }, 'shutting down — killing live claude workers')
   manager.shutdown()
+  loop.shutdown()
   terminals.killAll()
   chats.killAll()
 
@@ -1220,7 +1247,10 @@ process.on('SIGTERM', () => shutdown('SIGTERM'))
 // async SIGKILL escalation (5s) runs. On ANY exit path, group-SIGKILL every live
 // worker tree so `claude` grandchildren die with the server instead of orphaning
 // to launchd and burning CPU/RAM. Cheap and idempotent when already clean.
-process.on('exit', () => manager.hardKillAll())
+process.on('exit', () => {
+  manager.hardKillAll()
+  loop.hardKillAll()
+})
 
 // Version poller (WS-B / D3). Disabled by default (versionPollMs === 0) so
 // laptops never background-fetch; the VPS opts in via ZMRNG_VERSION_POLL_MS.

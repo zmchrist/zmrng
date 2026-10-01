@@ -392,3 +392,30 @@ pool. Web: new pure join `laneRows.ts` (joins the snapshot against the client's 
 presentational `LanesPanel` component, added as a new `'lanes'` tab in `WorkspaceView`'s
 `PaneTab` strip and a matching view in the phone drawer (`mobileNav.ts`, `NavIcon.tsx`).
 Plan: `.agents/plans/lane-viewer-panel.md`.
+
+## Loop mode — the gauntlet loop over a GitHub ticket map (2026-10-01)
+New desktop-only **Loop** tab that runs an epic's GitHub sub-issues to completion with the
+gauntlet technique (credit: robonuggets/gauntlet-loop, CC-BY-4.0, after Matt Shumer's "Claude
+of Duty"; reimplemented server-side, nothing vendored). Server: `loop.ts` (`LoopManager`),
+the pure `loopMap.ts` / `loopPrompts.ts` (`GAUNTLET_*` control tokens, STEP_PROFILES, the
+orchestrator prompt + recap), `loopGithub.ts` (the `LoopGitHub` seam over `gh api`, with
+task-list / `Blocked by #N` body fallbacks), `loopLoad.ts` (available-memory + load-per-core
+probe), `loopRoutes.ts` (the ungated `/api/loop/*` surface). Per ticket a fresh builder →
+read-only critic (blind A/B, server-randomized labels, `MAX_ROUNDS = 6` fuse) → validate →
+docs sync → serial fold into `gauntlet/<run8>/integ`; the server pushes integ only after a
+machine-asserted fold, and when every ticket is done the existing fail-closed security scan
+gates ONE final PR → default branch (never auto-merged). A persistent per-run orchestrator
+(chat ⅓ left) drives the lanes by `curl`ing the loopback routes. Loop lanes have their own
+global pool (`LOOP_MAX_LANES = 3`, separate from `config.maxLanes`, absent from the task
+Lanes tab) behind a load gate on NEW picks (`ZMRNG_LOOP_MAX_LOAD_PER_CORE` /
+`ZMRNG_LOOP_MIN_FREE_MEM_MB` / `ZMRNG_LOOP_PUMP_INTERVAL_MS`). Edits to existing files, all
+additive: `db.ts` gains `loop_runs`/`loop_tickets`/`loop_events` via `ensureLoopSchema()`
+(data-loss guard extended), `config.ts` gains `resolveLoopConfig`, `worktree.ts` gains
+`createWorktree`'s optional `{ branch, base, dir }` override and the exported `gitIn`,
+`index.ts` wires the manager, routes, boot `reconcileOrphans()` (live runs reboot `stale`)
+and shutdown/exit kills; `phases.ts`/`TaskManager` are untouched. Web: `types.ts` mirror
+(Loop types, four `loop*` `WsEvent` frames, `'loop'` in `WorkspaceMode`), pure
+`loopMap.ts`/`loopState.ts`/`loopProtocol.ts`, `LoopView`/`LoopChat`/`LoopLanes`/`LoopMap`,
+an `ActivityRail` button + `'loop'` `NavIcon`, App wiring (a phone coerces `'loop'` →
+`'workspace'`), and `api.ts` exporting `req`. Decisions D1–D7: `docs/adr/0003-gauntlet-loop.md`.
+Plan: `.agents/plans/gauntlet-loop-tab.md`.

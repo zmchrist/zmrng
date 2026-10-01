@@ -7,6 +7,8 @@ const RAIL: ReadonlyArray<{ id: WorkspaceMode; icon: NavIconName; label: string 
   { id: 'workspace', icon: 'workspace', label: 'Workspace' },
   { id: 'team', icon: 'team', label: 'Team' },
   { id: 'kb', icon: 'kb', label: 'KB' },
+  // Desktop only: the phone shell has no Loop view (App coerces it to Workspace).
+  { id: 'loop', icon: 'loop', label: 'Loop' },
 ]
 
 interface Props {

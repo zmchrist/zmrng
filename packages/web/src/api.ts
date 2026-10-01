@@ -179,8 +179,10 @@ async function reqAt<T>(
   return (await res.json()) as T
 }
 
-/** JSON call against this page's own origin — the default for everything but Team. */
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+/** JSON call against this page's own origin — the default for everything but Team.
+ *  Exported so a typed route group kept in its own module (`loopProtocol.ts`)
+ *  rides this same auth-aware `send()` path instead of a second fetch wrapper. */
+export async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return reqAt<T>('', path, init)
 }
 

@@ -1,0 +1,199 @@
+/* Loop tab — lane windows (top of the right column). Tokens only. */
+.lanes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.head {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-strong);
+  font-size: 0.85rem;
+}
+
+.title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.pool {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+/* The load gate is closed: vermilion is the one "attention" signal. */
+.chip {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--status-blocked);
+  border-radius: var(--radius-pill);
+  color: var(--status-blocked);
+  background: var(--accent-soft);
+  cursor: help;
+}
+
+.empty {
+  padding: 0.75rem 0.9rem;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.6rem;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  font-size: 0.8rem;
+}
+
+.card[data-phase='waiting'] {
+  border-color: var(--status-blocked);
+}
+
+.idle {
+  align-items: center;
+  justify-content: center;
+  min-height: 5.5rem;
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cardHead {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.ticketLink {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+button.ticketLink:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.pill {
+  flex: none;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.elapsed {
+  color: var(--text-faint);
+}
+
+.activity {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem 0.45rem;
+  border-left: 2px solid var(--status-blocked);
+  background: var(--well);
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.questionLabel {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--status-blocked);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.confirmText {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+}
+
+.stopBtn {
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+
+.stopBtn:hover {
+  color: var(--status-failed);
+  border-color: var(--status-failed);
+}

@@ -259,7 +259,7 @@ export interface TaskComment {
 }
 
 /** Top-level workspace shell mode (UI-only; mirrored for type-parity). */
-export type WorkspaceMode = 'tasks' | 'board' | 'workspace' | 'team' | 'kb'
+export type WorkspaceMode = 'tasks' | 'board' | 'workspace' | 'team' | 'kb' | 'loop'
 
 // ---- workspace dashboard grid (customizable card grid) ---------------------
 
@@ -635,6 +635,245 @@ export type WsEvent =
   | { type: 'task-removed'; taskId: string }
   /** live lane/session snapshot (Lanes panel); in-memory only, never persisted */
   | { type: 'lanes'; snapshot: LaneSnapshot }
+  /** a Loop run's full view (coalesced per run, ~150ms trailing window) */
+  | { type: 'loop'; run: LoopRunView }
+  /** one persisted Loop event (orchestrator chat, lane activity, status) */
+  | { type: 'loop-event'; runId: string; event: LoopEvent }
+  /** transient orchestrator token-delta stream, not persisted */
+  | { type: 'loop-partial'; runId: string; text: string }
+  /** a Loop run was archived — the client should drop it from the open view */
+  | { type: 'loop-removed'; runId: string }
+
+// ---- gauntlet loop (Loop mode) ---------------------------------------------
+//
+// A Loop run drives a map of GitHub-issue tickets (an epic's sub-issues) through
+// the gauntlet technique: a fresh BUILDER per round, a fresh READ-ONLY CRITIC
+// doing a blind binary A/B against the ticket's bar, then validate → sync docs →
+// a serial fold into the run's integration branch. One final PR integ → default.
+// Technique credit: robonuggets/gauntlet-loop (CC-BY-4.0), after Matt Shumer's
+// "Claude of Duty". Owned server-side by `LoopManager` (loop.ts).
+
+/** Lifecycle of one Loop run. `stale` = the app restarted under a live run. */
+export type LoopRunStatus =
+  | 'draft'
+  | 'running'
+  | 'paused'
+  | 'finalizing'
+  | 'complete'
+  | 'blocked'
+  | 'stale'
+  | 'archived'
+
+/**
+ * Lifecycle of one ticket inside a run. `blocked` is DERIVED (an open ticket with
+ * an unfinished blocker); `executing`..`folding` map 1:1 onto a `LoopStep`;
+ * `waiting` = the live step asked the orchestrator a question.
+ */
+export type LoopTicketState =
+  | 'todo'
+  | 'blocked'
+  | 'executing'
+  | 'reviewing'
+  | 'validating'
+  | 'finishing'
+  | 'folding'
+  | 'waiting'
+  | 'done'
+  | 'needs-human'
+  | 'skipped'
+
+/** The fresh-agent step a ticket's lane is running. */
+export type LoopStep = 'builder' | 'critic' | 'validate' | 'finish' | 'fold'
+
+/** The round fuse: a ticket that loses this many critic rounds parks `needs-human`. */
+export const LOOP_MAX_ROUNDS = 6
+/**
+ * The Loop lane pool's hard cap: at most this many ticket lanes in flight across
+ * EVERY Loop run at once (a global pool, not per run). Loop lanes have their own
+ * pool, owned by `LoopManager` — they never count against the task execute-lane
+ * cap (`config.maxLanes`) and never appear in the task Lanes tab.
+ */
+export const LOOP_MAX_LANES = 3
+
+/** GitHub issue state as the loop sees it. */
+export type LoopGhState = 'open' | 'closed'
+
+/** One persisted Loop run (the `loop_runs` table). */
+export interface LoopRun {
+  id: string
+  /** id of the RepoTarget the run drives. */
+  repoId: string
+  /** The parent/epic issue number whose sub-issues form the ticket map. */
+  epic: number
+  /** The epic issue's title. */
+  title: string
+  status: LoopRunStatus
+  /** The status to restore when a `stale` run is resumed. */
+  prevStatus: LoopRunStatus | null
+  /**
+   * The run's target lane count within the global Loop pool, 0..LOOP_MAX_LANES
+   * (0 = stop picking). The pool cap and the load gate still apply at pick time.
+   */
+  lanes: number
+  /** The per-run integration branch every ticket folds into. */
+  integBranch: string
+  /** Absolute path of the integration worktree (null once archived). */
+  integWorktree: string | null
+  /** Pick priority among UNBLOCKED tickets (issue numbers, highest first). */
+  priority: number[]
+  /** The final integ → default-branch PR, once opened. */
+  prUrl: string | null
+  /** Human-readable note (e.g. why the run is `blocked`). */
+  note: string | null
+  /** Usage summed across every step and the orchestrator. */
+  usage: TaskUsage
+  createdAt: string
+  updatedAt: string
+}
+
+/** One persisted ticket of a run (the `loop_tickets` table). */
+export interface LoopTicket {
+  runId: string
+  /** GitHub issue number (unique within a run). */
+  number: number
+  title: string
+  body: string
+  url: string
+  ghState: LoopGhState
+  /** Issue numbers this ticket is blocked by (GitHub "blocked by" links). */
+  blockedBy: number[]
+  /** The named reference the output must beat, parsed from the issue body. */
+  bar: string | null
+  state: LoopTicketState
+  /** The step currently (or last) running for this ticket; null before the first pick. */
+  step: LoopStep | null
+  /** Gauntlet round, 1-based once picked (0 = never picked). */
+  round: number
+  /** The critic's (or validator's) last named gap, fed into the next builder round. */
+  lastGap: string | null
+  branch: string | null
+  worktree: string | null
+  /** The integ commit the ticket folded at. */
+  foldSha: string | null
+  /** The open question while `waiting`. */
+  question: string | null
+  /** Human-readable note (e.g. why the ticket is `needs-human`). */
+  note: string | null
+  usage: TaskUsage
+  /** When the ticket was first picked. */
+  startedAt: string | null
+  /** When the current step started. */
+  stepStartedAt: string | null
+  updatedAt: string
+}
+
+/** One live lane: an in-flight ticket step, assembled in memory (never persisted). */
+export interface LoopLane {
+  ticket: number
+  step: LoopStep
+  /** The model/effort the step's child was ACTUALLY spawned with. */
+  model: string
+  effort: EffortLevel
+  /** The latest activity line (a tool-call summary or an assistant snippet). */
+  activity: string
+  /** When the current step's child was spawned. */
+  startedAt: string
+  /** True while the step is parked on a question to the orchestrator. */
+  waiting: boolean
+}
+
+/**
+ * One machine-load sample (`GET /api/loop/load`). The orchestrator reads it to
+ * choose a lane count, and the server hard-gates every NEW pick on it: no ticket
+ * is picked while `allowsNewLane` is false. In-flight steps are never killed.
+ */
+export interface LoopLoad {
+  /** Logical CPU count. */
+  cores: number
+  /** 1-minute load average (0 on hosts without one, e.g. Windows). */
+  loadAvg1: number
+  /** `loadAvg1 / cores`, rounded to 2 decimals. */
+  loadPerCore: number
+  memTotalMb: number
+  /** AVAILABLE memory (Linux MemAvailable; macOS free+inactive+speculative+purgeable). */
+  memAvailableMb: number
+  /** Threshold: picks pause while `loadPerCore` exceeds this. */
+  maxLoadPerCore: number
+  /** Threshold: picks pause while `memAvailableMb` is below this. */
+  minFreeMemMb: number
+  /** False while either threshold trips. */
+  allowsNewLane: boolean
+  /** Which threshold(s) tripped, human-readable; null when allowed. */
+  reason: string | null
+  sampledAt: string
+}
+
+/** The global Loop lane pool's occupancy (shared by every Loop run). */
+export interface LoopPool {
+  used: number
+  max: number
+}
+
+/** `GET /api/loop/load` response: a fresh sample plus the pool occupancy. */
+export interface LoopLoadResponse extends LoopLoad {
+  pool: LoopPool
+}
+
+/** Everything the Loop view renders for one run. */
+export interface LoopRunView {
+  run: LoopRun
+  tickets: LoopTicket[]
+  lanes: LoopLane[]
+  /** True while the run's orchestrator session is alive. */
+  orchestratorAlive: boolean
+  /** True while the orchestrator is mid-turn. */
+  orchestratorBusy: boolean
+  /** The global Loop lane pool (shared by every Loop run). */
+  pool: LoopPool
+  /** The latest load sample, or null before the first sample. */
+  load: LoopLoad | null
+}
+
+/**
+ * `chat` = the orchestrator transcript (operator turns, orchestrator replies, its
+ * tool calls, and the loop notifications sent to it); `activity` = a lane step's
+ * tool calls; `status` = a run/ticket state change; `error` = a failure note.
+ */
+export type LoopEventKind = 'chat' | 'activity' | 'status' | 'error'
+
+/** Who produced a `chat` line. */
+export type LoopChatRole = 'operator' | 'orchestrator' | 'tool' | 'loop'
+
+export interface LoopEventPayload {
+  role?: LoopChatRole
+  text?: string
+  /** Tool name for a tool-call line (e.g. Bash). */
+  tool?: string
+  /** Compact one-line summary of a tool call. */
+  summary?: string
+  step?: LoopStep
+  /** State transition endpoints for a `status` line. */
+  from?: string
+  to?: string
+}
+
+/** One persisted Loop event (the `loop_events` table). */
+export interface LoopEvent {
+  id: number
+  runId: string
+  /** The ticket this event belongs to; null for run-level / chat events. */
+  ticket: number | null
+  kind: LoopEventKind
+  payload: LoopEventPayload
+  createdAt: string
+}
+
+/** `POST /api/loop/runs` body. */
+export interface LoopCreateRequest {
+  repoId: string
+  epic: number
+  lanes?: number
+}
 
 // ---- terminal (bottom-dock PTY) --------------------------------------------
 

@@ -388,6 +388,11 @@ rounds); `clarify` holds no lane and is uncapped — the snapshot reports that t
 uncapped clarify group) rather than inventing a second pool. Nothing here is persisted; the
 whole snapshot is rebuilt from the three live-session managers on every push.
 
+> **Loop lanes are NOT in this snapshot.** The gauntlet Loop's lane pool
+> (`LOOP_MAX_LANES = 3`, owned by `LoopManager`) is deliberately separate from
+> `config.maxLanes`: it never counts against the execute-lane cap and is never read by
+> `buildLaneSnapshot` — Loop lanes are shown in the Loop tab (see **LoopManager** below).
+
 - **`LaneSources`** — the three managers reduced to the read-only accessors
   `buildLaneSnapshot` actually needs: `tasks(): { execute: LaneOccupancy; workers:
   LaneWorker[] }` (→ `TaskManager.laneSnapshot()`), `chats(): LaneChat[]` (→
@@ -417,6 +422,297 @@ whole snapshot is rebuilt from the three live-session managers on every push.
   itself is constructed afterward (reading the three managers via closures, so the
   construction-order cycle resolves through the arrow indirection, not a forward reference).
 
+## LoopManager — `packages/server/src/{loop,loopMap,loopPrompts,loopGithub,loopLoad,loopRoutes}.ts`
+
+The **Loop** mode's engine (ADR-0003: `docs/adr/0003-gauntlet-loop.md`; plan
+`.agents/plans/gauntlet-loop-tab.md`). It runs a map of GitHub-issue tickets (an epic's
+sub-issues) to completion with the *gauntlet loop*: per ticket a fresh BUILDER builds, a
+separate fresh READ-ONLY CRITIC does a blind binary A/B against the ticket's **bar** and
+names the single biggest gap, a loss feeds that gap into the next builder round, and a win
+goes on to validate → sync docs → a serial fold into a per-run integration branch. When
+every ticket is done there is **one** final PR integ → default branch, never auto-merged.
+It is a **separate manager, not Task rows** (D1): `phases.ts` is only *imported from*
+(`styleDirective`, `PR_BODY_TEMPLATE`, `PR_BODY_FILE`, `PR_RE`) — `TaskManager`, its lane
+accounting and `taskManager.test.ts` are untouched. Every child is spawned through the same
+injected `RunnerFactory` seam as `TaskManager`/`ChatManager`, so the `ANTHROPIC_API_KEY`
+strip holds by construction and the engine tests stay hermetic.
+
+> **Credit.** The technique is the *gauntlet loop* from **robonuggets/gauntlet-loop**
+> (licensed **CC-BY-4.0**), itself after Matt Shumer's "Claude of Duty". zmrng reimplements
+> it server-side; no code or skill from the source is invoked or vendored. Keep this credit
+> wherever the technique is documented.
+
+### Pure modules (no IO — every rule pinned by a unit test)
+
+- **`loopMap.ts`** — `parseBar(body)` (a `## Bar` section at any heading level wins, else
+  a `Bar:` line, plain/bold/bulleted; fenced code and HTML comments never count; null when
+  absent/empty), `parseBlockedByFallback(body)` (`Blocked by #N` / `Depends on #N` lines
+  only — `#N` in prose, code spans and fences is ignored), `parseEpicChildrenFallback(body)`
+  (`- [ ] #N` / `- [x] #N` task-list lines), `stripFencedCode(text)`,
+  `deriveStates(tickets, external?)` (recomputes `todo` vs `blocked`; an in-map blocker is
+  satisfied iff `done`/`skipped`, an out-of-map one iff `external` says `closed`),
+  `findCycle(tickets)`, `frontier(...)`, `pickNext(tickets, priority, freeSlots, external?)`
+  (frontier tickets **with a bar**, `priority` first then ascending issue number, at most
+  `freeSlots`), `barless(...)`, `percentComplete(tickets)` (done ÷ non-skipped, rounded),
+  `verdictOutcome(letter, oursLabel)` (WIN only when the letter is OUR server-randomized
+  label — markdown emphasis/quotes/trailing period tolerated; a tie, garbage or no answer
+  is a LOSE), `nextAfterLoss(ticket, gap)` (round fuse: `MAX_ROUNDS = LOOP_MAX_ROUNDS = 6`,
+  losing round 6 lands on round 7 → `parked`), `randomLabel(rand?)`.
+- **`loopPrompts.ts`** — the harness contract, pinned by `loopPrompts.test.ts` the way
+  `prompts.test.ts` pins `phases.ts`. **Control tokens** are line-anchored (like
+  `READY_RE`), so a token quoted mid-sentence never matches: `GAUNTLET_STATUS_RE`
+  (`GAUNTLET_STATUS=BUILT|GREEN|RED [reason]`; `GREENISH`/lower case never match),
+  `GAUNTLET_VERDICT_RE` (`GAUNTLET_VERDICT: <A|B>`), `GAUNTLET_GAP_RE`,
+  `GAUNTLET_QUESTION_RE`. `parseStepResult(text)` strips fenced code FIRST (a token or PR
+  URL inside a fence never counts) and takes the LAST occurrence of each token.
+  **`STEP_PROFILES`**: builder/critic/fold/orchestrator = opus·high; validate/finish/final
+  = sonnet·medium. Prompt builders (each returns `{system, kickoff}`): `builderPrompt`
+  (round > 1 carries the critic's last gap verbatim; "build, do not judge"), `criticPrompt`
+  (harsh, READ-ONLY, blind A/B with provenance stripped, a single LETTER never a score,
+  one biggest gap; both candidates described neutrally in A-then-B order),
+  `validatePrompt`, `finishPrompt` (docs sync), `foldPrompt`, `finalPrKickoff` (`--body-file`
+  from `PR_BODY_TEMPLATE` + one `Closes #n` per done ticket, never `--fill`, never merge),
+  plus `loopOrchestratorPrompt` / `orchestratorKickoff(ctx, recap?)` /
+  `orchestratorRecap(input)`. Every step system prompt carries the branch-only +
+  worktree-hygiene rules (a step worker is told it never pushes — the server does; the
+  final-PR agent's only remote write is the integ push), the `GAUNTLET_QUESTION`
+  protocol, and `styleDirective(style)`.
+- **`loopGithub.ts`** — the GitHub seam. `LoopGitHub { fetchMap(slug, epic): LoopMapFetch;
+  fetchIssue(slug, n): GhTicket }`; `ghLoopGitHub(ghExec = defaultGhExec)` shells out to
+  `gh api` via `promisify(execFile)` (no shell; 60s timeout, 16MB buffer, ≤4 calls in
+  flight) and validates the slug and issue number before any call. **A map is the epic's
+  native sub-issues** (`repos/<slug>/issues/<epic>/sub_issues`), **falling back** — on an
+  error OR an empty list — to the `- [ ] #N` task list in the epic body (a listed child that
+  cannot be fetched fails the whole map rather than silently vanishing). **Dependencies are
+  GitHub's native `dependencies/blocked_by` links**, **falling back** on an error to
+  `Blocked by #N` lines in the ticket body. Blockers outside the map get their state
+  fetched (`external`: closed ⇒ satisfied; unknown/errored ⇒ `open`, never silently done).
+  `mapIssueJson` reads any state other than `closed` as `open`. `LoopManager` tests inject a
+  fake, so `gh` never runs under test.
+- **`loopLoad.ts`** — the machine-load probe (D7). `parseMeminfo(text)` (Linux
+  `MemAvailable`, kB → whole MB, null when absent), `parseVmStat(text)` (macOS: header page
+  size × (free + inactive + speculative + purgeable) pages; null on a malformed header or
+  no `Pages free` line), `assessLoad(raw, thresholds, now?)` → `LoopLoad`, and
+  `defaultLoadProbe(thresholds, platform?, readers?)` (`LoadProbe.sample()` never rejects;
+  every reader — file, `execFile`, `cpus`/`loadavg`/`totalmem`/`freemem` — is injectable, so
+  the platform branches run under test without `/proc` or `vm_stat`). **Memory is
+  *available* memory, not `os.freemem()`**: on macOS `freemem()` counts only truly free
+  pages and excludes the inactive/purgeable cache, so it reads a few hundred MB on a healthy
+  Mac and a gate on it would block every pick; any parse/read failure (or another platform)
+  falls back to `freemem()`. `loadPerCore = loadAvg1 / cores`, 2 dp; the gate trips when
+  `loadPerCore` is strictly **over** `maxLoadPerCore` or `memAvailableMb` strictly **under**
+  `minFreeMemMb`; `reason` names each tripped threshold with its numbers (joined `; `). A
+  `[0,0,0]` load average (Windows) never trips the CPU half — memory still gates.
+
+### `LoopManager` (`loop.ts`)
+
+- **Constructor:** `new LoopManager(db, broadcast, deps: LoopDeps)`. Required deps:
+  `runnerFactory`, `github: LoopGitHub`, `load: LoadProbe`, `scanFactory:
+  ScanRunnerFactory` (the same seam the task scan gate uses), `apiBase` (the server's own
+  loopback origin, `http://127.0.0.1:<config.port>` — never hard-coded; it is what the
+  orchestrator `curl`s). Optional: `pumpIntervalMs` (default `config.loopPumpIntervalMs`; 0
+  disables the timer), `coalesceMs` (default 150; 0 broadcasts synchronously), `clock`,
+  `random` (feeds `randomLabel`), `repoLookup`, `slugOf`, `seed`, `securityPolicy`, `style`,
+  and **`log: LoopLog`** (a `{error(obj, msg)}` slice of Pino — `index.ts` passes
+  `app.log`; every failed fire-and-forget job is logged there AND, when it belongs to a run,
+  recorded as that run's `error` event, so a rejection is never unhandled).
+- **Public API** (mirrors the routes): `load()`, `listRuns()`, `view(runId)`,
+  `events(runId, limit?)`, `createRun({repoId, epic, lanes?})`, `start`, `pause`,
+  `setLanes`, `setPriority`, `refresh`, `addTicket`, `skipTicket`, `stopTicket`,
+  `retryTicket`, `answer`, `chat`, `resume`, `archive`, plus `reconcileOrphans()`,
+  `pump()`, `shutdown()`, `hardKillAll()`, and **`whenIdle()`** (the test seam — resolves
+  once every tracked async job has settled, so tests never sleep). Failures are a typed
+  **`LoopError(status 400|404|409|502, msg)`** that the routes map straight onto HTTP
+  (400 bad input / unknown repo / no GitHub origin, 404 unknown run or ticket, 409 an
+  action the current state forbids — including any action on an `archived` run — and 502 a
+  failed GitHub fetch).
+- **Run lifecycle** (`LoopRunStatus`): `draft ─start─▶ running ⇄ paused`; every ticket done
+  → `finalizing` → final PR URL → `complete`; a red/erroring final scan or a failed final-PR
+  agent → `blocked` (`start` on a blocked run re-scans, and adding a ticket reopens it to
+  `running`); a boot with a live run → `stale` ─`resume`▶ its previous status; any state
+  ─`archive`▶ `archived`. `start` accepts `draft`/`paused`/`blocked` only (a `stale` run
+  must `resume`); `pause` only from `running` and lets in-flight steps finish while
+  picking nothing new. Ticket states (`LoopTicketState`): `todo`,
+  `blocked` (DERIVED — an open ticket with an unfinished blocker), `executing`,
+  `reviewing`, `validating`, `finishing`, `folding` (1:1 with the five steps), `waiting`,
+  `done`, `needs-human`, `skipped`. A ticket whose GitHub issue is already **closed** is
+  `done` from the start.
+- **Lane pool (D3).** A global in-memory `Set<'<runId>:<issue>'>` capped at
+  **`LOOP_MAX_LANES = 3` across ALL Loop runs** — NOT per run, and entirely **separate
+  from `config.maxLanes`**. Loop lanes never count against the task execute-lane cap and
+  **never appear in the task Lanes tab** (`lanes.ts`'s snapshot does not read this pool;
+  they are shown in the Loop tab). The operator accepted that Loop lanes plus task lanes can
+  mean 8+ `claude` processes; the load gate below is the practical bound. `run.lanes`
+  (0–3) is a run's TARGET within the pool: free slots =
+  `min(run.lanes - heldByRun, LOOP_MAX_LANES - pool.size)`, and `pump()` walks `running`
+  runs oldest first. A new run starts at `lanes = 1`; the orchestrator's first turn picks
+  the real count. A lane is held from pick until `done`, `needs-human`, a stop/skip, or an
+  archive — a ticket waiting on the fold mutex **keeps its lane**, and `view()` renders
+  every held slot as a lane card even with no live child ("queued — waiting for the serial
+  fold" / "starting…"). Every path that ends a lane goes through the single
+  `releaseLane()`. Each acquire mints a fresh **lane token**; an async continuation (a
+  pick's git work, a step's setup) captures it and aborts if the lane was released or
+  re-acquired meanwhile.
+- **Load gate (D7) + pump.** `pump()` (serialized — a request during a pump sets a flag and
+  the running pump loops once more) first parks every frontier ticket with **no bar**
+  `needs-human` ("ticket has no bar" — there is no fallback to acceptance criteria), then —
+  only if a pick is actually possible — samples the probe ONCE. A closed gate
+  (`allowsNewLane: false`, or a probe that throws: **fail-closed**, logged via `deps.log`)
+  defers every new pick: the run's `note` becomes `picks deferred: <reason>` and the
+  orchestrator is told **once per deferral episode** (a `loadDeferred` flag cleared when a
+  pick next succeeds), never on every re-check. The gate only **defers new picks** — it never
+  kills an in-flight step and never rewrites `run.lanes`. A pump timer
+  (`config.loopPumpIntervalMs`) re-runs `pump()` so a deferred pick resumes once load drops;
+  it is `unref()`-ed and cleared by `shutdown()`. The latest sample rides every `LoopRunView`
+  as `load`, with the pool as `pool: {used, max}`; a new sample re-broadcasts running
+  runs' views only when `allowsNewLane` flips or a displayed number changes at its
+  formatted precision, so the timer does not spam the socket. A running run with no lane,
+  nothing pickable and a `needs-human` backlog is reported to the orchestrator once
+  ("run idle: N ticket(s) need a human").
+- **Git topology** (inside the target repo, per `.claude/rules/worktree-location.md`; `run8`
+  = the first 8 chars of the run id). Integration branch **`gauntlet/<run8>/integ`**, cut
+  from the default branch's resolved base at run creation, in worktree
+  `<repo>/worktrees/loop-<run8>-integ`. Ticket branch **`gauntlet/<run8>/t<n>`**, cut from
+  the integ TIP **at pick time** (so it carries every earlier fold), in worktree
+  `<repo>/worktrees/loop-<run8>-t<n>`. Both are created with `createWorktree`'s
+  `{branch, base, dir}` override and seeded with `seedHarness`. After a ticket's fold its
+  worktree is removed and the branch is kept; archiving removes every worktree of the run.
+  Branches are never force-deleted. The target repo should gitignore `worktrees/`.
+- **Per-ticket step flow.** Every step is a **fresh** runner (`stepRunners` keyed
+  `<runId>:<n>`, with a spawn `gen` that makes a stale callback inert), killed once its
+  result is accepted:
+  `todo ─pick─▶ builder ─BUILT─▶ critic ─WIN─▶ validate ─GREEN─▶ finish ─GREEN─▶ fold ─verified─▶ done`.
+  A critic **LOSE** feeds the gap into the next builder round (`round + 1`); a validate or
+  finish **RED** is also a loss (the reason becomes the gap); losing past `MAX_ROUNDS`
+  (6) parks the ticket `needs-human`. A fold **RED** parks it `needs-human` directly.
+  Tokens each step must end with: builder `GAUNTLET_STATUS=BUILT`; critic
+  `GAUNTLET_VERDICT: A|B` then `GAUNTLET_GAP: …`; validate/finish/fold
+  `GAUNTLET_STATUS=GREEN` or `RED <reason>`. **Blind A/B (D5):** the server randomizes
+  which label (`A`/`B`) is the ticket's work (`oursLabel`), the critic answers with a
+  letter, and `verdictOutcome` maps it to WIN/LOSE — a tie or unparseable answer is a LOSE
+  because the work must *beat* the bar. The critic cannot be literally blind (it fetches the
+  bar itself); "blind" is enforced by neutral prompts + label randomization. **Questions:**
+  any step may print `GAUNTLET_QUESTION: …` → the ticket goes `waiting` (lane held, runner
+  kept alive), the question is queued to the orchestrator, and `answer()` sends the text
+  into that same live runner so the step continues. **Nudge:** a turn that ends with no
+  valid token (or an error result) gets exactly ONE nudge; a second miss, an unexpected
+  exit or a spawn error parks the ticket `needs-human` (a child that exits mid-assertion is
+  deferred to the same decision).
+- **Machine assertions** (deterministic, after the agent's claim — the scan gate's
+  pattern): **builder** — tree clean AND HEAD advanced (else a nudge to commit);
+  **critic** — HEAD unchanged AND tree clean (a violation → `needs-human` at once, and no
+  fold is ever enqueued); **fold** — `git merge-base --is-ancestor <ticket branch> HEAD` in
+  the integ worktree AND integ tree clean (else a nudge). Only then does the **server**
+  `git push origin <integ>` (a non-default branch, never forced). A failed push is recorded
+  (run note + `error` event + orchestrator notice) but the ticket still completes — the
+  merge itself is verified.
+- **Fold mutex.** Folding is serial per run: `foldInFlight: Map<runId, n>` plus a FIFO
+  `foldQueue`. `enqueueFold` claims the mutex **synchronously** (no await between check and
+  set) or queues the ticket (state `folding`, lane kept); `onFoldSettled` ignores a
+  stale/duplicate settle; stopping a queued ticket only dequeues it; a `needs-human`/stop of
+  the folding ticket first best-effort `git merge --abort`s integ, then settles. A completed
+  fold: push, ticket `done` with `foldSha`, ticket worktree removed, lane released, mutex
+  settled (starting the next queued fold), then `maybeFinalize`.
+- **Final scan + PR (D4, D6).** `maybeFinalize(runId)` runs automatically the moment at
+  least one ticket is done and every non-skipped ticket is (neither operator nor
+  orchestrator triggers it): the run goes `finalizing`, then the existing deterministic
+  scan runs on the integ worktree (`scanFactory`, policy =
+  `mergeSecurityPolicy(config.security, repo.security)`, `baseRef` = the default branch,
+  `sast: true`; `policy.enabled === false` skips the scan). A `ScannerUnavailableError`, any
+  other scanner error, or unparseable output (`wellFormedScanOutput`) is **fail-closed** →
+  `blocked`; a red verdict (`evaluateThreshold`) → `blocked` with
+  `formatFindingsForAgent(blocking)` relayed to the orchestrator; green → the **final-PR
+  agent** (sonnet·medium, in the integ worktree) pushes integ (`git push -u origin <integ>`,
+  never forced), writes `PR_BODY_FILE` from `PR_BODY_TEMPLATE` + one `Closes #n` per done
+  ticket, and opens ONE PR with `gh pr create --base <default> --head <integ> --body-file`
+  (never `--fill`, never `gh pr merge`). Only a PR URL **of the run's own repo** counts
+  (`prUrlFor`: fences stripped, last URL wins) → `complete` with `prUrl`; no URL after one
+  nudge, an exit or a spawn error → `blocked`. **There are deliberately NO automatic
+  security-fix rounds** (unlike the task pipeline's RED → FIX loop): on red the operator
+  adds a fix ticket (which reopens the map) or fixes it by hand. A `finalizing` run whose
+  map gains open work again (`reopenIfIncomplete`) returns to `running`, kills the PR agent
+  and ignores a late scan result.
+- **Orchestrator.** One persistent `claude` session per run (opus·high, cwd = the integ
+  worktree), the operator's chat partner and the run's driver. `loopOrchestratorPrompt`
+  states its role (guide the run; NEVER edit code, commit, merge or push — the lanes do the
+  code work and the server does every push), the run facts, a **curl cheat sheet** for
+  every route below, a `gh` cheat sheet for editing issues / sub-issue links / blocked-by
+  links (followed by `…/refresh`), the lane + machine-load rules, and the `[loop event]`
+  protocol. It is spawned at run creation (kickoff: read the map and `GET /load`, set the
+  lane count, explain it, and do NOT start the run), and **lazily** by
+  `ensureOrchestrator(runId, withRecap)` — on an operator `chat`, on `resume`, or on a loop
+  event for a run whose orchestrator is not alive — always as a FRESH session with
+  `buildRecap` (run facts + a per-ticket state table + the **last 20 chat lines**, DB state
+  only). It is killed when its run reaches `complete` or is archived, so idle runs hold no
+  process. **Outbox / coalescing:** loop events (`pendingNotes`) and operator texts
+  (`pendingOps`) are never sent into a busy orchestrator; `flushOutbox` runs only when it is
+  idle (a spawn starts busy on its kickoff turn) and sends **ONE** message — operator texts
+  first, then a single `[loop event]` block with one `- line` per note. Events relayed:
+  ticket WIN / LOSE (with the gap) / done / `needs-human`, a lane question, a deferred pick
+  (once per episode), a run going idle, the map completing, a blocked run, an integ-push
+  failure. Its transcript persists in `loop_events` (kind `chat`, roles
+  `operator|orchestrator|tool|loop`); its token deltas stream only as `loop-partial` frames.
+- **Restart (`reconcileOrphans` / `resume`).** Boot marks every `running`/`paused`/
+  `finalizing` run `stale` (remembering `prevStatus`) — nothing is alive after a restart.
+  `resume` (stale only) restores the previous status (a `finalizing` run restarts as
+  `running` and re-runs the final scan), **synchronously re-acquires a pool slot for each
+  in-flight ticket without consulting the load gate** (they were already admitted; a full
+  pool sends the ticket back to `todo` rather than exceeding the cap), respawns the
+  orchestrator with the recap, re-runs each in-flight step FRESH in its existing (or
+  recreated) worktree, and re-enqueues tickets persisted in `folding` serially in
+  ticket-number order after a best-effort `merge --abort`.
+- **Archive.** Kills every step / final-PR / orchestrator child, releases every lane,
+  clears the fold maps, outbox and timers, sets `archived` (in-flight tickets read `todo`),
+  removes the ticket and integ worktrees (branches kept) and broadcasts `loop-removed`.
+  `shutdown()` kills every child and clears timers; `hardKillAll()` is the synchronous
+  group-SIGKILL backstop `index.ts` runs on `process.on('exit')` beside the task manager's.
+
+### Routes — `loopRoutes.ts` (`/api/loop/*`, UNGATED like the Workspace surface)
+
+`registerLoopRoutes(app, { loop })` is a **plain function**, not a `fastify-plugin` plugin
+(same reason as `registerKbRoutes`: attachable to a bare `Fastify()` and driven with
+`app.inject()`); it takes the narrow `LoopRoutesManager` interface so tests hand it a stub.
+It is not in `isProtectedPath` — its main caller is a run's own orchestrator `curl`ing it
+over loopback. **Every body is validated here** (the orchestrator is an LLM and may send
+anything): a bad body is a 400 that never reaches the manager.
+
+| Method / path | Body | Effect |
+|---|---|---|
+| `GET /api/loop/load` | — | a fresh `LoopLoad` sample plus `pool: {used, max}` (`LoopLoadResponse`) |
+| `GET /api/loop/runs` | — | `LoopRun[]`, non-archived first |
+| `GET /api/loop/runs/:id` | — | `LoopRunView` (run + tickets + live lanes + pool + load) |
+| `GET /api/loop/runs/:id/events?limit=` | — | the most recent `limit` (1..1000) `LoopEvent[]`, oldest → newest |
+| `POST /api/loop/runs` | `{ repoId, epic, lanes? }` | 201 — fetch the map, cut integ, spawn the orchestrator, status `draft` (`epic` a positive int, `lanes` an int 0..3) |
+| `POST …/:id/start` · `pause` · `resume` · `refresh` | — | `LoopRunView` |
+| `POST …/:id/archive` | — | `{ ok: true }` |
+| `POST …/:id/lanes` | `{ count: 0..3 }` | the run's target lane count (0 = stop picking); the pool and load gate still apply at pick time |
+| `POST …/:id/priority` | `{ order: number[] }` | pick priority among UNBLOCKED tickets (dependencies stay authoritative) |
+| `POST …/:id/chat` | `{ text }` | operator message → orchestrator → `{ ok: true }` (text trimmed, non-empty, ≤ 20,000 chars) |
+| `POST …/:id/tickets` | `{ number }` | add issue #N to the run |
+| `DELETE …/:id/tickets/:n` | — | skip ticket #n |
+| `POST …/:id/tickets/:n/stop` | — | kill the step (or dequeue a queued fold), release the lane, ticket → `todo` (round + worktree kept); no immediate re-pick — it is picked again on the next pump trigger; `DELETE …/tickets/:n` (skip) removes it for good |
+| `POST …/:id/tickets/:n/retry` | — | `needs-human` → `todo`, rounds reset |
+| `POST …/:id/tickets/:n/answer` | `{ text }` | answer a `waiting` ticket |
+
+Error mapping: a request-shape problem → 400; an error carrying a numeric HTTP `status`
+(`LoopError`) keeps it; anything else → 500, always `{ error }`. **Bodyless POSTs must not
+send a JSON content-type** — a `content-type: application/json` with an empty body is
+Fastify's `FST_ERR_CTP_EMPTY_JSON_BODY` 400 (see `.claude/errors.md`); the orchestrator's
+cheat sheet says so and the web client's `postBare` sends none.
+
+### WS frames (additive `WsEvent` members on the existing `/ws` hub)
+
+`{type:'loop', run: LoopRunView}` — a run's full view, **coalesced per run** with a 150ms
+trailing window (the `LaneEmitter` pattern); never sent for an archived run.
+`{type:'loop-event', runId, event: LoopEvent}` — one persisted event (chat / activity /
+status / error). `{type:'loop-partial', runId, text}` — orchestrator token deltas only,
+transient and never persisted. `{type:'loop-removed', runId}` — the run was archived.
+Every client gets every run's frames; the web filters on its open run id. Mirrored in
+`packages/web/src/types.ts` with the rest of the Loop types (`LoopRun`, `LoopTicket`,
+`LoopLane`, `LoopLoad`, `LoopPool`, `LoopLoadResponse`, `LoopRunView`, `LoopEvent`,
+`LoopEventPayload`, `LoopCreateRequest`, `LOOP_MAX_LANES`, `LOOP_MAX_ROUNDS`); `'loop'`
+joined `WorkspaceMode`.
+
 ## Db — `packages/server/src/db.ts`
 
 SQLite (better-sqlite3, WAL).
@@ -438,12 +734,25 @@ SQLite (better-sqlite3, WAL).
   the free-text `pages.updated_by` string with no user id behind it, so the column could
   only ever be null — and the additive-only rule means a column added today can never be
   removed.
+  The gauntlet Loop adds three more additive tables (declared once as `LOOP_SCHEMA`):
+  **`loop_runs`** (id, repo_id, epic, title, status, prev_status, lanes, integ_branch,
+  integ_worktree, priority JSON, pr_url, note, usage JSON, timestamps), **`loop_tickets`**
+  (PK `(run_id, number)`; title/body/url, gh_state, blocked_by JSON, bar, state, step,
+  round, last_gap, branch, worktree, fold_sha, question, note, usage JSON, started_at,
+  step_started_at, updated_at) and **`loop_events`** (autoincrement id, run_id, ticket
+  nullable, kind, payload JSON, created_at) + the `loop_events_run(run_id, id)` index.
+  Enum columns store the TypeScript literals verbatim (lower-case, e.g. `needs-human`);
+  the JSON columns are parsed defensively on read and fall back to their empty value.
 - **Migrations:** `ensureColumns()` reads `PRAGMA table_info(tasks)` and `ALTER`s any
   missing column (idempotent); `ensurePageColumns()` and **`ensureAuthSchema()`** do the
-  same for the KB and login schema; columns also live in `SCHEMA` for fresh DBs.
+  same for the KB and login schema; **`ensureLoopSchema()`** (called from the `Db`
+  constructor) re-runs `LOOP_SCHEMA` — three `CREATE TABLE IF NOT EXISTS` + one `CREATE
+  INDEX IF NOT EXISTS`, no column change to any existing table; columns also live in
+  `SCHEMA` for fresh DBs.
   Strictly additive — `db.test.ts` carries an explicit DATA-LOSS GUARD asserting that
-  pre-existing task/page/member/message rows are unchanged after the migration, because
-  the VPS redeploys in place over its live database.
+  pre-existing task/page/member/message rows are unchanged after the migration (extended
+  to cover the loop tables: every existing table keeps its exact rows AND columns),
+  because the VPS redeploys in place over its live database.
 - **Durability:** constructor sets `wal_autocheckpoint = 1000` to bound in-run WAL
   growth. **`close()`** runs `wal_checkpoint(TRUNCATE)` then closes the handle — called
   from the `shutdown()` (SIGINT/SIGTERM) path in `index.ts` so recent tasks are flushed
@@ -465,6 +774,17 @@ SQLite (better-sqlite3, WAL).
   keyed on the changelog's own newest `page.edit` row for that page) `page.edit` entry
   inside the same transaction. `upsertMember` is retained but is now LEGACY — nothing in
   the running server calls it.
+- **Loop additions:** `insertLoopRun` / `getLoopRun` / `listLoopRuns` (non-archived first,
+  each group newest `created_at` first) / `updateLoopRun(id, patch, now)`;
+  `upsertLoopTicket` / `getLoopTicket` / `listLoopTickets(runId)` (ascending issue number) /
+  `updateLoopTicket(runId, n, patch, now)`; `insertLoopEvent(runId, ticket, kind, payload,
+  now)` and `listLoopEvents(runId, {limit?, kind?})` (the MOST RECENT `limit` events —
+  default 200, clamped 1..1000 — returned oldest → newest, mirroring `listMessages`);
+  **`addLoopUsage(runId, ticket|null, delta, now)`** (atomic `col = col + delta` like
+  `addUsage`; adds to the run AND the ticket, or only the run when `ticket` is null — the
+  orchestrator's usage — and is a silent no-op for an unknown run/ticket). `LoopRunPatch` /
+  `LoopTicketPatch` go through fixed field→column maps: an unknown key is ignored (never
+  interpolated), `undefined` means "unchanged", `null` clears, and `usage` is excluded.
 
 ## Auth — `password.ts` / `session.ts` / `auth.ts` / `authRoutes.ts` / `cli/createUser.ts`
 
@@ -584,6 +904,16 @@ Env parsing + repo registry.
   override block (see `config/repos.example.json`); **`mergeSecurityPolicy(global,
   override)`** is the per-task seam `onScanReady` calls to get a repo's effective policy —
   never re-implement the merge.
+- **Loop load gate (D7):** `config.loopMaxLoadPerCore` (`ZMRNG_LOOP_MAX_LOAD_PER_CORE`,
+  default `1.0` — no NEW Loop ticket is picked while the 1-minute load average per core
+  exceeds it), `config.loopMinFreeMemMb` (`ZMRNG_LOOP_MIN_FREE_MEM_MB`, default `2048` — no
+  new pick while *available* memory is below it) and `config.loopPumpIntervalMs`
+  (`ZMRNG_LOOP_PUMP_INTERVAL_MS`, default `30000` — how often the Loop pump re-checks a
+  deferred pick), spread into `config` from **`resolveLoopConfig(env)`** (pure, mirrors
+  `resolveSecurityPolicy`). Each field falls back to its default **independently** on a
+  blank, non-numeric, non-finite, zero or negative value, so a typo can never disable the
+  gate (e.g. a 0 memory floor) or spin the pump. `index.ts` builds the production
+  `defaultLoadProbe` from the first two. See **LoopManager** above.
 - Loads `.env` at repo root into `process.env` (dev convenience).
 
 ## Worktree — `packages/server/src/worktree.ts`
@@ -594,6 +924,16 @@ Env parsing + repo registry.
   local-only repos with no remote). Worktrees live under the **target repo's own**
   `worktrees/<shortId>` (e.g. `<repo.path>/worktrees/<shortId>`); `phases.ts` passes
   `path.join(repo.path, 'worktrees')` at spawn time.
+  **Optional trailing `opts: { branch?, base?, dir? }`** (omitted ⇒ the behaviour above,
+  byte-identical for existing callers) — used by the gauntlet Loop to name its own
+  branches and dirs: `branch` replaces `feat/zmrng/<slug>-<shortId>`; `base` replaces the
+  resolved default-branch base as the start point of a FRESH branch (an existing branch is
+  reattached as-is, never recut); `dir` replaces the `<shortId>` directory NAME under
+  `worktreesDir` and must be a plain directory name (a path-bearing, empty or `..` value is
+  rejected before anything is created). The call stays idempotent under overrides.
+- **`gitIn(cwd, args)`** — exported face of the module's private git helper: runs `git -C
+  <cwd> <args>`, resolves the trimmed stdout, rejects on a non-zero exit. Used by
+  `LoopManager` for `rev-parse`, `merge-base`, `status --porcelain` and `push`.
 - **`removeWorktree(repoPath, worktreePath)`** — `worktree remove --force` + `prune`
   (both best-effort).
 - **`slugify(title)`** — branch-safe slug.
@@ -659,6 +999,15 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `POST /api/lanes/chat/:id/close` (`ChatManager.close`) and
   `POST /api/lanes/terminal/:id/close` (`TerminalManager.close`); the web then closes
   the owning chat/terminal tab. Subagent rows have no Close.
+  **`/api/loop/*`** — the gauntlet Loop's REST surface, installed by
+  `registerLoopRoutes(app, { loop })` (ungated; route table + validation in the
+  **LoopManager** section above). `index.ts` constructs `LoopManager` after
+  `manager.reconcileOrphans()` with `runnerFactory: defaultRunnerFactory`,
+  `github: ghLoopGitHub()`, `load: defaultLoadProbe({ maxLoadPerCore, minFreeMemMb })` from
+  config, `scanFactory: defaultScanRunnerFactory`, `apiBase: http://127.0.0.1:<config.port>`,
+  `pumpIntervalMs: config.loopPumpIntervalMs` and `log: app.log`, broadcasting through
+  `hub.broadcast`; then calls `loop.reconcileOrphans()` so a run left live by the previous
+  process boots `stale` (the operator resumes it, mirroring Restart-agent).
   `GET`/`PUT /api/settings` returns/patches the durable per-user `WorkspaceSettings`
   (`{ teamHandle }`) persisted in `zmrng.db` (the `settings` kv table) — the Team
   display-name handle moved here from browser `localStorage`, which was unreliable
@@ -680,6 +1029,9 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   panel with a `{type:'lanes', snapshot: emitter.snapshot()}` frame (exactly as `snapshot`
   seeds the board) — live updates thereafter arrive as further `lanes` frames broadcast by
   the `LaneEmitter` (see `lanes.ts` above) whenever a worker/chat/terminal session changes.
+  The same hub also carries the four `loop*` frames (see **LoopManager** → WS frames); `/ws`
+  seeds NO Loop state on connect — the web fetches the runs list / open run / events over
+  REST when the Loop mode is entered, and the frames keep it live from then on.
   `GET /ws/terminal` —
   the socket ATTACHES to a server-owned session rather than owning the shell outright.
   The first client frame is `attach` (carrying the stored `sessionId` if the client has
@@ -705,9 +1057,11 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   and big decisions. Client frames are parsed with `parseChatClientMsg()` from
   `chatAgent.ts`. Socket `close`/`error` kills the session.
 - **Static:** serves `web/dist` in production with an SPA not-found fallback.
-- **Lifecycle:** SIGINT/SIGTERM → `manager.shutdown()` (kill workers) + `terminals.killAll()`
-  (kill PTYs) + `chats.killAll()` (kill standalone chat sessions) → close. Logs
-  `repoWarnings` at startup.
+- **Lifecycle:** SIGINT/SIGTERM → `manager.shutdown()` (kill workers) + `loop.shutdown()`
+  (kill every Loop step / final-PR / orchestrator child, stop the pump timer) +
+  `terminals.killAll()` (kill PTYs) + `chats.killAll()` (kill standalone chat sessions) →
+  close. `process.on('exit')` group-SIGKILLs both `manager.hardKillAll()` and
+  `loop.hardKillAll()`. Logs `repoWarnings` at startup.
 - `asEffort` / `asStyle` validate enum inputs from the request body.
 
 ### Chat wire types (`types.ts`, mirrored)
@@ -747,6 +1101,8 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `POST /api/tasks/:id/restart`, distinct from the self-update `POST /api/restart`.
   `getLanes()` → `GET /api/lanes` (`LaneSnapshot`) — the Lanes panel's boot load; live
   updates thereafter arrive as `lanes` frames over the `/ws` hub, not repeated polling.
+  `req` is **exported** so a typed route group kept in its own module (`loopProtocol.ts`)
+  rides the same auth-aware `send()` instead of a second fetch wrapper.
 - **types.ts** — MANUAL mirror of `packages/server/src/types.ts`. `EventSub` includes
   `'tool' | 'subagent' | 'subagent_result'`; `EventPayload` includes `tool?`, `actor?`,
   `subagentType?`, `summary?`. `Task.stale?: boolean` — true when the task is in a live
@@ -755,6 +1111,10 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `LaneWorker` / `LaneChat` / `LaneTerminal` / `LaneOccupancy` / `LaneSnapshot` — the Lanes
   panel's wire types, mirrored verbatim from the server (see the `lanes.ts` section above
   for field-by-field detail). `WsEvent` gained `{type:'lanes'; snapshot: LaneSnapshot}`.
+  The gauntlet Loop's types (`LoopRun`/`LoopTicket`/`LoopLane`/`LoopLoad`/`LoopPool`/
+  `LoopLoadResponse`/`LoopRunView`/`LoopEvent`/`LoopEventPayload`/`LoopCreateRequest`, the
+  `LOOP_MAX_LANES`/`LOOP_MAX_ROUNDS` constants, `'loop'` in `WorkspaceMode`) and the four
+  `loop*` `WsEvent` variants are mirrored the same way (see **LoopManager** above).
 - **status.ts** — `statusColor(status)` backed by `--status-*` tokens; `actorColor(actor)`
   backed by `--actor-*` tokens (`main`, `frontend-specialist`, `backend-specialist`, `qa`,
   `code-reviewer`, `doc-updater`, `general-purpose`, with `--actor-default` fallback).
@@ -934,6 +1294,61 @@ event)` for a single client, `broadcast(event)` to all. All sends wrapped in try
   `laneRows.ts` module); `WorkspaceView` passes it `lanes` (the `App.tsx`-owned
   `laneSnapshot` state, fetched once via `api.getLanes()` on boot and kept current by the
   `lanes` case in `App.tsx`'s `onWs` switch), `tasks`, `repos`, and `active`.
+- **Loop mode** (gauntlet loop; engine in the **LoopManager** section above; current as of
+  2026-10-01) — a fifth `WorkspaceMode` (`'loop'`, an `ActivityRail` button with a new
+  `'loop'` outline `NavIcon`) that is **desktop-only**: the phone shell has no Loop view,
+  `mobileNav.viewForMode('loop')` falls back to `'tasks'`, `MOBILE_VIEWS` gains no entry,
+  and `App.tsx` coerces a persisted `'loop'` to `'workspace'` on a phone WITHOUT rewriting
+  the stored mode (the desktop still reopens Loop) and never mounts `LoopView` there. Pure
+  modules (React-free, each unit-tested):
+  - **`loopMap.ts`** — `layoutMap(tickets)` (a layered DAG: column = the length of a ticket's
+    LONGEST in-map blocker chain, row = order by issue number within the column; a cycle
+    falls back to column 0 rather than throwing; out-of-map blockers are ignored — there is
+    no node to draw), `mapEdges(tickets)` (blocker → ticket, in-map only), the fixed node
+    geometry (`MAP_NODE_W`/`MAP_NODE_H`/`MAP_COL_GAP`/`MAP_ROW_GAP`/`MAP_PAD`, `nodeBox`,
+    `mapSize`, `edgeLine`), `doneCount`/`percentComplete`/`mapHeader` (`2 of 4 · 50%`;
+    skipped tickets are out of scope), `ticketGlyph(state)` (checked / unchecked / active /
+    warn / skipped), `stepLabel`/`phaseColor` (existing `--status-*`/`--actor-*`/`--accent`
+    tokens only — NO `--loop-*` token), `RUN_STATUS_LABEL`/`runStatusColor`,
+    `formatRound` (`round 2/6`), `laneCards(view)` (the server's live lanes joined with
+    their tickets, padded with idle slots up to the run's lane target — never above the
+    pool cap, never dropping a live lane), and `poolSummary(view)` (`Pool 2/3 · load
+    0.62/core · 5.1 GB free`, degrading to `Pool 2/3` before the first sample, plus the
+    `gateClosed` flag and tripped `reason` behind the "picks paused" chip).
+    `formatElapsed`/`formatTokens` are reused from `laneRows.ts`.
+  - **`loopState.ts`** — the open run persisted to `localStorage` (`zmrng-loop-open-run`:
+    `loadOpenRunId`/`saveOpenRunId`), `upsertRun`/`removeRun` (an archived run is dropped),
+    `appendLoopEvent`/`mergeLoopEvents` (kept in event-id order, deduped, capped at
+    `MAX_LOOP_EVENTS` = 1000 so a long run cannot grow the chat DOM unbounded),
+    `isOrchestratorReply`, `appendLoopPartial` (tail-capped at `MAX_LOOP_PARTIAL_CHARS`), and
+    `loopThread(events)` — the orchestrator transcript as chat items, **reusing the
+    `chatThread.ts` reducer** rather than growing a second one (operator = user bubble,
+    orchestrator reply = agent bubble, its tool calls / the loop notifications / errors =
+    compact notes; lane `activity` and `status` lines belong to the lanes/map, not the chat).
+  - **`loopProtocol.ts`** — `loopApi`, the typed REST helpers for `/api/loop/*`, built on
+    `api.ts`'s now-**exported `req`** so they ride the one auth-aware `send()` path;
+    `postBare` sends NO content-type (a bodyless POST must not send a JSON one) and a 4xx
+    surfaces the server's `{ error }` text.
+  - **`App.tsx` wiring** — runs list, the ONE open run, its view + events + the
+    orchestrator's streamed partial (coalesced per animation frame like the task `partial`
+    stream). Fetched only while Loop is the active mode (never at boot) and kept live by
+    the four `loop*` cases in `onWs`; breadcrumb `Loop › #<epic> <title>`.
+  - **`components/LoopView.tsx`** — the mode root. No run open: a run picker plus a new-run
+    form (repo select + epic number; the lane count is the orchestrator's call). One open:
+    a slim header ("All runs", status pill, repo · integ branch, Start / Pause / Resume per
+    status, a 0–3 lane-count select, Open PR, Archive with an inline confirm) over a FIXED
+    CSS grid — `LoopChat` full height on the left third, `LoopLanes` above `LoopMap` on the
+    right two thirds; no dragging or resizing. **`LoopChat.tsx`** — the orchestrator bubble
+    thread + composer (Enter sends, Shift+Enter a newline; no attachments, by scope).
+    **`LoopLanes.tsx`** — the pool/load header line, a "picks paused: high load" chip while
+    the gate is closed, then up to three lane cards (`#n` title link, step pill, round,
+    tokens, a 1s elapsed tick running only while Loop is the visible mode, model, the latest
+    activity line, the question when `waiting`, and a Stop button with an inline confirm)
+    plus muted "idle lane" slots. **`LoopMap.tsx`** — the "N of M · P%" progress header and
+    the DAG: nodes with read-only `role="checkbox"` status boxes (checked = done) positioned
+    from `layoutMap` as inline styles (the sanctioned dynamic-value case) and straight SVG
+    connectors. Presentational over `loopMap.ts`; `LoopView` takes an injectable `client`
+    so its tests need no fetch.
 
 ---
 

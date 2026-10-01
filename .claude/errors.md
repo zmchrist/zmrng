@@ -426,3 +426,47 @@ non-obvious root cause, or is likely to recur. Template in
 - **Solution:** `packages/web/vitest.config.ts` now pins it to `test` at the top. This unmasked a real violation: `LoginPane.module.css` `.input:focus` had `outline: none`.
 - **Files:** `packages/web/vitest.config.ts`, `packages/web/src/components/LoginPane.module.css`
 - **Date Found:** 2026-10-01
+
+### zmrng-on-zmrng worker blocked by `worktree_guard` after the plan → execute handoff
+- **Error:** `Blocked: another active Claude session already owns this worktree
+  ('<root>')` — from `worktree_guard.py` on the first `Edit`/`Write` of the execute phase,
+  although no other session is actually running.
+- **Cause:** only when the TARGET repo is zmrng itself. Its checked-in
+  `.claude/settings.json` registers `worktree_guard.py`, so the guard fires for zmrng
+  *workers* too (it is otherwise operator-harness only and is not seeded into workers).
+  The plan-phase session's last `Edit`/`Write` claims the worktree via
+  `/tmp/claude-worktree-locks/<sha16>.lock` (keyed on the worktree root, holding that
+  session's `session_id` + a timestamp). The execute phase is a FRESH session with a NEW
+  `session_id`, so the still-fresh lock reads as "another live session" and every edit is
+  denied until the lock's TTL lapses (`HERMES_WORKTREE_LOCK_TTL`, default 3600s). Subagents
+  share their parent's `session_id`, so they are not blocked by the lead's own lock — only
+  by a lock held by a DIFFERENT (older) session.
+- **Solution:** wait out the TTL (first confirm the owning session is really dead), or —
+  better — have the LEAD session make the first `Edit`/`Write` of the phase so it re-claims
+  the lock under its own `session_id`, and only then fan out to subagents. While blocked,
+  agents can work in a scratch copy of the files and hand back a `git apply` patch for the
+  lead to apply.
+- **Files:** `.claude/hooks/worktree_guard.py`
+- **Date Found:** 2026-10-01
+
+### Duplicate React / `Invalid hook call` after `npm install` inside a task worktree
+- **Error:** Every hook-using web test fails with `Invalid hook call. Hooks can only be
+  called inside of the body of a function component` (or `TypeError: Cannot read properties
+  of null (reading 'useState')`) right after a root `npm install` was run inside a task
+  worktree — looks like total environment corruption, with no code change to blame.
+- **Cause:** a task worktree (`<repo>/worktrees/<shortId>`) has NO root `node_modules` of
+  its own and resolves its dependencies from the PARENT checkout's `node_modules` by
+  walking up the directory tree. A root `npm install` run inside the worktree creates a
+  PARTIAL `node_modules` there (e.g. no `@testing-library/*`), so the component code and
+  `react` load from the worktree while `react-dom` / the test utilities still resolve from
+  the parent — two independent React copies in one process. (Same symptom family as the
+  `NODE_ENV=production` devDependencies entry above, different trigger: here the install
+  itself should not have been run.)
+- **Solution:** do NOT run `npm install` in a task worktree; use the parent checkout's
+  `node_modules`. If a stray `node_modules` already exists in the worktree, MOVE it out of
+  the tree (e.g. `mv node_modules ../node_modules.stray` — a move, not a recursive delete)
+  and re-run the tests. Check with `node -e "console.log(require.resolve('react'),
+  require.resolve('react-dom'))"` — both must resolve to the same `node_modules`.
+- **Files:** N/A (environment/install step, not a source file) — affects `packages/web`
+  tests in any worktree nested under the main checkout.
+- **Date Found:** 2026-10-01
