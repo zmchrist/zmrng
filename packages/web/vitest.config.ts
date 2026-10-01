@@ -5,6 +5,12 @@ import react from '@vitejs/plugin-react'
 // plugin the app build uses. CSS Modules resolve through Vite as usual.
 const { env } = process
 
+// Vite reads NODE_ENV while resolving the config, before `test.env` below applies. A
+// parent shell exporting NODE_ENV=production (the VPS/cora orchestrator does) makes
+// Vite stub Node builtins as browser-external, so `node:path`/`node:fs` lose their
+// named exports inside tests (focusRingGuard: "join is not a function"). Pin it here.
+env.NODE_ENV = 'test'
+
 /** Fork cap: 3 locally, or ZMRNG_VITEST_MAX_FORKS (the orchestrator sets 2 for workers). */
 const MAX_FORKS = Number(env.ZMRNG_VITEST_MAX_FORKS ?? 3)
 

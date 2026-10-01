@@ -41,6 +41,7 @@ vi.mock('../src/api', () => ({
     getConfig: () => Promise.resolve({ botHandle: '@agent' }),
     listRepos: () => Promise.resolve([]),
     listTasks: () => Promise.resolve([]),
+    getLanes: () => Promise.reject(new Error('not needed here')),
     listChannels: () => Promise.resolve([]),
     getChannelMessages: () => Promise.resolve([]),
     // Boot the app straight onto the KB tab: App keeps every mode mounted and
