@@ -11,24 +11,34 @@ import {
   encodePageEdit,
   parseWorkspaceServerMsg,
 } from '../src/workspaceProtocol'
-import { MAX_DISPLAY_NAME_LEN, MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from '../src/types'
+import { MAX_MESSAGE_BODY_LEN, MAX_EMOJI_LEN } from '../src/types'
 import type { KbPage } from '../src/types'
 
 describe('client encoders', () => {
-  it('encodeHello produces a hello frame carrying the display name', () => {
-    expect(JSON.parse(encodeHello('Ada'))).toEqual({ type: 'hello', displayName: 'Ada' })
+  it('encodeHello produces a bare hello frame when no token is given', () => {
+    // A same-origin socket is authenticated by the `zmrng_session` httpOnly
+    // cookie the browser attaches to the WS handshake — there is nothing for
+    // the frame to carry.
+    const frame = JSON.parse(encodeHello()) as Record<string, unknown>
+    expect(frame).toEqual({ type: 'hello' })
+    expect(Object.keys(frame)).toEqual(['type'])
   })
 
-  it('encodeHello trims surrounding whitespace from the display name', () => {
-    expect(JSON.parse(encodeHello('  Ada  '))).toEqual({ type: 'hello', displayName: 'Ada' })
+  it('encodeHello carries a bearer token when one is given (cross-origin, D2)', () => {
+    expect(JSON.parse(encodeHello('tok-abc'))).toEqual({ type: 'hello', token: 'tok-abc' })
   })
 
-  it('encodeHello clamps an over-long name to the length cap (post-trim)', () => {
-    const overCap = `  ${'a'.repeat(MAX_DISPLAY_NAME_LEN + 50)}  `
-    const frame = JSON.parse(encodeHello(overCap)) as { type: string; displayName: string }
-    expect(frame.type).toBe('hello')
-    expect(frame.displayName).toBe('a'.repeat(MAX_DISPLAY_NAME_LEN))
-    expect(frame.displayName.length).toBe(MAX_DISPLAY_NAME_LEN)
+  it('encodeHello omits an empty/blank token rather than sending an empty string', () => {
+    expect(JSON.parse(encodeHello(''))).toEqual({ type: 'hello' })
+    expect(JSON.parse(encodeHello('   '))).toEqual({ type: 'hello' })
+  })
+
+  it('encodeHello NEVER emits a displayName — identity is the session, not a frame', () => {
+    for (const raw of [encodeHello(), encodeHello('tok-abc')]) {
+      const frame = JSON.parse(raw) as Record<string, unknown>
+      expect(frame).not.toHaveProperty('displayName')
+      expect(Object.keys(frame).sort()).not.toContain('displayName')
+    }
   })
 
   it('encodePing produces a bare ping frame', () => {
@@ -40,43 +50,32 @@ describe('client encoders', () => {
     expect(JSON.parse(encodeUnsubscribe(9))).toEqual({ type: 'unsubscribe', channelId: 9 })
   })
 
-  it('encodeMessage produces a message frame with author/body and NO kind', () => {
-    // A client never asserts `kind` — a socket post is always `human`
-    // server-side; the `agent` kind is server-controlled (future T4).
-    expect(JSON.parse(encodeMessage(1, 'Ada', 'hi'))).toEqual({
-      type: 'message',
-      channelId: 1,
-      author: 'Ada',
-      body: 'hi',
-    })
+  it('encodeMessage carries ONLY channelId + body — no author, no kind', () => {
+    // The author is the socket's authenticated user; the server REJECTS a frame
+    // that still asserts one, so an author key would break the post outright.
+    // A client never asserts `kind` either — a socket post is always `human`
+    // server-side; the `agent` kind is server-controlled.
+    const frame = JSON.parse(encodeMessage(1, 'hi')) as Record<string, unknown>
+    expect(frame).toEqual({ type: 'message', channelId: 1, body: 'hi' })
+    expect(Object.keys(frame).sort()).toEqual(['body', 'channelId', 'type'])
   })
 
   it('encodeMessage trims the body and clamps it to the length cap', () => {
-    expect(JSON.parse(encodeMessage(1, 'Ada', '  hi  '))).toMatchObject({ body: 'hi' })
+    expect(JSON.parse(encodeMessage(1, '  hi  '))).toMatchObject({ body: 'hi' })
     const overCap = 'a'.repeat(MAX_MESSAGE_BODY_LEN + 20)
-    const frame = JSON.parse(encodeMessage(1, 'Ada', overCap)) as { body: string }
+    const frame = JSON.parse(encodeMessage(1, overCap)) as { body: string }
     expect(frame.body.length).toBe(MAX_MESSAGE_BODY_LEN)
   })
 
-  it('encodeReact produces a react frame with channel/message/handle/emoji', () => {
-    expect(JSON.parse(encodeReact(2, 7, 'Ada', '👍'))).toEqual({
-      type: 'react',
-      channelId: 2,
-      messageId: 7,
-      handle: 'Ada',
-      emoji: '👍',
-    })
+  it('encodeReact carries ONLY channel/message/emoji — no handle', () => {
+    const frame = JSON.parse(encodeReact(2, 7, '👍')) as Record<string, unknown>
+    expect(frame).toEqual({ type: 'react', channelId: 2, messageId: 7, emoji: '👍' })
+    expect(Object.keys(frame).sort()).toEqual(['channelId', 'emoji', 'messageId', 'type'])
   })
 
-  it('encodeReact trims handle + emoji and clamps them to their caps', () => {
-    expect(JSON.parse(encodeReact(1, 1, '  Ada  ', '  👍  '))).toMatchObject({
-      handle: 'Ada',
-      emoji: '👍',
-    })
-    const frame = JSON.parse(
-      encodeReact(1, 1, 'a'.repeat(MAX_DISPLAY_NAME_LEN + 5), 'x'.repeat(MAX_EMOJI_LEN + 5)),
-    ) as { handle: string; emoji: string }
-    expect(frame.handle.length).toBe(MAX_DISPLAY_NAME_LEN)
+  it('encodeReact trims the emoji and clamps it to its cap', () => {
+    expect(JSON.parse(encodeReact(1, 1, '  👍  '))).toMatchObject({ emoji: '👍' })
+    const frame = JSON.parse(encodeReact(1, 1, 'x'.repeat(MAX_EMOJI_LEN + 5))) as { emoji: string }
     expect(frame.emoji.length).toBe(MAX_EMOJI_LEN)
   })
 })
@@ -102,6 +101,18 @@ describe('parseWorkspaceServerMsg', () => {
 
   it('decodes a pong frame', () => {
     expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'pong' }))).toEqual({ type: 'pong' })
+  })
+
+  it('decodes an unauthorized frame (no session / expired session)', () => {
+    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'unauthorized' }))).toEqual({
+      type: 'unauthorized',
+    })
+  })
+
+  it('ignores stray fields on an unauthorized frame', () => {
+    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'unauthorized', why: 'x' }))).toEqual({
+      type: 'unauthorized',
+    })
   })
 
   it('decodes a live message frame', () => {
@@ -271,6 +282,7 @@ describe('parseWorkspaceServerMsg', () => {
   it('returns undefined for near-miss cases and never throws', () => {
     expect(parseWorkspaceServerMsg('{not json')).toBeUndefined()
     expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'nope' }))).toBeUndefined()
+    expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'unauthorised' }))).toBeUndefined()
     expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'roster' }))).toBeUndefined()
     expect(parseWorkspaceServerMsg(JSON.stringify({ type: 'roster', members: 'x' }))).toBeUndefined()
     expect(parseWorkspaceServerMsg('')).toBeUndefined()
@@ -284,18 +296,21 @@ describe('KB page encoders (T2, #144)', () => {
     expect(JSON.parse(encodePageUnsubscribe(9))).toEqual({ type: 'page.unsubscribe', pageId: 9 })
   })
 
-  it('encodePageEdit preserves body whitespace and trims/clamps the author', () => {
-    expect(JSON.parse(encodePageEdit(3, '  indented\n', '  Ada  '))).toEqual({
+  it('encodePageEdit carries ONLY pageId + body, preserving body whitespace', () => {
+    // The editor is the socket's authenticated user; an `author` key would be
+    // rejected by the server, not ignored.
+    const frame = JSON.parse(encodePageEdit(3, '  indented\n')) as Record<string, unknown>
+    expect(frame).toEqual({
       type: 'page.edit',
       pageId: 3,
       body: '  indented\n', // NOT trimmed
-      author: 'Ada', // trimmed + clamped
     })
+    expect(Object.keys(frame).sort()).toEqual(['body', 'pageId', 'type'])
   })
 
   it('encodePageEdit clamps an over-long body to the cap', () => {
     const overCap = 'a'.repeat(MAX_MESSAGE_BODY_LEN + 50)
-    const frame = JSON.parse(encodePageEdit(1, overCap, 'Ada')) as { body: string }
+    const frame = JSON.parse(encodePageEdit(1, overCap)) as { body: string }
     expect(frame.body.length).toBe(MAX_MESSAGE_BODY_LEN)
   })
 })

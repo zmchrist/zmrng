@@ -1,16 +1,25 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styles from './KbView.module.css'
-import type { KbPage, KbPageRevision, KbTreeNode, Space, WorkspaceMember } from '../types'
+import type {
+  KbChangeAction,
+  KbChangeEntry,
+  KbPage,
+  KbPageRevision,
+  KbTreeNode,
+  PublicUser,
+  Space,
+  WorkspaceMember,
+} from '../types'
 import { MAX_DISPLAY_NAME_LEN, PROTECTED_SPACE_NAME } from '../types'
 import { FileTree } from './FileTree'
 import { KbToolbar } from './KbToolbar'
-import { api } from '../api'
+import { api, isAuthError } from '../api'
+import { clearSession } from '../auth'
 import { renderPageMarkdown, safeLinkHref, toggleChecklistLine } from '../kbMarkdown'
 import { applyLink, toggleWrap } from '../kbEdits'
 import type { SelectionEdit } from '../kbEdits'
 import { openExternal } from '../openExternal'
 import { filterKbTree, pageBreadcrumb, parseKbNodePath } from '../kbTree'
-import { kbHandles } from '../kbHandles'
 import { useIsMobile } from '../useIsMobile'
 import { KB_PANEL_KEY } from '../mobileTaskPanel'
 import { usePanelSplit } from '../usePanelSplit'
@@ -26,19 +35,20 @@ import {
 
 interface Props {
   /**
-   * The teammate's self-asserted display-name handle (server-side settings —
-   * the SAME `settings.teamHandle` the Team surface persists). Presence/viewing
-   * falls back to `anon` when unset, but EDITING requires a non-empty handle:
-   * no KB page may ever be saved as authored by 'anon' (#150). See `kbHandles`.
+   * The authenticated user for the Knowledge Base origin. The KB is served by
+   * THIS server (same-origin), so App gates this view on the local session and
+   * only mounts it once one exists — which is why there is no unauthenticated
+   * branch left in here. `displayName` is the identity for page presence and
+   * for the optimistic `updatedBy` on a save; the server is what actually
+   * attributes every write, from the socket's own session.
    */
-  teamHandle: string
+  user: PublicUser
   /**
-   * Persist a new display handle (mirrors how App wires TeamView's
-   * `onHandleChange`). Reused by the inline "set a display name to edit"
-   * affordance so a viewer can enable editing without leaving the KB surface —
-   * one identity across Team + KB, no second store.
+   * The session for this origin is gone — the operator logged out, the server
+   * answered 401, or the socket reported `unauthorized`. App re-reads the
+   * stored session and re-shows the login pane in place of this view.
    */
-  onHandleChange: (handle: string) => void
+  onLogout: () => void
   /**
    * One-shot navigation target from the Team tab's "Send to KB" promotion (T4,
    * #154): the space + page to select/open when the KB tab is entered. Seeded
@@ -66,39 +76,19 @@ const RECONNECT_MS = 2000
 const AUTOSAVE_DEBOUNCE_MS = 600
 
 /**
- * Inline "set a display name" affordance (#150) — NOT a blocking modal. Shown
- * wherever a KB write is gated because no display handle is set; setting a name
- * here reuses the SAME `settings.teamHandle` the Team surface persists (via
- * `onSet` → App's `saveSettings`), so it immediately enables editing across
- * both surfaces. Mirrors the Team join input's styling/tokens.
+ * The Knowledge Base is served by this app's OWN server, so its session is the
+ * same-origin one (`''` — the httpOnly `zmrng_session` cookie). Team Chat is
+ * the surface that may live on another origin; see `TeamView.tsx`.
  */
-function HandleGate({ onSet, action }: { onSet: (handle: string) => void; action: string }) {
-  const [draft, setDraft] = useState('')
-  const submit = (e: React.FormEvent): void => {
-    e.preventDefault()
-    const name = draft.trim()
-    if (!name) return
-    onSet(name)
-  }
-  return (
-    <form className={styles.handleGate} onSubmit={submit}>
-      <span className={styles.handleGateLabel}>Set a display name to {action}</span>
-      <div className={styles.handleGateRow}>
-        <input
-          className={styles.handleGateInput}
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="e.g. Ada"
-          maxLength={MAX_DISPLAY_NAME_LEN}
-          aria-label="Display name"
-        />
-        <button type="submit" className={styles.handleGateBtn} disabled={!draft.trim()}>
-          Set name
-        </button>
-      </div>
-    </form>
-  )
+const KB_ORIGIN = ''
+
+/** Human labels for the changelog's action codes. */
+const CHANGE_LABEL: Record<KbChangeAction, string> = {
+  'page.create': 'created',
+  'page.rename': 'renamed',
+  'page.move': 'moved',
+  'page.edit': 'edited',
+  'page.delete': 'deleted',
 }
 
 /** Two-letter avatar initials for a viewer's presence chip. */
@@ -116,16 +106,19 @@ function initials(name: string): string {
  * style markdown field — click it and start typing right away, like a notepad.
  * There is no per-block model: a page's `body` IS the whole page, autosaved
  * continuously as the operator types (last-write-wins), with a throttled
- * revision history reachable from the "History" page action. It owns ONE
- * multiplexed workspace socket (GET /ws/workspace, same-origin) for page
- * subscribe/edit/presence — REST covers spaces/tree/page + structural CRUD.
+ * revision history reachable from the "History" page action and a per-space
+ * lifecycle feed behind "Changelog". It owns ONE multiplexed workspace socket
+ * (GET /ws/workspace, same-origin) for page subscribe/edit/presence — REST
+ * covers spaces/tree/page + structural CRUD.
+ *
+ * Everything here is an authenticated surface: App only mounts it once the
+ * local origin holds a session, so every write affordance is simply available.
  */
-function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active }: Props) {
-  // Split identity (#150): `presenceHandle` (may be `anon`) drives the workspace
-  // hello + page presence; `editHandle` (EMPTY when no handle is set) authors
-  // page saves. `canEdit` gates every write affordance — read-only viewing
-  // works with no handle, but nothing is ever saved as `anon`.
-  const { presenceHandle, editHandle, canEdit } = kbHandles(teamHandle)
+function KbViewComponent({ user, onLogout, openTarget = null, active }: Props) {
+  // The authenticated identity: page presence and the optimistic `updatedBy`.
+  // The server attributes the persisted write from the socket's own session —
+  // this is display only, and can no longer be asserted over the wire.
+  const author = user.displayName
   // Phone only: the Spaces/Pages list vs open-page split, remembered per view.
   const isMobile = useIsMobile()
   const [panel, movePanel] = usePanelSplit(KB_PANEL_KEY)
@@ -155,6 +148,9 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   // The page-history panel (throttled revision snapshots — #6 "keep, throttled").
   const [historyOpen, setHistoryOpen] = useState(false)
   const [revisions, setRevisions] = useState<KbPageRevision[]>([])
+  // The space changelog panel — who changed what, newest first.
+  const [changelogOpen, setChangelogOpen] = useState(false)
+  const [changelog, setChangelog] = useState<KbChangeEntry[]>([])
   // Create affordance (page + folder) — compact icon buttons at the tree footer
   // that expand into a single inline name input (Obsidian-style). Both create at
   // the space root; reorganize into folders later.
@@ -180,6 +176,44 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     openPageIdRef.current = openPageId
   }, [openPageId])
 
+  // Keep the latest `onLogout` readable inside the stable socket closure and
+  // the passive load effects without re-running either on a new prop identity.
+  const onLogoutRef = useRef(onLogout)
+  useEffect(() => {
+    onLogoutRef.current = onLogout
+  }, [onLogout])
+
+  /**
+   * Forget this origin's session and hand the surface back to the login pane.
+   * The store is what App gates on, so dropping it is what actually re-gates:
+   * an `unauthorized` socket frame arrives while the stored session still looks
+   * live by its clock, and telling App to re-read without clearing would just
+   * re-render this same view behind a dead socket.
+   *
+   * Stable for the component's lifetime (it reads the CURRENT `onLogout`
+   * through its ref), so the socket + load effects depend on it without ever
+   * tearing down on a new prop identity.
+   */
+  const gateAgain = useCallback((): void => {
+    clearSession(KB_ORIGIN)
+    onLogoutRef.current()
+  }, [])
+
+  /**
+   * One REST failure handler. An expired/absent session is NOT an error to
+   * render at the operator — it re-shows the login pane; anything else surfaces
+   * inline under the tree.
+   */
+  const onApiError =
+    (message: string) =>
+    (err: unknown): void => {
+      if (isAuthError(err)) {
+        gateAgain()
+        return
+      }
+      setError(message)
+    }
+
   // Readable inside the stable socket closure: an incoming page.update is
   // dropped while the local user is actively editing, so another viewer's save
   // never clobbers a live typing session (last-write-wins only matters at
@@ -195,10 +229,6 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   useEffect(() => {
     editingRef.current = editing
   }, [editing])
-  const canEditRef = useRef(canEdit)
-  useEffect(() => {
-    canEditRef.current = canEdit
-  }, [canEdit])
 
   // Continuous autosave: the debounce timer + the page/body it will flush.
   // Refs (not state) so the textarea's onChange can schedule/cancel a save
@@ -222,9 +252,9 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     const pending = pendingRef.current
     if (!pending) return
     pendingRef.current = null
-    sendFrame(encodePageEdit(pending.pageId, pending.body, editHandle))
+    sendFrame(encodePageEdit(pending.pageId, pending.body))
     setDetail((prev) =>
-      prev && prev.id === pending.pageId ? { ...prev, body: pending.body, updatedBy: editHandle } : prev,
+      prev && prev.id === pending.pageId ? { ...prev, body: pending.body, updatedBy: author } : prev,
     )
   }
 
@@ -233,6 +263,16 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     pendingRef.current = { pageId, body }
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(flushPending, AUTOSAVE_DEBOUNCE_MS)
+  }
+
+  /** Revoke the session server-side, then re-gate the surface. */
+  const signOut = (): void => {
+    void api
+      .logout(KB_ORIGIN)
+      // A dead session 401s and an unreachable server throws; either way this
+      // client logs out locally — a logout button must always log you out.
+      .catch(() => undefined)
+      .then(() => gateAgain())
   }
 
   // ---- socket lifecycle (page presence + live body deltas) ----
@@ -258,7 +298,9 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
       wsRef.current = ws
       ws.onopen = () => {
         setConnected(true)
-        ws?.send(encodeHello(presenceHandle))
+        // No identity on the wire: this socket is same-origin, so the handshake
+        // carries the httpOnly session cookie and the server derives the user.
+        ws?.send(encodeHello())
         // Re-subscribe to the open page after a reconnect.
         const pid = openPageIdRef.current
         if (pid !== null) ws?.send(encodePageSubscribe(pid))
@@ -281,6 +323,13 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
           // A folder/page was re-parented (drag-and-drop) elsewhere — refetch the
           // tree if the change targets the space we're currently viewing.
           if (msg.spaceId === spaceIdRef.current) setTreeNonce((n) => n + 1)
+        } else if (msg.type === 'unauthorized') {
+          // The handshake presented no valid session (it expired, or another tab
+          // logged out). The server closes the socket; stop reconnecting and
+          // hand the surface back to the login pane instead of looping.
+          closed = true
+          gateAgain()
+          ws?.close()
         }
       }
       ws.onclose = () => {
@@ -300,7 +349,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
       wsRef.current = null
       setConnected(false)
     }
-  }, [presenceHandle, editHandle, active])
+  }, [active, gateAgain])
 
   // ---- load spaces once; default to the first space ----
   useEffect(() => {
@@ -312,13 +361,18 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
         setSpaces(list)
         setSpaceId((cur) => (cur !== null ? cur : (list[0]?.id ?? null)))
       })
-      .catch(() => {
-        if (!cancelled) setError('Failed to load spaces')
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (isAuthError(err)) {
+          gateAgain()
+          return
+        }
+        setError('Failed to load spaces')
       })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [gateAgain])
 
   // ---- load the selected space's tree ----
   useEffect(() => {
@@ -329,13 +383,18 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
       .then((nodes) => {
         if (!cancelled) setTree(nodes)
       })
-      .catch(() => {
-        if (!cancelled) setTree([])
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (isAuthError(err)) {
+          gateAgain()
+          return
+        }
+        setTree([])
       })
     return () => {
       cancelled = true
     }
-  }, [spaceId, treeNonce])
+  }, [spaceId, treeNonce, gateAgain])
 
   // ---- open a page: REST fetch + subscribe to its live fan-out ----
   // A blank page (freshly created, or emptied out) opens straight into the
@@ -348,7 +407,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
       .then((page) => {
         if (cancelled) return
         setDetail(page)
-        if (canEditRef.current && page.body === '') {
+        if (page.body === '') {
           setBodyDraft('')
           setEditing(true)
         } else {
@@ -356,17 +415,22 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
           setEditing(false)
         }
       })
-      .catch(() => {
-        if (!cancelled) setDetail(null)
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (isAuthError(err)) {
+          gateAgain()
+          return
+        }
+        setDetail(null)
       })
     sendFrame(encodePageSubscribe(openPageId))
     return () => {
       cancelled = true
       sendFrame(encodePageUnsubscribe(openPageId))
     }
-  }, [openPageId])
+  }, [openPageId, gateAgain])
 
-  /** Reset the per-space view state (open page, editor, history, search). */
+  /** Reset the per-space view state (open page, editor, panels, search). */
   const clearSpaceState = (): void => {
     setOpenPageId(null)
     setDetail(null)
@@ -374,6 +438,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     setEditing(false)
     setBodyDraft(null)
     setHistoryOpen(false)
+    setChangelogOpen(false)
     setSearch('')
   }
 
@@ -385,12 +450,12 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   }
 
   /**
-   * Create a new space (name only). Gated by `canEdit` like every other KB
-   * write. Prompts for the name (matching the existing rename affordance),
-   * appends the created space to the switcher, and selects it.
+   * Create a new space (name only). Prompts for the name (matching the existing
+   * rename affordance), appends the created space to the switcher, and selects
+   * it.
    */
   const createSpace = async (): Promise<void> => {
-    if (!canEdit || busy) return
+    if (busy) return
     const name = window.prompt('New space name')?.trim()
     if (!name) return
     setBusy(true)
@@ -400,8 +465,8 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
       setSpaces((prev) => [...prev, space])
       setSpaceId(space.id)
       clearSpaceState()
-    } catch {
-      setError('Failed to create space')
+    } catch (err) {
+      onApiError('Failed to create space')(err)
     } finally {
       setBusy(false)
     }
@@ -409,12 +474,12 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
 
   /**
    * Delete a space and everything inside it, after an explicit confirmation that
-   * spells out the permanence. Gated by `canEdit`; the protected `zmrng` space
-   * can never be deleted (guarded here and server-side). After deletion the
-   * switcher falls back to the first remaining space.
+   * spells out the permanence. The protected `zmrng` space can never be deleted
+   * (guarded here and server-side). After deletion the switcher falls back to
+   * the first remaining space.
    */
   const deleteSpace = async (space: Space): Promise<void> => {
-    if (!canEdit || busy || space.name === PROTECTED_SPACE_NAME) return
+    if (busy || space.name === PROTECTED_SPACE_NAME) return
     const ok = window.confirm(
       `Delete the "${space.name}" space?\n\n` +
         'This permanently deletes the space and EVERYTHING inside it — all folders, ' +
@@ -431,8 +496,8 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
         setSpaceId(remaining[0]?.id ?? null)
         clearSpaceState()
       }
-    } catch {
-      setError('Failed to delete space')
+    } catch (err) {
+      onApiError('Failed to delete space')(err)
     } finally {
       setBusy(false)
     }
@@ -449,6 +514,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     setEditing(false)
     setBodyDraft(null)
     setHistoryOpen(false)
+    setChangelogOpen(false)
   }
 
   const refreshTree = (): void => {
@@ -456,14 +522,16 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     api
       .getSpaceTree(spaceId)
       .then(setTree)
-      .catch(() => undefined)
+      .catch((err: unknown) => {
+        if (isAuthError(err)) gateAgain()
+      })
   }
 
   // ---- single-field body editing ----
 
   /** Enter edit mode: seed the draft from the last-known-saved body. */
   const enterEdit = (): void => {
-    if (!detail || !canEdit) return
+    if (!detail) return
     setBodyDraft(detail.body)
     setEditing(true)
   }
@@ -476,7 +544,6 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
    * and fans a `space.tree` frame so other viewers converge. We refetch locally.
    */
   const moveNode = (sourcePath: string, targetFolderPath: string | null): void => {
-    if (!canEdit) return
     const source = parseKbNodePath(sourcePath)
     if (!source) return
     // A non-root target must be a folder; ignore a drop onto anything else.
@@ -490,9 +557,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
       source.kind === 'folder'
         ? api.updateFolder(source.id, { parentId: targetFolderId })
         : api.updatePage(source.id, { folderId: targetFolderId })
-    move
-      .then(() => refreshTree())
-      .catch(() => setError('Failed to move item'))
+    move.then(() => refreshTree()).catch(onApiError('Failed to move item'))
   }
 
   /** Live textarea change: update the draft and debounce an autosave. */
@@ -598,10 +663,10 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
     if (target instanceof HTMLInputElement && target.type === 'checkbox') {
       e.preventDefault()
       e.stopPropagation()
-      if (!canEdit || !detail || openPageId === null || target.dataset.line === undefined) return
+      if (!detail || openPageId === null || target.dataset.line === undefined) return
       const nextBody = toggleChecklistLine(detail.body, Number(target.dataset.line))
-      setDetail((prev) => (prev ? { ...prev, body: nextBody, updatedBy: editHandle } : prev))
-      sendFrame(encodePageEdit(openPageId, nextBody, editHandle))
+      setDetail((prev) => (prev ? { ...prev, body: nextBody, updatedBy: author } : prev))
+      sendFrame(encodePageEdit(openPageId, nextBody))
       return
     }
     enterEdit()
@@ -610,29 +675,46 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   // ---- history panel (throttled revisions) ----
   const openHistory = (): void => {
     if (!detail) return
+    setChangelogOpen(false)
     api
       .getPageRevisions(detail.id)
       .then((revs) => {
         setRevisions(revs)
         setHistoryOpen(true)
       })
-      .catch(() => setError('Failed to load history'))
+      .catch(onApiError('Failed to load history'))
   }
 
   /** Restore a revision onto the open page, then close the panel. */
   const restore = (revisionId: number): void => {
-    if (!canEdit || openPageId === null) return
+    if (openPageId === null) return
     api
-      .restorePageRevision(revisionId, editHandle)
+      .restorePageRevision(revisionId)
       .then((page) => {
         setDetail(page)
         setBodyDraft(null)
         setEditing(false)
         // Re-broadcast so other viewers converge on the restored version.
-        sendFrame(encodePageEdit(openPageId, page.body, editHandle))
+        sendFrame(encodePageEdit(openPageId, page.body))
         setHistoryOpen(false)
       })
-      .catch(() => setError('Failed to restore revision'))
+      .catch(onApiError('Failed to restore revision'))
+  }
+
+  // ---- changelog panel (per-space page lifecycle) ----
+  // Distinct from History: revisions are THIS page's restorable body snapshots
+  // and die with it, while the changelog covers every page in the space and
+  // every kind of change — create, rename, move, body-save, delete.
+  const openChangelog = (): void => {
+    if (spaceId === null) return
+    setHistoryOpen(false)
+    api
+      .getChangelog(spaceId)
+      .then((entries) => {
+        setChangelog(entries)
+        setChangelogOpen(true)
+      })
+      .catch(onApiError('Failed to load the changelog'))
   }
 
   // ---- structural create (page + folder) ----
@@ -645,7 +727,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
   const submitCreate = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     const name = createDraft.trim()
-    if (!canEdit || !name || spaceId === null || busy || !creating) return
+    if (!name || spaceId === null || busy || !creating) return
     setBusy(true)
     setError(null)
     try {
@@ -653,14 +735,14 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
         await api.createFolder(spaceId, name, null)
         refreshTree()
       } else {
-        const page = await api.createPage(spaceId, name, editHandle, null)
+        const page = await api.createPage(spaceId, name, null)
         refreshTree()
         onOpenNode(`page/${page.id}`)
       }
       setCreating(null)
       setCreateDraft('')
-    } catch {
-      setError(creating === 'folder' ? 'Failed to create folder' : 'Failed to create page')
+    } catch (err) {
+      onApiError(creating === 'folder' ? 'Failed to create folder' : 'Failed to create page')(err)
     } finally {
       setBusy(false)
     }
@@ -676,7 +758,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
         setDetail(page)
         refreshTree()
       })
-      .catch(() => setError('Failed to rename page'))
+      .catch(onApiError('Failed to rename page'))
   }
 
   const deletePage = (): void => {
@@ -691,7 +773,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
         setViewers([])
         refreshTree()
       })
-      .catch(() => setError('Failed to delete page'))
+      .catch(onApiError('Failed to delete page'))
   }
 
   const filteredTree = useMemo(() => filterKbTree(tree, search), [tree, search])
@@ -710,20 +792,18 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
         <div className={styles.sectionHead}>
           <span className={styles.sectionTitle}>Spaces</span>
           <span className={styles.headRight}>
-            {canEdit && (
-              <button
-                type="button"
-                className={styles.spaceAddBtn}
-                onClick={createSpace}
-                title="New space"
-                aria-label="New space"
-                disabled={busy}
-              >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-                  <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-              </button>
-            )}
+            <button
+              type="button"
+              className={styles.spaceAddBtn}
+              onClick={createSpace}
+              title="New space"
+              aria-label="New space"
+              disabled={busy}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </svg>
+            </button>
             <span className={styles.conn}>
               <span className={`${styles.dot} ${connected ? styles.dotOn : styles.dotOff}`} aria-hidden />
               {connected ? 'live' : 'offline'}
@@ -734,7 +814,7 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
           {spaces.length === 0 && <li className={styles.empty}>No spaces.</li>}
           {spaces.map((s) => {
             const active = s.id === spaceId
-            const deletable = canEdit && active && s.name !== PROTECTED_SPACE_NAME
+            const deletable = active && s.name !== PROTECTED_SPACE_NAME
             return (
               <li key={s.id} className={styles.spaceItem}>
                 <button
@@ -782,84 +862,88 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
               entries={filteredTree}
               onOpen={onOpenNode}
               selectedPath={openPageId !== null ? `page/${openPageId}` : null}
-              onMove={canEdit ? moveNode : undefined}
+              onMove={moveNode}
             />
           )}
         </div>
 
-        {canEdit ? (
-          <div className={styles.treeFooter}>
-            {creating ? (
-              <form className={styles.createInline} onSubmit={submitCreate}>
-                <input
-                  className={styles.createInlineInput}
-                  type="text"
-                  value={createDraft}
-                  onChange={(e) => setCreateDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      e.preventDefault()
-                      setCreating(null)
-                      setCreateDraft('')
-                    }
-                  }}
-                  onBlur={() => {
-                    if (!createDraft.trim()) setCreating(null)
-                  }}
-                  placeholder={creating === 'page' ? 'Page name…' : 'Folder name…'}
-                  aria-label={creating === 'page' ? 'New page name' : 'New folder name'}
-                  maxLength={MAX_DISPLAY_NAME_LEN}
-                  autoFocus
-                />
-              </form>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className={styles.iconBtn}
-                  onClick={() => startCreate('page')}
-                  title="New page"
-                  aria-label="New page"
-                  disabled={busy || spaceId === null}
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-                    <path
-                      d="M4 1.5h4.5L13 6v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"
-                      stroke="currentColor"
-                      strokeWidth="1.2"
-                      strokeLinejoin="round"
-                    />
-                    <path d="M8.25 1.75V6H12.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
-                    <path d="M8 8.5v4M6 10.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className={styles.iconBtn}
-                  onClick={() => startCreate('folder')}
-                  title="New folder"
-                  aria-label="New folder"
-                  disabled={busy || spaceId === null}
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-                    <path
-                      d="M1.5 4a1 1 0 0 1 1-1h3l1.5 1.5H13.5a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4Z"
-                      stroke="currentColor"
-                      strokeWidth="1.2"
-                      strokeLinejoin="round"
-                    />
-                    <path d="M8 7v3.5M6.25 8.75h3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-                  </svg>
-                </button>
-              </>
-            )}
-          </div>
-        ) : (
-          <div className={styles.treeFooter}>
-            <HandleGate onSet={onHandleChange} action="create pages" />
-          </div>
-        )}
+        <div className={styles.treeFooter}>
+          {creating ? (
+            <form className={styles.createInline} onSubmit={submitCreate}>
+              <input
+                className={styles.createInlineInput}
+                type="text"
+                value={createDraft}
+                onChange={(e) => setCreateDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setCreating(null)
+                    setCreateDraft('')
+                  }
+                }}
+                onBlur={() => {
+                  if (!createDraft.trim()) setCreating(null)
+                }}
+                placeholder={creating === 'page' ? 'Page name…' : 'Folder name…'}
+                aria-label={creating === 'page' ? 'New page name' : 'New folder name'}
+                maxLength={MAX_DISPLAY_NAME_LEN}
+                autoFocus
+              />
+            </form>
+          ) : (
+            <>
+              <button
+                type="button"
+                className={styles.iconBtn}
+                onClick={() => startCreate('page')}
+                title="New page"
+                aria-label="New page"
+                disabled={busy || spaceId === null}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path
+                    d="M4 1.5h4.5L13 6v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M8.25 1.75V6H12.5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                  <path d="M8 8.5v4M6 10.5h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={styles.iconBtn}
+                onClick={() => startCreate('folder')}
+                title="New folder"
+                aria-label="New folder"
+                disabled={busy || spaceId === null}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <path
+                    d="M1.5 4a1 1 0 0 1 1-1h3l1.5 1.5H13.5a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4Z"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M8 7v3.5M6.25 8.75h3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+              </button>
+            </>
+          )}
+        </div>
         {error && <p className={styles.error}>{error}</p>}
+
+        {/* Who you are on this server, and the way out. */}
+        <div className={styles.account}>
+          <span className={styles.accountName} title={`Signed in as ${user.username}`}>
+            {author}
+          </span>
+          <button type="button" className={styles.logoutBtn} onClick={signOut}>
+            Log out
+          </button>
+        </div>
       </aside>
 
       {/* Phone only: swipe up toward a full-screen page, down toward a
@@ -896,6 +980,9 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
               <div className={styles.pageActions}>
                 <button type="button" className={styles.pageAction} onClick={openHistory}>
                   History
+                </button>
+                <button type="button" className={styles.pageAction} onClick={openChangelog}>
+                  Changelog
                 </button>
                 <button type="button" className={styles.pageAction} onClick={renamePage}>
                   Rename
@@ -941,12 +1028,10 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                     *italic* · ~~strike~~ · ==highlight== · [text](url) · esc done
                   </div>
                 </div>
-              ) : !canEdit && detail.body.trim() === '' ? (
-                <p className={styles.empty}>This page is empty.</p>
               ) : (
                 <div
                   className={styles.bodyRendered}
-                  onClick={canEdit ? onBodyClick : undefined}
+                  onClick={onBodyClick}
                   dangerouslySetInnerHTML={{
                     __html:
                       renderPageMarkdown(detail.body) ||
@@ -955,12 +1040,6 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                 />
               )}
             </div>
-
-            {!canEdit && (
-              <div className={styles.addBar}>
-                <HandleGate onSet={onHandleChange} action="edit this page" />
-              </div>
-            )}
           </>
         ) : (
           <div className={styles.detailEmpty}>
@@ -993,6 +1072,32 @@ function KbViewComponent({ teamHandle, onHandleChange, openTarget = null, active
                 ))}
             </ul>
             <button type="button" className={styles.historyClose} onClick={() => setHistoryOpen(false)}>
+              Close
+            </button>
+          </div>
+        )}
+
+        {changelogOpen && (
+          <div className={styles.historyPanel} role="dialog" aria-label="Space changelog">
+            <div className={styles.historyHead}>
+              <strong>Changelog</strong> — every change in {spaceName || 'this space'}, newest first:
+            </div>
+            <ul className={styles.revisions}>
+              {changelog.length === 0 && <li className={styles.empty}>No changes recorded yet.</li>}
+              {changelog.map((c) => (
+                <li key={c.id} className={styles.changeEntry}>
+                  <span className={styles.revMeta}>
+                    {c.username} · {CHANGE_LABEL[c.action]} · {new Date(c.createdAt).toLocaleString()}
+                  </span>
+                  <span className={styles.revSnippet}>{c.detail || '(no detail)'}</span>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className={styles.historyClose}
+              onClick={() => setChangelogOpen(false)}
+            >
               Close
             </button>
           </div>

@@ -105,3 +105,31 @@ that revisits one of these.
   `chatAgent.ts`'s `voiceSystemPrompt`) is retained but no longer set by any UI. Do not
   re-add local ML voice without first re-weighing that bundle cost.
 
+- Login (KB + Team, `.agents/plans/zmrng-login-auth.md`): a username/password gate in front of
+  the **Knowledge Base** and **Team Chat** surfaces ONLY — the Workspace orchestrator stays
+  ungated (gating the operator's own tooling buys nothing; explicitly rejected). Sessions are
+  **server-side rows**, not JWTs (revocation/expiry need a server-side list anyway, so a JWT is
+  the sessions table with extra steps); only the sha256 of a token is stored. Hashing is
+  `node:crypto` **scrypt**, NOT argon2id (D3) — argon2 is a node-gyp addon the Tauri sidecar
+  bundler hand-vendors, and the versioned `scrypt$N$r$p$salt$key` prefix keeps a future swap to
+  one file. **One session token, two transports** (D2): an `HttpOnly; SameSite=Strict` cookie
+  same-origin, an `Authorization: Bearer` header for the desktop app's cross-origin Team
+  connection to the VPS, which no cookie can reach without TLS. `Secure` is conditional, never
+  unconditional — browsers silently DROP a `Secure` cookie on the VPS's plain-http origin.
+  Because the cross-origin path uses a header, `access-control-allow-credentials` is never sent
+  and the existing reflected-origin CORS policy stays safe (reflecting arbitrary origins WITH
+  credentials was considered and rejected as a real vulnerability). **One login, not one
+  account** (D1): the client keeps an origin-keyed session store and submits one credential pair
+  to every gated origin in parallel, so the operator types their password once — but the servers
+  do not trust each other and `create-user` must be run on each host; federating identity between
+  instances was rejected as far beyond this task. Identity LEFT THE WIRE: `hello` carries no
+  display name and `message`/`react`/`page.edit` frames asserting an `author`/`handle` are
+  rejected, which also closes the old spoofing hole. `settings.teamHandle` survives in the schema
+  (migrations are additive-only) but nothing reads it. Accounts are CLI-provisioned only — no
+  self-serve signup, no password-reset flow; re-running `create-user` resets a password, and that
+  is the documented recovery path. A dedicated additive `kb_changelog` table records page
+  create/rename/move/body-save/delete; reusing `page_revisions` was rejected because it only ever
+  sees body saves and dies with its page. `authRoutes.ts` / `kbRoutes.ts` are plain functions on
+  the app instance rather than `fastify-plugin` plugins — an encapsulated plugin's `onRequest`
+  hook would not cover the parent's routes — which is also what makes the gate and the KB
+  attribution testable with `app.inject()` against a bare `Fastify()`.

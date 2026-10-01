@@ -18,7 +18,13 @@ packages/server/src/
   index.ts     — Fastify bootstrap: REST routes + WebSocket + static serve
   config.ts    — env parsing + repo registry (config/repos.json → env → legacy)
   db.ts        — SQLite schema, prepared statements, idempotent migrations
-  types.ts     — Task/WsEvent/usage/RepoTarget types (SOURCE OF TRUTH)
+  types.ts     — Task/WsEvent/usage/RepoTarget/User/Session types (SOURCE OF TRUTH)
+  password.ts  — scrypt password hashing ONLY (versioned `scrypt$N$r$p$salt$key`)
+  session.ts   — pure session-token primitives (newToken/hashToken/expiry/renewal)
+  auth.ts      — AuthService + LoginThrottle + cookie builders + the gated-prefix list
+  authRoutes.ts— registerAuth(): the onRequest gate + /api/auth/{login,logout,me}
+  kbRoutes.ts  — registerKbRoutes(): the whole Knowledge Base REST surface
+  cli/createUser.ts — account-provisioning CLI (`npm run create-user`)
   runner.ts    — spawn + parse the claude child (stream-json); strip API key; buildUserMessage()/sanitizeAttachments() for multimodal image/PDF attachments
   terminal.ts  — TerminalManager: server-owned node-pty sessions (keyed by id) for the Workspace terminal; attach/detach survive a transient socket drop within a grace window
   chatAgent.ts — ChatManager: standalone chat `claude` Runners (GET /ws/chat), same RunnerFactory seam as TaskManager
@@ -64,6 +70,21 @@ and are mirrored to the web side purely as a client-side fast-fail (`attachments
 point and must never be skipped for a new route/frame that accepts attachments.
 Attachments are transient by design: never written to disk or the DB, held only long
 enough to build one outbound stream-json message (`buildUserMessage`).
+
+### Auth — gate at the edge, attribute from the session
+The Knowledge Base and Team Chat surfaces are gated; the Workspace orchestrator is not.
+`isProtectedPath` (`auth.ts`) is the SINGLE list of gated prefixes — add a new gated route
+there, never with an ad-hoc check in a handler. Inside a gated handler, take the identity
+from `requireUser(req, reply)` and NEVER from the request body: a client-supplied `author`
+is ignored everywhere, and the workspace socket REJECTS a frame that still asserts one.
+
+Register route modules as PLAIN FUNCTIONS on the app instance (`registerAuth`,
+`registerKbRoutes`), not as `fastify-plugin` plugins — an encapsulated plugin's
+`onRequest` hook would not cover the parent's routes, and it is what lets a test attach
+them to a bare `Fastify()` and drive them with `app.inject()`.
+
+Never make the session cookie unconditionally `Secure`: browsers silently DROP a `Secure`
+cookie on a plain-http origin, and the VPS workspace is plain http on the tailnet.
 
 ### Repo registry (config)
 Targets load with a fallback chain — `config/repos.json` → `ZMRNG_REPOS` env →

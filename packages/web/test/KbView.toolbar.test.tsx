@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { KbView } from '../src/components/KbView'
-import type { KbPage, KbTreeNode, Space } from '../src/types'
+import type { KbPage, KbTreeNode, PublicUser, Space } from '../src/types'
 
 const getSpaces = vi.fn()
 const getSpaceTree = vi.fn()
@@ -9,16 +9,20 @@ const getPage = vi.fn()
 const openExternal = vi.fn()
 
 vi.mock('../src/api', () => ({
+  isAuthError: (err: unknown) => err instanceof Error && err.name === 'AuthError',
   api: {
     getSpaces: (...a: unknown[]) => getSpaces(...a),
     getSpaceTree: (...a: unknown[]) => getSpaceTree(...a),
     getPage: (...a: unknown[]) => getPage(...a),
+    getChangelog: () => Promise.resolve([]),
   },
 }))
 
 vi.mock('../src/openExternal', () => ({
   openExternal: (...a: unknown[]) => openExternal(...a),
 }))
+
+const ADA: PublicUser = { id: 1, username: 'ada', displayName: 'Ada' }
 
 const SPACE: Space = {
   id: 1,
@@ -61,9 +65,9 @@ afterEach(() => {
 })
 
 /** Render the KB view (inactive → no workspace socket) and open the seeded page. */
-async function openPage(teamHandle: string, body = PAGE.body) {
+async function openPage(body = PAGE.body) {
   getPage.mockResolvedValue({ ...PAGE, body })
-  render(<KbView teamHandle={teamHandle} onHandleChange={() => {}} active={false} />)
+  render(<KbView user={ADA} onLogout={() => {}} active={false} />)
   await screen.findByRole('button', { name: 'general' })
   fireEvent.click(await screen.findByRole('button', { name: 'Notes' }))
   await waitFor(() => expect(getPage).toHaveBeenCalledWith(10))
@@ -72,7 +76,7 @@ async function openPage(teamHandle: string, body = PAGE.body) {
 
 describe('<KbView> formatting toolbar', () => {
   it('shows no toolbar in read mode and reveals it once the body is clicked', async () => {
-    await openPage('Ada')
+    await openPage()
     expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByText('hello world'))
@@ -83,7 +87,7 @@ describe('<KbView> formatting toolbar', () => {
   })
 
   it('applies a toolbar action to the textarea selection WITHOUT leaving edit mode', async () => {
-    await openPage('Ada')
+    await openPage()
     fireEvent.click(screen.getByText('hello world'))
 
     const textarea = (await screen.findByLabelText('Page body')) as HTMLTextAreaElement
@@ -102,16 +106,8 @@ describe('<KbView> formatting toolbar', () => {
     expect(screen.getByRole('toolbar')).toBeInTheDocument()
   })
 
-  it('never shows the toolbar to a read-only viewer (no edit handle)', async () => {
-    await openPage('')
-    fireEvent.click(screen.getByText('hello world'))
-
-    expect(screen.queryByRole('toolbar')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Page body')).not.toBeInTheDocument()
-  })
-
   it('opens a rendered link externally instead of dropping into the editor', async () => {
-    await openPage('Ada', '[site](https://example.test/docs)')
+    await openPage('[site](https://example.test/docs)')
 
     fireEvent.click(screen.getByRole('link', { name: 'site' }))
 
@@ -121,7 +117,7 @@ describe('<KbView> formatting toolbar', () => {
   })
 
   it('swallows a relative link without trying to open the app itself', async () => {
-    await openPage('Ada', '[local](/some/page)')
+    await openPage('[local](/some/page)')
 
     fireEvent.click(screen.getByRole('link', { name: 'local' }))
 

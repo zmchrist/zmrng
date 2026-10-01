@@ -9,11 +9,14 @@ The chat-only partner (Partner A, Pro sub) contributes through this workspace �
 channels + the `@agent` bot + the "Send to my zmrng" handoff into a technical partner's
 local backlog. They never run the local app; they paste a URL into Settings.
 
-> **Security perimeter — read first.** There is **no app-code auth**. Handles are
-> self-asserted; **tailnet membership IS the access control.** The workspace port MUST be
-> reachable *only* over Tailscale. Never expose it publicly, never port-forward it, never
-> put it behind a public reverse proxy. This is a documented POC precondition — the app
-> deliberately has no auth gate.
+> **Security perimeter — read first.** The Team surface now requires a
+> **username/password login** (see §2a), so handles are no longer self-asserted — but
+> **Tailscale is still the perimeter.** The workspace port MUST be reachable *only* over
+> Tailscale. Never expose it publicly, never port-forward it, never put it behind a
+> public reverse proxy. Two reasons the requirement did not soften: the traffic is plain
+> HTTP, so credentials cross the network relying on the tailnet's own encryption, and the
+> login gate covers `/api/channels` + the KB routes, not every surface this binary
+> serves. TLS is the correct long-term fix and is out of scope.
 
 ---
 
@@ -104,6 +107,38 @@ sudo systemctl restart zmrng-workspace
 sudo systemctl status  zmrng-workspace --no-pager
 journalctl -u zmrng-workspace -n 50 --no-pager
 ```
+
+---
+
+## 2a. Provision the accounts (required — nobody can use Team without one)
+
+The Team and Knowledge Base surfaces are gated. There is no self-serve signup, so every
+teammate needs an account created here, on the VPS, by hand:
+
+```bash
+cd /path/to/zmrng
+npm run create-user -- --username ada --display-name "Ada"    # prompts for the password, no echo
+```
+
+- The password must be at least 8 characters. There are no composition rules.
+- **Re-running the command for an existing username RESETS that password.** That is the
+  only recovery path — there is deliberately no password-reset flow.
+- Usernames are exact-match and case-sensitive (`ada` and `Ada` are two accounts).
+- `--display-name` defaults to the username, and a re-run never renames an existing user.
+
+**Accounts are per server instance (D1).** A session is issued by the server that minted
+it, and the two servers do not trust each other. A teammate whose desktop app reads the
+Knowledge Base from their own local sidecar and Team Chat from this VPS needs the SAME
+username and password provisioned in **both** places — then one login covers both
+surfaces, because the login pane submits the credentials to every gated origin at once.
+Provisioning someone here does NOT create them anywhere else.
+
+The account lives in the same `zmrng.db` the server uses (`ZMRNG_DATA_DIR`-aware), so it
+survives the in-place redeploy in §5 untouched.
+
+> **`ZMRNG_SECURE_COOKIES`** — leave it UNSET here. The VPS serves plain `http://`, and a
+> `Secure` cookie is silently dropped by browsers on a non-HTTPS origin, which would break
+> login entirely. Set it to `1` only once a TLS-terminating proxy sits in front.
 
 ---
 
