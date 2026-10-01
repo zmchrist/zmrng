@@ -47,9 +47,7 @@
   background-color: var(--surface-hover);
 }
 .select:focus {
-  outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
 }
 .select:disabled {
   opacity: 0.5;
@@ -90,7 +88,7 @@
   color: var(--text);
   background: var(--surface-strong);
   border: 1px solid var(--accent);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   transition: var(--transition);
 }
@@ -193,7 +191,6 @@
   transition: var(--transition);
 }
 .input:focus {
-  outline: none;
   border-color: var(--accent);
 }
 

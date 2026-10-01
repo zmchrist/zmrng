@@ -1,109 +1,113 @@
 :root {
-  /* ---- base — "Cosmos": a deep space-navy field ------------------------- */
-  /* The cosmic radial-gradient atmosphere + starfield are painted on the
-     body backdrop layers (below), gated by [data-backdrop="cosmos"]; --bg is
-     the flat field colour underneath so non-cosmos themes still get a solid
-     field when they override it. */
-  --bg: #090b13;
+  /* ============================================================================
+     "Vermilion Press" — flat editorial Swiss, light mode (the default look).
+     3 colors, hard stop: paper / ink / vermilion. Vermilion is a WEAPON —
+     exactly one focal thing per region gets it. NO gradients, NO drop shadows,
+     NO backdrop-blur, NO glass, NO glow, near-ZERO radius. Structure comes from
+     1px ink hairlines + 2px solid borders + a strict grid, not from depth.
 
-  /* ---- surfaces — translucent glass panels over the cosmic field -------- */
-  /* --surface-opacity is a user-tunable multiplier (Settings → Window opacity):
-     1 = the authored alphas below, 0 = fully see-through glass. It scales only
-     the panel-background alphas, never text/icons/borders. Set at runtime on
-     the document root by opacity.ts. */
+     Every component reads these vars, so this one :root drives the whole app.
+     ============================================================================ */
+
+  /* ---- base field — flat paper ------------------------------------------- */
+  --bg: #f7f5f0;
+
+  /* --surface-opacity: user-tunable multiplier (Settings → Window opacity),
+     scaled into panel-background alphas by opacity.ts. On flat paper the
+     see-through slider is largely meaningless; the mechanism is left intact. */
   --surface-opacity: 1;
-  --surface: rgba(14, 18, 32, calc(0.5 * var(--surface-opacity)));
-  --surface-strong: rgba(16, 20, 34, calc(0.62 * var(--surface-opacity)));
-  --surface-hover: rgba(255, 255, 255, 0.06);
+  --surface: #fdfcf9; /* paper panel — differentiated by BORDERS, not fills */
+  --surface-strong: #ffffff;
+  --surface-hover: rgba(22, 19, 15, 0.04);
   /* inset wells for fields / code */
-  --well: rgba(0, 0, 0, calc(0.3 * var(--surface-opacity)));
-  --well-strong: rgba(0, 0, 0, calc(0.46 * var(--surface-opacity)));
+  --well: rgba(22, 19, 15, 0.05);
+  --well-strong: rgba(22, 19, 15, 0.09);
 
-  /* frosted glass is back: real backdrop blur on every panel */
-  --blur: 20px;
-  --glass: blur(20px) saturate(1.1);
+  /* ---- kill the glass ----------------------------------------------------- */
+  --blur: 0;
+  --glass: none;
 
-  /* ---- edges / hairlines — soft luminous glass rules -------------------- */
-  --border: rgba(255, 255, 255, 0.09);
-  --border-strong: rgba(255, 255, 255, 0.17);
-  /* subtle top-edge bevel so glass panels catch light */
-  --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --hairline-soft: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  /* ---- edges — ink hairlines, no bevel ----------------------------------- */
+  --border: rgba(22, 19, 15, 0.18);
+  --border-strong: rgba(22, 19, 15, 0.42);
+  --hairline: none;
+  --hairline-soft: none;
 
-  /* ---- text --------------------------------------------------------------*/
-  --text: #e9e6dd;
-  --text-dim: #9aa0b2;
-  --text-faint: #5f6678;
+  /* ---- text --------------------------------------------------------------- */
+  --text: #16130f;
+  /* 0.75 on paper = 7.9:1 — clears WCAG 1.4.3 (4.5:1) and adopted 1.4.6 (7:1).
+     0.55 measured 3.96–4.10:1 and failed 1.4.3. */
+  --text-dim: rgba(22, 19, 15, 0.75);
+  --text-faint: rgba(22, 19, 15, 0.4);
 
-  /* ---- accent — warm cosmic gold ---------------------------------------- */
-  --accent: #f2ca8a;
-  --accent-2: #f0a86a;
-  --accent-bright: #f7d9a0;
-  --accent-soft: rgba(242, 202, 138, 0.16);
-  --accent-line: rgba(242, 202, 138, 0.7);
-  --accent-grad: linear-gradient(135deg, #f2ca8a 0%, #f0a86a 100%);
-  /* deep space-navy ink reads on top of the gold accent fill */
-  --accent-ink: #20170a;
+  /* ---- accent — vermilion weapon (flat, no gradient, no 2nd hue) ---------- */
+  --accent: #ff4d1a;
+  --accent-2: #ff4d1a;
+  --accent-bright: #ff6a3d;
+  --accent-soft: rgba(255, 77, 26, 0.14);
+  --accent-line: rgba(255, 77, 26, 0.7);
+  --accent-grad: #ff4d1a; /* flat fill, not a gradient */
+  --accent-ink: #f7f5f0; /* paper reads on top of a vermilion fill */
 
-  /* ---- status hues — functional signal, tuned for the cosmos palette ---- */
-  --status-backlog: #5f6678;
-  --status-clarify: #f0c98a;
-  --status-planning: #9fb4ff;
-  --status-executing: #9fb4ff;
-  --status-validating: #7fd0c0;
-  --status-blocked: #f0a86a;
-  --status-review: #c9a0f0;
-  --status-done: #8fd0a4;
-  --status-failed: #f09a8a;
-  /* manual terminal board state — shelved, dimmest of the terminal hues */
-  --status-archived: #4a5063;
-  /* legacy single-phase status (old DB rows) */
-  --status-building: #9fb4ff;
+  /* ---- status hues — functional signposting on paper. Restrained ink/gray
+         ramp; vermilion reserved for the live/alert states. ----------------- */
+  --status-backlog: rgba(22, 19, 15, 0.45);
+  --status-clarify: #16130f;
+  --status-planning: #16130f;
+  --status-executing: #ff4d1a; /* the one "live" weapon */
+  --status-validating: #16130f;
+  --status-blocked: #ff4d1a; /* warning */
+  --status-review: #16130f;
+  --status-done: rgba(22, 19, 15, 0.65);
+  --status-failed: #ff4d1a;
+  --status-archived: rgba(22, 19, 15, 0.35);
+  --status-building: #16130f;
 
-  /* ---- actor hues — color-code worker + subagents ------------------------ */
+  /* ---- actor hues — ink + vermilion(main) + a gray ramp. On strict 3-color
+         Swiss the per-subagent color-coding flattens to a value ramp. -------- */
   --actor-main: var(--accent);
-  --actor-frontend-specialist: #9fb4ff;
-  --actor-backend-specialist: #7fb0ff;
-  --actor-qa: #f0c98a;
-  --actor-code-reviewer: #c9a0f0;
-  --actor-doc-updater: #7fd0c0;
-  --actor-general-purpose: #9aa0b2;
-  --actor-default: rgba(233, 230, 221, 0.7);
+  --actor-frontend-specialist: #16130f;
+  --actor-backend-specialist: rgba(22, 19, 15, 0.7);
+  --actor-qa: rgba(22, 19, 15, 0.55);
+  --actor-code-reviewer: rgba(22, 19, 15, 0.4);
+  --actor-doc-updater: rgba(22, 19, 15, 0.7);
+  --actor-general-purpose: rgba(22, 19, 15, 0.55);
+  --actor-default: rgba(22, 19, 15, 0.5);
 
-  /* ---- shape — soft rounded glass corners -------------------------------- */
-  --radius: 11px;
-  --radius-sm: 8px;
-  --radius-pill: 999px;
+  /* ---- shape — hard Swiss edges ------------------------------------------ */
+  --radius: 0;
+  --radius-sm: 0;
+  --radius-pill: 0;
 
-  /* ---- motion ------------------------------------------------------------ */
+  /* ---- motion ------------------------------------------------------------- */
   --transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
   --spring: 460ms cubic-bezier(0.22, 1, 0.36, 1);
-  /* Crisp Apple-esque panel open/close (minimize/enlarge): short duration,
-     ease-out-heavy curve — snappier than --spring. */
   --panel-duration: 170ms;
   --panel-ease: cubic-bezier(0.32, 0.72, 0, 1);
 
-  /* ---- elevation — soft floating-glass depth ----------------------------- */
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.42);
-  --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.3);
+  /* ---- elevation — no soft depth; 1px rings instead of shadows/glows ------ */
+  --shadow: none;
+  --shadow-soft: none;
   --glow-accent: 0 0 0 1px var(--accent-line);
   --glow-accent-strong: 0 0 0 1px var(--border-strong);
   --glow-operator: 0 0 0 1px var(--border);
-  --focus-ring: 0 0 0 1px var(--accent-line);
+  /* Solid --focus-color, not the 70% --accent-line (measured 2.24–2.39:1, under 3:1). */
+  --focus-ring: 0 0 0 2px var(--focus-color);
+  /* Darker vermilion for the focus outline only: >=3.5:1 on paper, bg and wells
+     (WCAG 1.4.11 / 2.4.13). Full #ff4d1a measured 2.91:1 on the tab-strip well. */
+  --focus-color: #d93a0b;
 
-  /* ---- controls ------------------------------------------------------------ */
-  --scrollbar-thumb: rgba(255, 255, 255, 0.17);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+  /* ---- controls ----------------------------------------------------------- */
+  --scrollbar-thumb: rgba(22, 19, 15, 0.28);
+  --scrollbar-thumb-hover: rgba(22, 19, 15, 0.42);
 
-  /* ---- typography — clean mono brand, clean sans body -------------------- */
-  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-  /* display face — kept defined for any remaining --font-display consumers */
-  --font-display: 'Lobster', cursive;
-  /* brand wordmark: understated monospace, matching the Cosmos screens */
+  /* ---- typography — one grotesque family, many weights ------------------- */
+  --font: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-display: var(--font); /* Swiss = no decorative/script display face */
   --font-brand: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --tracking-wide: 0.16em;
-  --tracking-tight: -0.012em;
+  --tracking-tight: -0.03em;
 }
 
 * {
@@ -134,67 +138,16 @@ body {
    set by opacity.ts via isTauriRuntime()), fade it in lockstep with
    --surface-opacity so the real desktop shows through toward 0%. The plain
    browser dev target has no native window to show through, so it keeps the
-   solid background above untouched. */
+   solid background above untouched. On the flat paper base the see-through
+   slider is far less meaningful, but the mechanism is left intact. */
 [data-native-transparent='true'] body {
   background: color-mix(in srgb, var(--bg) calc(var(--surface-opacity) * 100%), transparent);
 }
 
-/* App content sits above the fixed cosmic backdrop layers. */
+/* App content gets its own stacking layer above the body background. */
 #root {
   position: relative;
   z-index: 1;
-}
-
-/* ---- Cosmos backdrop — a drifting nebula + a twinkling starfield --------
-   Two fixed full-viewport layers painted behind the app, only when the active
-   theme requests the cosmos backdrop (set via [data-backdrop] on the root by
-   applyTheme). ::before is the coloured nebula wash; ::after is the star specks.
-   Both are inert (pointer-events:none) and sit at z-index 0, below #root. */
-html[data-backdrop='cosmos'] body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(900px 600px at 50% -12%, rgba(255, 224, 180, 0.2), transparent 60%),
-    radial-gradient(720px 540px at 10% 118%, rgba(255, 150, 172, 0.12), transparent 62%),
-    radial-gradient(760px 560px at 112% 6%, rgba(140, 170, 255, 0.14), transparent 60%),
-    radial-gradient(120% 120% at 50% 45%, transparent 52%, rgba(2, 3, 8, 0.62) 100%);
-}
-
-html[data-backdrop='cosmos'] body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background-image:
-    radial-gradient(1.6px 1.6px at 22% 14%, #ffffff, transparent),
-    radial-gradient(1.6px 1.6px at 68% 30%, #ffe9c8, transparent),
-    radial-gradient(1.4px 1.4px at 40% 62%, #cdd8ff, transparent),
-    radial-gradient(1.4px 1.4px at 47% 20%, #ffffff, transparent),
-    radial-gradient(1.6px 1.6px at 80% 74%, #ffd9b0, transparent),
-    radial-gradient(1.4px 1.4px at 12% 46%, #cdd8ff, transparent),
-    radial-gradient(1.4px 1.4px at 88% 22%, #ffffff, transparent),
-    radial-gradient(1.4px 1.4px at 30% 84%, #ffe9c8, transparent),
-    radial-gradient(1.5px 1.5px at 60% 50%, #ffffff, transparent),
-    radial-gradient(1.3px 1.3px at 5% 78%, #cdd8ff, transparent),
-    radial-gradient(1.4px 1.4px at 94% 60%, #ffd9b0, transparent),
-    radial-gradient(1.3px 1.3px at 72% 8%, #ffffff, transparent);
-  background-repeat: no-repeat;
-  opacity: 0.55;
-  animation: cosmos-twinkle 4.2s ease-in-out infinite;
-}
-
-@keyframes cosmos-twinkle {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 0.8;
-  }
 }
 
 button {
@@ -207,8 +160,13 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 a:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+  /* Solid 2px outline in the full-strength accent (WCAG 2.4.7 / 2.4.13, 1.4.11).
+     The old box-shadow ring used --accent-line (70% alpha) and measured 2.24–2.39:1
+     against paper — below the 3:1 non-text floor. Solid --focus-color clears 3:1 on every light surface.
+     outline also survives forced-colors mode, where box-shadow is dropped. */
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 ::-webkit-scrollbar {

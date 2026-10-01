@@ -59,7 +59,6 @@
 }
 
 .input:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -300,7 +299,6 @@
 }
 
 .select:focus {
-  outline: none;
   border-color: var(--accent-line);
 }
 
@@ -361,8 +359,8 @@
   min-width: 0;
   min-height: 0;
   background: var(--well);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
   overflow: hidden;
 }
 
@@ -495,8 +493,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(2px);
+  background: rgba(22, 19, 15, 0.35);
+  backdrop-filter: var(--glass);
 }
 
 .kbCard {
@@ -546,9 +544,7 @@
 
 .kbSelect:focus,
 .kbInput:focus {
-  outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
 }
 
 .kbError {
@@ -919,7 +915,7 @@
 
 .dotOn {
   background: var(--status-done);
-  box-shadow: 0 0 0 3px rgba(110, 231, 168, 0.16);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-done) 18%, transparent);
 }
 
 .dotOff {

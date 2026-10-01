@@ -134,10 +134,14 @@ describe('<WorkspaceView> phone task-panel swipe handle', () => {
     fireEvent.touchEnd(el, { changedTouches: [{ clientY: to }] })
   }
 
-  it('offers the handle on the Tasks view only', async () => {
+  function pane() {
+    return document.querySelector('section')!
+  }
+
+  it('offers the handle on the Tasks view only, starting at half screen', async () => {
     const { unmount } = renderView('tasks')
     await screen.findAllByText('Task One')
-    expect(handle()).toHaveAttribute('aria-expanded', 'true')
+    expect(handle()).toHaveAttribute('data-position', 'split')
     unmount()
 
     renderView('terminal')
@@ -150,34 +154,45 @@ describe('<WorkspaceView> phone task-panel swipe handle', () => {
     expect(screen.queryByRole('button', { name: /task list/i })).not.toBeInTheDocument()
   })
 
-  it('hides the task list on a swipe up and restores it on a swipe down', async () => {
+  it('steps full list ↔ half ↔ full worker on swipes, stopping at the ends', async () => {
     renderView('tasks')
     await screen.findAllByText('Task One')
 
     swipe(300, 200)
+    expect(handle()).toHaveAttribute('data-position', 'detail')
     expect(document.querySelector('aside')).toHaveAttribute('aria-hidden', 'true')
-    expect(handle()).toHaveAttribute('aria-expanded', 'false')
+    expect(pane()).not.toHaveAttribute('aria-hidden')
+    swipe(300, 200)
+    expect(handle()).toHaveAttribute('data-position', 'detail')
 
     swipe(200, 300)
+    expect(handle()).toHaveAttribute('data-position', 'split')
     expect(document.querySelector('aside')).not.toHaveAttribute('aria-hidden')
-    expect(handle()).toHaveAttribute('aria-expanded', 'true')
+
+    swipe(200, 300)
+    expect(handle()).toHaveAttribute('data-position', 'list')
+    expect(pane()).toHaveAttribute('aria-hidden', 'true')
+    swipe(200, 300)
+    expect(handle()).toHaveAttribute('data-position', 'list')
   })
 
-  it('toggles on a tap — the keyboard-accessible path — without double-applying', async () => {
+  it('cycles on a tap — the keyboard-accessible path — without double-applying', async () => {
     renderView('tasks')
     await screen.findAllByText('Task One')
 
     // A real tap fires touchend AND a synthetic click; only one must count.
     swipe(300, 300)
     fireEvent.click(handle())
-    expect(handle()).toHaveAttribute('aria-expanded', 'false')
+    expect(handle()).toHaveAttribute('data-position', 'detail')
 
-    // A pure click (keyboard activation) still toggles.
+    // Pure clicks (keyboard activation) keep cycling back toward the list.
     fireEvent.click(handle())
-    expect(handle()).toHaveAttribute('aria-expanded', 'true')
+    expect(handle()).toHaveAttribute('data-position', 'split')
+    fireEvent.click(handle())
+    expect(handle()).toHaveAttribute('data-position', 'list')
   })
 
-  it('remembers the collapsed state across a remount', async () => {
+  it('remembers the position across a remount', async () => {
     const { unmount } = renderView('tasks')
     await screen.findAllByText('Task One')
     swipe(300, 200)
@@ -185,7 +200,7 @@ describe('<WorkspaceView> phone task-panel swipe handle', () => {
 
     renderView('tasks')
     await screen.findAllByText('Task One')
-    expect(handle()).toHaveAttribute('aria-expanded', 'false')
+    expect(handle()).toHaveAttribute('data-position', 'detail')
     expect(document.querySelector('aside')).toHaveAttribute('aria-hidden', 'true')
   })
 })

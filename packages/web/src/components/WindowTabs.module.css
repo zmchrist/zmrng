@@ -79,6 +79,10 @@
   color: var(--text);
   background: var(--surface-hover);
 }
+/* .tabStrip scrolls sideways, so the global 2px outer ring is cut; draw it inset. */
+.tabAdd:focus-visible {
+  outline-offset: -2px;
+}
 
 .body {
   flex: 1;
@@ -125,8 +129,74 @@
 }
 
 .launchRow {
+  position: relative;
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.menuBtn {
+  padding: 8px 12px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.menuBtn:hover,
+.menuBtn[aria-expanded='true'] {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+/* Stacked pickers; capped to the viewport so every select stays reachable. */
+.settingsPopover {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 240px;
+  max-width: calc(100vw - 32px);
+  max-height: 60dvh;
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--surface-strong);
+  backdrop-filter: var(--glass);
+  -webkit-backdrop-filter: var(--glass);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.settingsPopover .select {
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .settingsPopover .select {
+    font-size: 16px;
+  }
 }
 
 .select {
@@ -156,9 +226,7 @@
   background-color: var(--surface-hover);
 }
 .select:focus {
-  outline: none;
   border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
 }
 .select option {
   background: var(--well);

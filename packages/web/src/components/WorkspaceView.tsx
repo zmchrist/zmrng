@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { NavIcon } from './NavIcon'
 import styles from './WorkspaceView.module.css'
 import type {
@@ -25,17 +25,20 @@ import { TerminalCard } from './TerminalCard'
 import { WorkerLogPanel } from './WorkerLogPanel'
 import { SecurityPanel } from './SecurityPanel'
 import { LanesPanel } from './LanesPanel'
-import type { ChatTabState, TabsState, TerminalTabState } from '../windowTabs'
+import {
+  focusChatLane,
+  focusTerminalSession,
+  type ChatTabState,
+  type TabsState,
+  type TerminalTabState,
+} from '../windowTabs'
+import type { LaneTarget } from '../laneRows'
 import type { HandoffPrefill } from '../teamHandoff'
 import type { SecurityScan } from '../types'
 import type { MobileWorkspaceView } from '../mobileNav'
-import {
-  beginSwipe,
-  loadTasksCollapsed,
-  resolveSwipe,
-  saveTasksCollapsed,
-  type SwipeGesture,
-} from '../mobileTaskPanel'
+import { TASKS_PANEL_KEY } from '../mobileTaskPanel'
+import { usePanelSplit } from '../usePanelSplit'
+import { PanelHandle } from './PanelHandle'
 
 /** Worker-pane tabs — the fixed Cosmos IDE tab set (replaces the draggable grid). */
 type PaneTab = 'worker' | 'files' | 'terminal' | 'chat' | 'lanes'
@@ -66,6 +69,9 @@ interface Props {
   /** Phone shell: which single view to fill the screen with. `undefined` on
    *  desktop, where the task panel + tab strip layout is used unchanged. */
   mobileView?: MobileWorkspaceView
+  /** Phone shell: switch the single full-screen view (a Lanes row click jumps
+   *  to the worker/chat/terminal view it points at). */
+  onMobileViewChange?: (view: MobileWorkspaceView) => void
   /** Per-tab state for the multi-tab Chat and Terminal panes + their
    *  persistence sinks (global UI state). Feed the tabbed ChatCard/TerminalCard
    *  dropped into the IDE's Chat/Terminal tabs. */
@@ -125,6 +131,7 @@ export function WorkspaceView({
   selectedId,
   tasksCollapsed,
   mobileView,
+  onMobileViewChange,
   chatTabs,
   onChatTabsChange,
   terminalTabs,
@@ -148,13 +155,9 @@ export function WorkspaceView({
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [seenPrefill, setSeenPrefill] = useState<HandoffPrefill | null>(null)
-  // Phone shell only: the task-list panel's collapsed flag, driven by the
-  // swipe handle and remembered across reloads (one global setting).
-  const [mobileTasksCollapsed, setMobileTasksCollapsed] = useState(loadTasksCollapsed)
-  const swipeRef = useRef<SwipeGesture | null>(null)
-  // A touch that already resolved must not be re-applied by the synthetic click
-  // the browser fires afterwards; the click path exists for keyboard users.
-  const touchHandledRef = useRef(false)
+  // Phone shell only: the task list / worker split (full list, half, full
+  // worker), driven by the swipe handle and remembered across reloads.
+  const [panel, movePanel] = usePanelSplit(TASKS_PANEL_KEY)
 
   // The Files tab always browses the configured Projects dir — it deliberately
   // does NOT follow task selection, so a task's worktree is never listed here.
@@ -204,6 +207,29 @@ export function WorkspaceView({
     [onSelect],
   )
 
+  // A Lanes row click jumps to what the row is: a task (worker, queued or
+  // subagent row) opens that task's Worker view; a chat / terminal row focuses
+  // the exact tab owning that live session. On the phone shell the single
+  // full-screen view switches too ('tasks' is where the worker log lives).
+  const openLane = useCallback(
+    (target: LaneTarget) => {
+      let next: PaneTab
+      if (target.kind === 'task') {
+        onSelect(target.taskId)
+        next = 'worker'
+      } else if (target.kind === 'chat') {
+        onChatTabsChange(focusChatLane(chatTabs, target.laneId))
+        next = 'chat'
+      } else {
+        onTerminalTabsChange(focusTerminalSession(terminalTabs, target.sessionId))
+        next = 'terminal'
+      }
+      setTab(next)
+      if (mobileView !== undefined) onMobileViewChange?.(next === 'worker' ? 'tasks' : next)
+    },
+    [onSelect, chatTabs, onChatTabsChange, terminalTabs, onTerminalTabsChange, mobileView, onMobileViewChange],
+  )
+
   const status = task?.status ?? null
 
   // Phone shell: one view fills the screen, driven by the hamburger drawer
@@ -211,15 +237,15 @@ export function WorkspaceView({
   const isMobile = mobileView !== undefined
   const activeTab: PaneTab = isMobile ? (mobileView === 'tasks' ? 'worker' : mobileView) : tab
   const showTasksView = isMobile ? mobileView === 'tasks' : !tasksCollapsed
-  const showTasks = showTasksView && !(isMobile && mobileTasksCollapsed)
-
-  const setCollapsed = useCallback((next: boolean) => {
-    setMobileTasksCollapsed(next)
-    saveTasksCollapsed(next)
-  }, [])
+  const showTasks = showTasksView && !(isMobile && panel.position === 'detail')
+  const hidePane = isMobile && showTasksView && panel.position === 'list'
 
   return (
-    <div className={styles.center} data-mobile={isMobile || undefined}>
+    <div
+      className={styles.center}
+      data-mobile={isMobile || undefined}
+      data-panel={isMobile && showTasksView ? panel.position : undefined}
+    >
       <aside
         className={`${styles.tasksPanel} ${showTasks ? '' : styles.tasksPanelCollapsed}`}
         aria-hidden={!showTasks || undefined}
@@ -254,40 +280,13 @@ export function WorkspaceView({
         </div>
       </aside>
 
-      {/* Phone shell: swipe up on the handle to collapse the task list, swipe
-          down or tap (also the keyboard path) to bring it back. */}
+      {/* Phone shell: swipe up on the handle to step toward a full-screen
+          worker, swipe down toward a full-screen task list, tap to cycle. */}
       {isMobile && showTasksView && (
-        <button
-          type="button"
-          className={styles.tasksHandle}
-          aria-expanded={!mobileTasksCollapsed}
-          aria-label={mobileTasksCollapsed ? 'Show task list' : 'Hide task list'}
-          title={mobileTasksCollapsed ? 'Show task list' : 'Hide task list'}
-          onTouchStart={(e) => {
-            swipeRef.current = beginSwipe(e.touches[0]?.clientY ?? 0)
-          }}
-          onTouchEnd={(e) => {
-            const gesture = swipeRef.current
-            swipeRef.current = null
-            if (!gesture) return
-            touchHandledRef.current = true
-            setCollapsed(
-              resolveSwipe(gesture, e.changedTouches[0]?.clientY ?? gesture.startY, mobileTasksCollapsed),
-            )
-          }}
-          onClick={() => {
-            if (touchHandledRef.current) {
-              touchHandledRef.current = false
-              return
-            }
-            setCollapsed(!mobileTasksCollapsed)
-          }}
-        >
-          <span className={styles.tasksHandleBar} aria-hidden="true" />
-        </button>
+        <PanelHandle label="Task list" position={panel.position} onMove={movePanel} />
       )}
 
-      <section className={styles.pane}>
+      <section className={styles.pane} aria-hidden={hidePane || undefined}>
         {!isMobile && (
         <div className={styles.tabStrip} role="tablist" aria-label="Worker pane">
           {PANE_TABS.map((t) => (
@@ -399,6 +398,7 @@ export function WorkspaceView({
               tasks={tasks}
               repos={repos}
               active={activeTab === 'lanes'}
+              onOpen={openLane}
             />
           </div>
         </div>

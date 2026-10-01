@@ -456,3 +456,25 @@ describe('TerminalManager onChange (lane emitter notify seam)', () => {
     expect(() => mgr.attach(undefined, { onData: () => {}, onExit: () => {} })).not.toThrow()
   })
 })
+
+describe('TerminalManager.close (explicit tab close)', () => {
+  it('kills the pty immediately, cancels any grace timer and forgets the session', () => {
+    const mgr = makeManager()
+    const { sessionId } = mgr.attach(undefined, { onData: () => {}, onExit: () => {} })
+    mgr.close(sessionId)
+    expect(created[0].killCount).toBe(1)
+    expect(mgr.snapshot()).toEqual([])
+    // A later attach with the dead id spawns a fresh shell.
+    mgr.attach(sessionId, { onData: () => {}, onExit: () => {} })
+    expect(created).toHaveLength(2)
+  })
+
+  it('is a no-op for an unknown id', () => {
+    const mgr = makeManager()
+    expect(() => mgr.close('nope')).not.toThrow()
+  })
+
+  it('parseClientMsg accepts a close frame', () => {
+    expect(parseClientMsg('{"type":"close"}')).toEqual({ type: 'close' })
+  })
+})
