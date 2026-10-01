@@ -1,4 +1,5 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import { NavIcon } from './NavIcon'
 import styles from './WorkspaceGrid.module.css'
 
 interface Props {
@@ -42,7 +43,7 @@ export function GridCard({
     >
       <div className={styles.header} data-mode="move" onPointerDown={onMovePointerDown}>
         <span className={styles.handle} aria-hidden="true">
-          ⠿
+          <NavIcon name="grip" />
         </span>
         <span className={styles.title}>{title}</span>
         <button
@@ -53,7 +54,7 @@ export function GridCard({
           onPointerDown={(e) => e.stopPropagation()}
           onClick={onToggleMinimize}
         >
-          {minimized ? '▫' : '–'}
+          {minimized ? <NavIcon name="square" /> : <NavIcon name="minus" />}
         </button>
         <button
           type="button"
@@ -63,7 +64,7 @@ export function GridCard({
           onPointerDown={(e) => e.stopPropagation()}
           onClick={onHide}
         >
-          ×
+          <NavIcon name="close" />
         </button>
       </div>
 

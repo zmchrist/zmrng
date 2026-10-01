@@ -1,3 +1,4 @@
+import { NavIcon } from './NavIcon'
 import styles from './WindowTabs.module.css'
 
 interface TabStripProps {
@@ -31,7 +32,7 @@ export function TabStrip({ tabs, activeId, onActivate, onClose, onAdd, addLabel 
               onClose(t.id)
             }}
           >
-            ×
+            <NavIcon name="close" />
           </button>
         </div>
       ))}
