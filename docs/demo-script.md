@@ -80,6 +80,7 @@ Back to the app.
   branch-only**, **self-validation gate**, **deterministic security scan**. Make
   sure all three land verbally.
 - Keep your cursor deliberate; no hunting around the UI on camera.
-- After recording: upload to Loom, drop the URL into the README (`[Loom link —
-  TODO]` on line ~9) and optionally export a short GIF to `docs/demo.gif` and
-  uncomment the image line just below it.
+- After recording: fill the README's `DEMO EMBED` block (top of `README.md`) with
+  one of its three options — drag the `.mp4`/`.mov` straight into the README on
+  github.com (best), or paste a hosted URL, or commit a GIF. Asset names, specs,
+  and the ffmpeg commands live in [`docs/media/README.md`](media/README.md).

@@ -6,11 +6,23 @@
 request. Fully autonomous, in isolated git worktrees, no babysitting.** One
 GUI replaces watching five terminals.
 
-> ▶️ **2-minute demo:** [Loom link — TODO] — watch a task go from prompt to
-> merged-ready PR without a human touching the code.
-> _(Recording script: [`docs/demo-script.md`](docs/demo-script.md).)_
+> ▶️ **2-minute demo** — watch a task go from prompt to merged-ready PR with no
+> human touching the code.
 
-<!-- ![demo](docs/demo.gif) — TODO: record before making this repo public -->
+<!-- DEMO EMBED — fill ONE option below once the recording exists, then delete
+     the option lines you did not use. Asset specs + ffmpeg commands:
+     docs/media/README.md · recording shot list: docs/demo-script.md
+
+     A (best) — GitHub-native video: edit this README on github.com and drag the
+       .mp4/.mov onto the "DROP VIDEO HERE" line; GitHub inserts an inline player.
+     B — hosted link + clickable poster (commit docs/media/demo-thumb.png):
+         [![zmrng — 2-minute demo](docs/media/demo-thumb.png)](PASTE_VIDEO_URL_HERE)
+     C — self-contained GIF (commit docs/media/demo.gif):
+         ![zmrng demo](docs/media/demo.gif)
+-->
+<!-- DROP VIDEO HERE (option A) -->
+
+> _Recording shot list: [`docs/demo-script.md`](docs/demo-script.md)._
 
 zmrng drives a **registry of target repos** — each task picks which repo it
 operates on from a configured list (`config/repos.json`), merged with every git
