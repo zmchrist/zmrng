@@ -333,5 +333,4 @@ plans/            standalone copy of the implementation plan
 
 *Built solo by [Zachary Christ](https://github.com/zmchrist). I build
 autonomous agent systems and the reliability infra to run them in production —
-available for remote contract / part-time AI-engineering work. Contact:
-TioVida@pm.me*
+available for remote contract / part-time AI-engineering work. Contact: zmchrist@pm.me*
