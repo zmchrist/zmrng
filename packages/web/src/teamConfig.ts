@@ -1,16 +1,21 @@
-// Pure URL helpers for the Team tab's VPS workspace-server base, plus the fixed
-// base itself. The whole team shares ONE Tailscale-reachable VPS, so the URL is
-// a code constant rather than per-machine configuration: every install (desktop
-// app and browser) points at the same host with nothing to type, and a rebuild
-// or reboot always yields it. There is deliberately no Settings field, no env
-// override, and no persisted value — an earlier per-user setting proved both
-// unreliable across rebuilds and pointless for a single shared VPS.
+// Pure URL helpers for the Team tab's VPS workspace-server base, plus the base
+// itself. The whole team shares ONE Tailscale-reachable VPS, so the URL is a
+// build-time constant rather than per-machine configuration: every install
+// (desktop app and browser) points at the same host with nothing to type, and a
+// rebuild always yields it. The value is baked in from the `VITE_WORKSPACE_URL`
+// build env var (set it to your tailnet IP / MagicDNS name before `vite build`);
+// when unset it is empty and the Team tab simply shows nothing configured. There
+// is deliberately no Settings field and no persisted value — an earlier per-user
+// setting proved both unreliable across rebuilds and pointless for a single VPS.
 
 /**
- * The fixed VPS team-workspace base. Reachable over Tailscale only (the tailnet
- * IS the access control — see the POC exposure precondition in CLAUDE.md).
+ * The VPS team-workspace base, baked in from `VITE_WORKSPACE_URL` at build time
+ * (empty when unset). Reachable over Tailscale only (the tailnet IS the access
+ * control — see the POC exposure precondition in CLAUDE.md).
  */
-export const WORKSPACE_URL = 'http://100.92.187.96:4500'
+const configuredWorkspaceUrl: unknown = import.meta.env.VITE_WORKSPACE_URL
+export const WORKSPACE_URL =
+  typeof configuredWorkspaceUrl === 'string' ? configuredWorkspaceUrl : ''
 
 /**
  * Strip a configured base down to a bare origin (scheme + host[:port]),

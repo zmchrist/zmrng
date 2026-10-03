@@ -5,7 +5,7 @@ import { loadSession, type LoginPost } from '../src/auth'
 import type { LoginResponse, PublicUser } from '../src/types'
 
 const LOCAL = ''
-const VPS = 'http://100.92.187.96:4500'
+const VPS = 'http://vps.example:4500'
 
 const ADA: PublicUser = { id: 1, username: 'ada', displayName: 'Ada' }
 

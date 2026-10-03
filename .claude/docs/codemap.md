@@ -107,12 +107,12 @@ REJECTED rather than silently re-attributed. An unauthenticated socket is sent
 (migrations are additive-only, so it was not dropped) but nothing reads it any
 more.
 
-The **VPS URL is fixed in code**: `teamConfig.WORKSPACE_URL`
-(`http://100.92.187.96:4500`) alongside the pure `workspaceSocketUrl`/
-`workspaceHttpOrigin` transport coercers. The whole team shares one
-Tailscale-reachable VPS, so every install (desktop app and browser) points at it
-with nothing to enter and nothing that can go missing across a rebuild or reboot.
-There is deliberately no Settings field, no `ZMRNG_WORKSPACE_URL` env override,
+The **VPS URL is a build-time constant**: `teamConfig.WORKSPACE_URL`, baked in
+from the `VITE_WORKSPACE_URL` build env var (empty when unset), alongside the pure
+`workspaceSocketUrl`/`workspaceHttpOrigin` transport coercers. The whole team
+shares one Tailscale-reachable VPS, so every install (desktop app and browser)
+points at it with nothing to enter and nothing that can go missing across a
+rebuild or reboot. There is deliberately no Settings field, no runtime override,
 and no persisted value — an older build's `workspace_url` settings row is dead
 data, never read (migrations stay additive-only, so it is not deleted).
 

@@ -15,7 +15,7 @@ import type { LoginResponse, PublicUser } from '../src/types'
 
 /** The desktop deployment's two gated origins: the local sidecar and the VPS. */
 const LOCAL = ''
-const VPS = 'http://100.92.187.96:4500'
+const VPS = 'http://vps.example:4500'
 
 const ADA: PublicUser = { id: 1, username: 'ada', displayName: 'Ada' }
 const GRACE: PublicUser = { id: 2, username: 'grace', displayName: 'Grace' }
@@ -36,16 +36,16 @@ beforeEach(() => {
 describe('sessionKey', () => {
   it('keys the empty (same-origin) origin as `local`, distinctly from a remote one', () => {
     expect(sessionKey(LOCAL)).toBe(`${SESSION_KEY_PREFIX}local`)
-    expect(sessionKey(VPS)).toBe(`${SESSION_KEY_PREFIX}http://100.92.187.96:4500`)
+    expect(sessionKey(VPS)).toBe(`${SESSION_KEY_PREFIX}http://vps.example:4500`)
     expect(sessionKey(LOCAL)).not.toBe(sessionKey(VPS))
   })
 
   it('normalizes whitespace, case and trailing slashes to one stable key', () => {
     const canonical = sessionKey(VPS)
-    expect(sessionKey('  http://100.92.187.96:4500  ')).toBe(canonical)
-    expect(sessionKey('http://100.92.187.96:4500/')).toBe(canonical)
-    expect(sessionKey('http://100.92.187.96:4500///')).toBe(canonical)
-    expect(sessionKey('HTTP://100.92.187.96:4500')).toBe(canonical)
+    expect(sessionKey('  http://vps.example:4500  ')).toBe(canonical)
+    expect(sessionKey('http://vps.example:4500/')).toBe(canonical)
+    expect(sessionKey('http://vps.example:4500///')).toBe(canonical)
+    expect(sessionKey('HTTP://vps.example:4500')).toBe(canonical)
     // A blank-but-not-empty origin is still the local one.
     expect(sessionKey('   ')).toBe(sessionKey(LOCAL))
   })
@@ -71,8 +71,8 @@ describe('origin-keyed storage (decision D1)', () => {
     // both surfaces resolve to one storage key, so one login authenticates both.
     const session = live(ADA, 'shared-token')
     saveSession(VPS, session)
-    expect(loadSession('http://100.92.187.96:4500/')).toEqual(session)
-    expect(loadSession('HTTP://100.92.187.96:4500')).toEqual(session)
+    expect(loadSession('http://vps.example:4500/')).toEqual(session)
+    expect(loadSession('HTTP://vps.example:4500')).toEqual(session)
   })
 
   it('round-trips a saved session', () => {
@@ -210,7 +210,7 @@ describe('loginToOrigins (decision D1 — one password entry, N origins)', () =>
     const post = vi.fn<LoginPost>(async () => response(live(ADA, 'one-token')))
 
     const results = await loginToOrigins(
-      [VPS, 'http://100.92.187.96:4500/', 'HTTP://100.92.187.96:4500'],
+      [VPS, 'http://vps.example:4500/', 'HTTP://vps.example:4500'],
       'ada',
       'hunter22',
       post,
