@@ -1,14 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { WORKSPACE_URL, workspaceSocketUrl, workspaceHttpOrigin } from '../src/teamConfig'
 
-describe('WORKSPACE_URL (the fixed VPS base)', () => {
-  it('is the shared Tailscale VPS, fixed in code so nothing has to be entered', () => {
-    expect(WORKSPACE_URL).toBe('http://<vps-ip>:4500')
+describe('WORKSPACE_URL (the build-time VPS base)', () => {
+  it('is a string, empty when VITE_WORKSPACE_URL is unset (as in the test env)', () => {
+    expect(typeof WORKSPACE_URL).toBe('string')
+    expect(WORKSPACE_URL).toBe('')
   })
 
-  it('derives a usable socket URL and REST origin with no configuration', () => {
-    expect(workspaceSocketUrl(WORKSPACE_URL)).toBe('ws://<vps-ip>:4500/ws/workspace')
-    expect(workspaceHttpOrigin(WORKSPACE_URL)).toBe('http://<vps-ip>:4500')
+  it('derives empty transports from an unconfigured (empty) base', () => {
+    expect(workspaceSocketUrl(WORKSPACE_URL)).toBe('')
+    expect(workspaceHttpOrigin(WORKSPACE_URL)).toBe('')
   })
 })
 
@@ -28,15 +29,15 @@ describe('workspaceSocketUrl', () => {
   })
 
   it('coerces http → ws and https → wss', () => {
-    expect(workspaceSocketUrl('http://<vps-ip>:4500')).toBe(
-      'ws://<vps-ip>:4500/ws/workspace',
+    expect(workspaceSocketUrl('http://vps.example:4500')).toBe(
+      'ws://vps.example:4500/ws/workspace',
     )
     expect(workspaceSocketUrl('https://vps.example')).toBe('wss://vps.example/ws/workspace')
   })
 
   it('defaults a scheme-less host to ws://', () => {
-    expect(workspaceSocketUrl('<vps-ip>:4500')).toBe(
-      'ws://<vps-ip>:4500/ws/workspace',
+    expect(workspaceSocketUrl('vps.example:4500')).toBe(
+      'ws://vps.example:4500/ws/workspace',
     )
   })
 
@@ -47,19 +48,19 @@ describe('workspaceSocketUrl', () => {
 
 describe('workspaceHttpOrigin', () => {
   it('keeps an http(s) base as its origin, dropping a /ws/workspace suffix', () => {
-    expect(workspaceHttpOrigin('http://<vps-ip>:4500')).toBe('http://<vps-ip>:4500')
+    expect(workspaceHttpOrigin('http://vps.example:4500')).toBe('http://vps.example:4500')
     expect(workspaceHttpOrigin('https://vps.example/ws/workspace')).toBe('https://vps.example')
   })
 
   it('coerces ws → http and wss → https', () => {
-    expect(workspaceHttpOrigin('ws://<vps-ip>:4500/ws/workspace')).toBe(
-      'http://<vps-ip>:4500',
+    expect(workspaceHttpOrigin('ws://vps.example:4500/ws/workspace')).toBe(
+      'http://vps.example:4500',
     )
     expect(workspaceHttpOrigin('wss://vps.example')).toBe('https://vps.example')
   })
 
   it('defaults a scheme-less host to http://', () => {
-    expect(workspaceHttpOrigin('<vps-ip>:4500')).toBe('http://<vps-ip>:4500')
+    expect(workspaceHttpOrigin('vps.example:4500')).toBe('http://vps.example:4500')
   })
 
   it('returns empty for an empty base', () => {
