@@ -7,6 +7,9 @@ production-grade agent orchestration.
 
 ## Before you hit record (setup, off-camera)
 
+- [ ] **Launch the clean demo profile** so none of your real data is on camera:
+      `scripts/demo.sh` (empty db + a demo-only projects dir). Full rationale and
+      watch-outs: [`docs/demo-setup.md`](demo-setup.md).
 - [ ] A **real target repo** configured in `config/repos.json` that you can push
       to — not zmrng itself. Something small and legible on screen (a demo repo
       with a couple of files reads better than a giant monorepo).
