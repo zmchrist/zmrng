@@ -77,19 +77,21 @@ function Worker({ row, now, onOpen, onClose }: { row: WorkerRow; now: number; on
   const open = (): void => onOpen({ kind: 'task', taskId: row.taskId })
   return (
     <li className={styles.row}>
-      <button type="button" className={styles.rowMain} onClick={open}>
-        <span className={styles.title}>{row.title}</span>
-        <span className={styles.pill} style={{ color: statusColor(row.status) }}>
-          {row.statusLabel}
-        </span>
-        <span className={styles.meta}>
-          {row.model} · {row.effort} · {row.style}
-        </span>
-        <span className={styles.repo}>{row.repoLabel}</span>
-        <span className={styles.tokens}>{tokens(row.usage)} tok</span>
-        <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
-      </button>
-      <CloseButton target={{ kind: 'task', taskId: row.taskId }} onClose={onClose} label={row.title} />
+      <div className={styles.line}>
+        <button type="button" className={styles.rowMain} onClick={open}>
+          <span className={styles.title}>{row.title}</span>
+          <span className={styles.pill} style={{ color: statusColor(row.status) }}>
+            {row.statusLabel}
+          </span>
+          <span className={styles.meta}>
+            {row.model} · {row.effort} · {row.style}
+          </span>
+          <span className={styles.repo}>{row.repoLabel}</span>
+          <span className={styles.tokens}>{tokens(row.usage)} tok</span>
+          <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
+        </button>
+        <CloseButton target={{ kind: 'task', taskId: row.taskId }} onClose={onClose} label={row.title} />
+      </div>
       {row.subagents.length > 0 && (
         <ul className={styles.subagents}>
           {row.subagents.map((s) => (
@@ -116,21 +118,23 @@ function Worker({ row, now, onOpen, onClose }: { row: WorkerRow; now: number; on
 function Chat({ row, now, onOpen, onClose }: { row: ChatRow; now: number; onOpen: Open; onClose: Open }) {
   return (
     <li className={styles.row}>
-      <button
-        type="button"
-        className={styles.rowMain}
-        onClick={() => onOpen({ kind: 'chat', laneId: row.id })}
-      >
-        <span className={styles.kind}>chat</span>
-        <span className={styles.meta}>
-          {row.model} · {row.effort} · {row.style}
-        </span>
-        <span className={styles.repo}>{row.repoLabel}</span>
-        {row.voice && <span className={styles.note}>voice</span>}
-        <span className={styles.tokens}>{tokens(row.usage)} tok</span>
-        <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
-      </button>
-      <CloseButton target={{ kind: 'chat', laneId: row.id }} onClose={onClose} label="chat" />
+      <div className={styles.line}>
+        <button
+          type="button"
+          className={styles.rowMain}
+          onClick={() => onOpen({ kind: 'chat', laneId: row.id })}
+        >
+          <span className={styles.kind}>chat</span>
+          <span className={styles.meta}>
+            {row.model} · {row.effort} · {row.style}
+          </span>
+          <span className={styles.repo}>{row.repoLabel}</span>
+          {row.voice && <span className={styles.note}>voice</span>}
+          <span className={styles.tokens}>{tokens(row.usage)} tok</span>
+          <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
+        </button>
+        <CloseButton target={{ kind: 'chat', laneId: row.id }} onClose={onClose} label="chat" />
+      </div>
     </li>
   )
 }
@@ -191,16 +195,18 @@ export function LanesPanel({ snapshot, tasks, repos, active, onOpen = noop, onCl
             <ul className={styles.rows}>
               {rows.execute.queued.map((q, i) => (
                 <li key={q.taskId} className={styles.row}>
-                  <button
-                    type="button"
-                    className={styles.rowMain}
-                    onClick={() => onOpen({ kind: 'task', taskId: q.taskId })}
-                  >
-                    <span className={styles.queuePos}>{i + 1}</span>
-                    <span className={styles.title}>{q.title}</span>
-                    <span className={styles.repo}>{q.repoLabel}</span>
-                  </button>
-                  <CloseButton target={{ kind: 'task', taskId: q.taskId }} onClose={onClose} label={q.title} />
+                  <div className={styles.line}>
+                    <button
+                      type="button"
+                      className={styles.rowMain}
+                      onClick={() => onOpen({ kind: 'task', taskId: q.taskId })}
+                    >
+                      <span className={styles.queuePos}>{i + 1}</span>
+                      <span className={styles.title}>{q.title}</span>
+                      <span className={styles.repo}>{q.repoLabel}</span>
+                    </button>
+                    <CloseButton target={{ kind: 'task', taskId: q.taskId }} onClose={onClose} label={q.title} />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -245,18 +251,20 @@ export function LanesPanel({ snapshot, tasks, repos, active, onOpen = noop, onCl
           <ul className={styles.rows}>
             {rows.terminals.map((row) => (
               <li key={row.id} className={styles.row}>
-                <button
-                  type="button"
-                  className={styles.rowMain}
-                  onClick={() => onOpen({ kind: 'terminal', sessionId: row.id })}
-                >
-                  <span className={styles.kind}>term</span>
-                  <span className={styles.mono}>{row.shell}</span>
-                  <span className={styles.cwd}>{row.cwd}</span>
-                  {!row.attached && <span className={styles.note}>detached</span>}
-                  <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
-                </button>
-                <CloseButton target={{ kind: 'terminal', sessionId: row.id }} onClose={onClose} label="terminal" />
+                <div className={styles.line}>
+                  <button
+                    type="button"
+                    className={styles.rowMain}
+                    onClick={() => onOpen({ kind: 'terminal', sessionId: row.id })}
+                  >
+                    <span className={styles.kind}>term</span>
+                    <span className={styles.mono}>{row.shell}</span>
+                    <span className={styles.cwd}>{row.cwd}</span>
+                    {!row.attached && <span className={styles.note}>detached</span>}
+                    <span className={styles.elapsed}>{formatElapsed(row.startedAt, now)}</span>
+                  </button>
+                  <CloseButton target={{ kind: 'terminal', sessionId: row.id }} onClose={onClose} label="terminal" />
+                </div>
               </li>
             ))}
           </ul>

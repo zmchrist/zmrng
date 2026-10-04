@@ -58,8 +58,9 @@
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  align-items: start;
   gap: 0.35rem;
 }
 
@@ -71,13 +72,32 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-strong);
+  min-width: 0;
+}
+
+/* The row's content line: the clickable main content plus the close button
+   (or its confirm step), side by side so the close control never needs its
+   own line — that extra line was what made rows taller than their content. */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
 }
 
 .rowMain {
   display: flex;
+  flex: 1;
+  min-width: 0;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.35rem 0.55rem;
+}
+
+@media (max-width: 768px) {
+  .rows {
+    grid-template-columns: 1fr;
+  }
 }
 
 .title {
@@ -215,7 +235,7 @@
 }
 
 .closeBtn {
-  align-self: flex-end;
+  flex-shrink: 0;
   min-height: 1.6rem;
   padding: 0 0.6rem;
   border: 1px solid var(--border);
@@ -241,7 +261,7 @@
 .confirm {
   display: inline-flex;
   align-items: center;
-  align-self: flex-end;
+  flex-shrink: 0;
   gap: 0.35rem;
 }
 
