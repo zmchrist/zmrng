@@ -40,3 +40,7 @@ buildinfo.json
 
 # Playwright MCP screenshot artifacts
 .playwright-mcp/
+
+# Internal planning artifacts — kept local, not shipped publicly
+.agents/plans/
+.agents/handoffs/
