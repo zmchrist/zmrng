@@ -1,10 +1,3 @@
-
-
-
-
-https://github.com/user-attachments/assets/98e804c2-369b-4690-9566-4a74f2dd60ca
-
-
 # zmrng — an autonomous coding agent
 
 [![CI](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml/badge.svg)](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml)
@@ -16,17 +9,7 @@ GUI replaces watching five terminals.
 > ▶️ **2-minute demo** — watch a task go from prompt to merged-ready PR with no
 > human touching the code.
 
-<!-- DEMO EMBED — fill ONE option below once the recording exists, then delete
-     the option lines you did not use. Asset specs + ffmpeg commands:
-     docs/media/README.md · recording shot list: docs/demo-script.md
-
-     A (best) — GitHub-native video: edit this README on github.com and drag the
-       .mp4/.mov onto the "DROP VIDEO HERE" line; GitHub inserts an inline player.
-     B — hosted link + clickable poster (commit docs/media/demo-thumb.png):
-         [![zmrng — 2-minute demo](docs/media/demo-thumb.png)](PASTE_VIDEO_URL_HERE)
-     C — self-contained GIF (commit docs/media/demo.gif):
-         ![zmrng demo](docs/media/demo.gif)
--->
+https://github.com/user-attachments/assets/98e804c2-369b-4690-9566-4a74f2dd60ca
 
 > _Recording shot list: [`docs/demo-script.md`](docs/demo-script.md)._
 
