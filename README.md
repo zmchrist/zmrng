@@ -1,6 +1,9 @@
 
 
-https://github.com/user-attachments/assets/075b21d1-f1ee-45eb-a0ca-b291d12a1318
+
+
+https://github.com/user-attachments/assets/98e804c2-369b-4690-9566-4a74f2dd60ca
+
 
 # zmrng — an autonomous coding agent
 
