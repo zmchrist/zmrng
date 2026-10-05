@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/075b21d1-f1ee-45eb-a0ca-b291d12a1318
+
 # zmrng — an autonomous coding agent
 
 [![CI](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml/badge.svg)](https://github.com/zmchrist/zmrng/actions/workflows/ci.yml)
@@ -20,7 +24,6 @@ GUI replaces watching five terminals.
      C — self-contained GIF (commit docs/media/demo.gif):
          ![zmrng demo](docs/media/demo.gif)
 -->
-<!-- DROP VIDEO HERE (option A) -->
 
 > _Recording shot list: [`docs/demo-script.md`](docs/demo-script.md)._
 
